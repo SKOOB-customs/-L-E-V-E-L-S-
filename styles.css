@@ -408,7 +408,7 @@ h6,
   flex-wrap: wrap;
   margin-top: 18px;
   padding: 10px;
-  background: rgba(12, 15, 20, 0.76);
+  background: var(--panel-strong);
 }
 
 .tab-button {
