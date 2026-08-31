@@ -7,11 +7,12 @@
   --line-strong: rgba(0, 0, 0, 0.5);
   --text: #edf2f8;
   --muted: #a7b3c2;
-  --chrome-1: #f5f8ff;
-  --chrome-2: #c4ccd7;
-  --chrome-3: #8e98a6;
+  --chrome-1: #f3e6b8;
+  --chrome-2: #d8bf7d;
+  --chrome-3: #a8874a;
   --accent: #d13d4d;
   --shadow: rgba(0, 0, 0, 0.28);
+  --logo-font: "Permanent Marker", cursive;
 }
 
 * {
@@ -271,6 +272,7 @@ h5,
 h6,
 .eyebrow,
 .hero-text {
+  font-family: var(--logo-font);
   background: linear-gradient(180deg, var(--chrome-1) 0%, var(--chrome-2) 21%, var(--chrome-1) 45%, var(--chrome-3) 100%);
   -webkit-background-clip: text;
   background-clip: text;
