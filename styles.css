@@ -775,10 +775,15 @@ h6,
 
 .gallery-item figcaption {
   padding: 16px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-family: var(--logo-font);
+  font-size: 1.1rem;
+  font-weight: 400;
   text-align: center;
   border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--chrome-1) 0%, var(--chrome-2) 21%, var(--chrome-1) 45%, var(--chrome-3) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .community-kicker {
