@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeveLs | Community Hub</title>
+    <meta
+      name="description"
+      content="LeveLs is a lightweight community hub for feature ideas, glitch skins, and small game mod submissions."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>oast" class="toast" role="status" aria-live="polite"></div>
+
+    <div class="site-shell">
+      <header class="site-header panel">
+        <div class="brand-wrap">
+          <div class="brand-mark">L</div>
+          <div class="brand-copy">
+            <span class="brand-name">LeveLs</span>
+            <span class="brand-sub">COMMUNITY HUB</span>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <a class="chrome-button small" href="https://steamcommunity.com/groups/SKOOB_customs" target="_blank" rel="noreferrer">Steam</a>
+          <a class="chrome-button" href="https://discord.gg/KpDeBAZrF" target="_blank" rel="noreferrer">Join Discord</a>
+        </div>
+      </header>
+
+      <div class="tab-switcher panel" aria-label="Hub categories">
+        <button class="tab-button active" data-tab="gallery" type="button">Gallery</button>
+        <button class="tab-button" data-tab="overview" type="button">Overview</button>
+        <button class="tab-button" data-tab="features" type="button">Features</button>
+        <button class="tab-button" data-tab="skins" type="button">Skins</button>
+        <button class="tab-button" data-tab="community" type="button">Community</button>
+        <button class="tab-button" data-tab="submit" type="button">Submit</button>
+      </div>
+
+      <main class="page-content">
+        <section class="tab-panel is-active" id="overview" data-tab="overview">
+          <section class="hero panel" id="home">
+            <div class="hero-copy">
+              <p class="eyebrow">SkoobsCustoms</p>
+              <p class="hero-text">
+                Feature ideas, skin submissions, and community highlights built for a lightweight hub.
+              </p>
+
+              <div class="cta-row">
+                <a class="action-button large" href="#submit">Submit a Feature</a>
+                <a class="secondary-button large" href="#features">Explore Ideas</a>
+              </div>
+
+              <ul class="mini-list">
+                <li>JSON-driven skin packs</li>
+                <li>Compact mod ideas</li>
+                <li>Community-led updates</li>
+              </ul>
+            </div>
+
+            <div class="hero-showcase">
+              <div class="showcase-card panel-inner">
+                <div class="showcase-header">
+                  <span class="status-dot"></span>
+                  <span>SERVER STATUS</span>
+                </div>
+
+                <div class="server-brand">(L)(E)(V)(E)(L)(S)</div>
+
+                <div class="server-grid">
+                  <div>
+                    <span>Players</span>
+                    <strong>0 / 0</strong>
+                  </div>
+                  <div>
+                    <span>Discord</span>
+                    <strong data-discord-count>0</strong>
+                  </div>
+                  <div>
+                    <span>Mods</span>
+                    <strong>18</strong>
+                  </div>
+                  <div>
+                    <span>Skins</span>
+                    <strong>64</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="stats-row" aria-label="Project stats">
+            <div class="stat-box panel">
+              <span class="stat-label">Members</span>
+              <strong data-discord-count>0</strong>
+            </div>
+            <div class="stat-box panel">
+              <span class="stat-label">Skin Packs</span>
+              <strong>64</strong>
+            </div>
+            <div class="stat-box panel">
+              <span class="stat-label">Active Mods</span>
+              <strong>18</strong>
+            </div>
+            <div class="stat-box panel">
+              <span class="stat-label">Uptime</span>
+              <strong>99.9%</strong>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-panel" id="features" data-tab="features">
+          <div class="section-header">
+            <p class="eyebrow">FEATURED</p>
+            <h2>What the community can build</h2>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card panel">
+              <div class="feature-icon">01</div>
+              <h3>Glitch Skin Packs</h3>
+              <p>Simple, clean cosmetic designs with JSON-based palettes and effect presets.</p>
+              <a href="#skins">View examples</a>
+            </article>
+
+            <article class="feature-card panel">
+              <div class="feature-icon">02</div>
+              <h3>Community Ideas</h3>
+              <p>Low-impact suggestions and feature concepts that fit naturally into the project direction.</p>
+              <a href="#submit">Share an idea</a>
+            </article>
+
+            <article class="feature-card panel">
+              <div class="feature-icon">03</div>
+              <h3>Player Feedback</h3>
+              <p>Submit small feature requests and vote on the ideas that matter most.</p>
+              <a href="#submit">Open form</a>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="skins" data-tab="skins">
+          <div class="section-header">
+            <p class="eyebrow">SKINS</p>
+            <h2>Players can submit skins and win community rewards</h2>
+          </div>
+
+          <div class="two-column-layout">
+            <div class="panel content-box">
+              <div class="mini-heading">Skin submission flow</div>
+              <div class="info-list">
+                <div>
+                  <strong>01</strong>
+                  <span>Players can submit their own JSON skin ideas for review.</span>
+                </div>
+                <div>
+                  <strong>02</strong>
+                  <span>Community favorites may be selected for release and special recognition.</span>
+                </div>
+                <div>
+                  <strong>03</strong>
+                  <span>Future rewards may include in-game currency and subscription perks.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel content-box">
+              <div class="mini-heading">Creator spotlight</div>
+              <div class="chat-list">
+                <div class="chat-item">
+                  <span class="chat-user">Community</span>
+                  <p>Players have a real chance to submit skins and get featured.</p>
+                </div>
+                <div class="chat-item">
+                  <span class="chat-user">Creator</span>
+                  <p>I’m a JSON artist making custom skins for everyone to have a chance at winning.</p>
+                </div>
+                <div class="chat-item">
+                  <span class="chat-user">Future</span>
+                  <p>In-game and subscription currency are planned as rewards for standout submissions.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="gallery" data-tab="gallery">
+          <div class="section-header">
+            <p class="eyebrow">GALLERY</p>
+            <h2>Project showcase</h2>
+          </div>
+
+          <div class="gallery-grid">
+            <figure class="gallery-item">
+              <img src="workspace/Prject 3.png" alt="Project 3" />
+              <figcaption>Project 3</figcaption>
+            </figure>
+            <figure class="gallery-item">
+              <img src="workspace/Project 2.png" alt="Project 2" />
+              <figcaption>Project 2</figcaption>
+            </figure>
+            <figure class="gallery-item">
+              <img src="workspace/Project 4.png" alt="Project 4" />
+              <figcaption>Project 4</figcaption>
+            </figure>
+            <figure class="gallery-item">
+              <img src="workspace/Project 8.jpg" alt="Project 8" />
+              <figcaption>Project 8</figcaption>
+            </figure>
+            <figure class="gallery-item">
+              <img src="workspace/Project1.png" alt="Project 1" />
+              <figcaption>Project 1</figcaption>
+            </figure>
+            <figure class="gallery-item">
+              <img src="workspace/project 5.png" alt="Project 5" />
+              <figcaption>Project 5</figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="community" data-tab="community">
+          <div class="section-header">
+            <p class="eyebrow">COMMUNITY</p>
+            <h2>Stay connected</h2>
+          </div>
+
+          <div class="community-grid">
+            <article class="community-card panel">
+              <span class="community-kicker">Discord</span>
+              <h3>Talk live with the team</h3>
+              <p>Share ideas, test features, and coordinate updates with the community.</p>
+              <a class="chrome-button small" href="https://discord.gg/KpDeBAZrF" target="_blank" rel="noreferrer">Join Discord</a>
+            </article>
+
+            <article class="community-card panel">
+              <span class="community-kicker">Steam</span>
+              <h3>Follow the project page</h3>
+              <p>Track progress, announcements, and community events from the Steam hub.</p>
+              <a class="chrome-button small" href="https://steamcommunity.com/groups/SKOOB_customs" target="_blank" rel="noreferrer">Open Steam</a>
+            </article>
+
+            <article class="community-card panel">
+              <span class="community-kicker">Updates</span>
+              <h3>Latest community notes</h3>
+              <p>Quick summaries, changelogs, and testing news from the hub.</p>
+              <a href="#">View updates</a>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="submit" data-tab="submit">
+          <div class="section-header">
+            <p class="eyebrow">SUBMIT</p>
+            <h2>Send a new idea to the hub</h2>
+          </div>
+
+          <section class="submit-section panel">
+            <form class="submit-form">
+              <div class="field-row two-up">
+                <label>
+                  Feature name
+                  <input type="text" value="Glitch Primal Pack" />
+                </label>
+                <label>
+                  Category
+                  <select>
+                    <option>Skin</option>
+                    <option>Mod</option>
+                    <option>Feature</option>
+                    <option>Community</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="field-row">
+                <label>
+                  Short description
+                  <textarea rows="4">A lightweight pack that adds clean color distortion and a sharper UI frame for dino skins.</textarea>
+                </label>
+              </div>
+
+              <div class="field-row">
+                <label>
+                  JSON data
+                  <textarea rows="7">{
+  "skin": "glitch-primal",
+  "palette": ["#f76c6c", "#f7d7a3", "#5ae4ff"],
+  "effect": "soft-distortion"
+}</textarea>
+                </label>
+              </div>
+
+              <div class="submit-actions">
+                <button type="button" class="secondary-button">Preview</button>
+                <button type="submit" class="action-button">Send to Hub</button>
+              </div>
+            </form>
+          </section>
+        </section>
+      </main>
+
+      <footer class="site-footer panel">
+        <span>Levels</span>
+        <p>Built for community input, glitch skins, and compact mod ideas.</p>
+      </footer>
+    </div>
+    <script src="script.js"></script>
+  </body>
+</html>

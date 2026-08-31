@@ -1,0 +1,13 @@
+name = "levels"
+type = "javascript"
+
+[env.production]
+routes = [
+  { pattern = "*.js", zone_name = "example.com" },
+  { pattern = "*.css", zone_name = "example.com" },
+  { pattern = "*.html", zone_name = "example.com" }
+]
+
+[build]
+command = ""
+cwd = "."
