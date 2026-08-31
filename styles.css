@@ -438,6 +438,10 @@ h6,
   padding: 26px;
 }
 
+.hero-solo {
+  grid-template-columns: 1fr;
+}
+
 .eyebrow {
   margin: 0 0 12px;
   color: var(--muted);
