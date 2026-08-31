@@ -1,0 +1,11 @@
+# Secrets and local config - never commit these
+.env
+.env.*
+*.pem
+*.key
+secrets/
+config.local.*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db

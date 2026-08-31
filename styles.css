@@ -78,6 +78,128 @@ body::before {
   z-index: 2;
 }
 
+/* Global chat sidebar */
+.chat-toggle {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 30;
+  transform: translateY(-50%);
+  padding: 0.7rem 0.5rem;
+  border: none;
+  border-radius: 10px 0 0 10px;
+  background: var(--panel-strong);
+  color: var(--text);
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.1em;
+  box-shadow: -4px 0 14px rgba(0, 0, 0, 0.28);
+}
+
+.chat-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 88vw);
+  height: 100vh;
+  padding: 16px;
+  gap: 10px;
+  background: var(--panel-strong);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+}
+
+.chat-sidebar.is-open {
+  transform: translateX(0);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.chat-close {
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-note {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.chat-message {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
+.chat-message .chat-message-user {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.chat-message .chat-message-time {
+  float: right;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.chat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-input-row input {
+  flex: 1;
+}
+
+.chat-form input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
+/* Honeypot field: hidden from sighted users and screen readers, catches simple bots */
+.chat-honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -122,13 +244,12 @@ textarea {
 }
 
 .brand-mark {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
-  font-weight: 800;
+  width: 52px;
+  height: 52px;
+  display: block;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .brand-copy {

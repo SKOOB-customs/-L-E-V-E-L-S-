@@ -133,3 +133,121 @@ if (connectSteamBtn) {
 
 // Load Steam profile on page load
 displaySteamStatus();
+
+// Global chat sidebar (local-only: no backend yet, so messages persist per browser)
+const chatToggle = document.getElementById('chatToggle');
+const chatSidebar = document.getElementById('chatSidebar');
+const chatClose = document.getElementById('chatClose');
+const chatMessages = document.getElementById('chatMessages');
+const chatForm = document.getElementById('chatForm');
+const chatNameInput = document.getElementById('chatName');
+const chatTextInput = document.getElementById('chatText');
+const chatHoneypot = document.getElementById('chatWebsite');
+
+const chatMessagesKey = 'levelsChatMessages';
+const chatNameKey = 'levelsChatName';
+const chatMaxStored = 100;
+const chatMinIntervalMs = 1500;
+let lastChatSendAt = 0;
+
+const getChatMessages = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(chatMessagesKey) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+};
+
+const renderChatMessages = () => {
+  if (!chatMessages) return;
+  const messages = getChatMessages();
+  chatMessages.innerHTML = '';
+
+  messages.forEach((message) => {
+    const item = document.createElement('div');
+    item.className = 'chat-message';
+
+    const user = document.createElement('span');
+    user.className = 'chat-message-user';
+    user.textContent = message.name;
+
+    const time = document.createElement('span');
+    time.className = 'chat-message-time';
+    time.textContent = new Date(message.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const text = document.createElement('span');
+    text.className = 'chat-message-text';
+    text.textContent = message.text;
+
+    item.append(user, time, document.createElement('br'), text);
+    chatMessages.appendChild(item);
+  });
+
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+};
+
+const addChatMessage = (name, text) => {
+  const messages = getChatMessages();
+  messages.push({ name, text, ts: Date.now() });
+  localStorage.setItem(chatMessagesKey, JSON.stringify(messages.slice(-chatMaxStored)));
+  renderChatMessages();
+};
+
+const openChat = () => {
+  chatSidebar?.classList.add('is-open');
+  chatSidebar?.setAttribute('aria-hidden', 'false');
+  chatToggle?.setAttribute('aria-expanded', 'true');
+};
+
+const closeChat = () => {
+  chatSidebar?.classList.remove('is-open');
+  chatSidebar?.setAttribute('aria-hidden', 'true');
+  chatToggle?.setAttribute('aria-expanded', 'false');
+};
+
+chatToggle?.addEventListener('click', () => {
+  const isOpen = chatSidebar?.classList.contains('is-open');
+  if (isOpen) {
+    closeChat();
+  } else {
+    openChat();
+  }
+});
+
+chatClose?.addEventListener('click', closeChat);
+
+if (chatNameInput) {
+  chatNameInput.value = localStorage.getItem(chatNameKey) || '';
+}
+
+chatForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+
+  // Bots tend to fill every field, including the hidden honeypot; humans never see it
+  if (chatHoneypot && chatHoneypot.value) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastChatSendAt < chatMinIntervalMs) {
+    showToast('You are sending messages too quickly.');
+    return;
+  }
+
+  const name = chatNameInput?.value.trim().slice(0, 24);
+  const text = chatTextInput?.value.trim().slice(0, 240);
+
+  if (!name || !text) return;
+
+  localStorage.setItem(chatNameKey, name);
+  addChatMessage(name, text);
+
+  lastChatSendAt = now;
+  if (chatTextInput) {
+    chatTextInput.value = '';
+    chatTextInput.focus();
+  }
+});
+
+renderChatMessages();
