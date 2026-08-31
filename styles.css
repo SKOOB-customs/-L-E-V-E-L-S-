@@ -1,8 +1,8 @@
 :root {
   --bg: #04070b;
-  --panel: rgba(74, 52, 30, 0.86);
-  --panel-soft: rgba(74, 52, 30, 0.55);
-  --panel-strong: rgba(58, 40, 22, 0.92);
+  --panel: rgba(46, 31, 16, 0.88);
+  --panel-soft: rgba(46, 31, 16, 0.6);
+  --panel-strong: rgba(34, 22, 11, 0.94);
   --line: rgba(0, 0, 0, 0.3);
   --line-strong: rgba(0, 0, 0, 0.5);
   --text: #edf2f8;
@@ -13,8 +13,8 @@
   --accent: #d13d4d;
   --shadow: rgba(0, 0, 0, 0.28);
   --logo-font: "Permanent Marker", cursive;
-  --chat-bg: rgba(74, 52, 30, 0.55);
-  --chat-bg-solid: #4a341e;
+  --chat-bg: rgba(46, 31, 16, 0.6);
+  --chat-bg-solid: #2e1f10;
 }
 
 * {
