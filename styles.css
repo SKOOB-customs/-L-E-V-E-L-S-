@@ -39,8 +39,8 @@ body::before {
   inset: 0;
   background:
     radial-gradient(circle at top, rgba(209, 61, 77, 0.08), transparent 22%),
-    linear-gradient(180deg, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.8));
-  z-index: 0;
+    linear-gradient(180deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.5));
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -52,7 +52,7 @@ body::before {
   height: 100%;
   object-fit: cover;
   z-index: -1;
-  opacity: 0.6;
+  opacity: 0.85;
 }
 
 .toast {
@@ -81,7 +81,7 @@ body::before {
 
 .site-shell {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 a {
