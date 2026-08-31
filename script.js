@@ -78,3 +78,58 @@ secondaryButtons.forEach((button) => {
     }
   });
 });
+
+// Steam Profile Management
+const steamStorageKey = 'levelsSteamProfile';
+
+const getSteamProfile = () => {
+  const saved = localStorage.getItem(steamStorageKey);
+  return saved ? JSON.parse(saved) : null;
+};
+
+const setSteamProfile = (steamId, username) => {
+  const profile = { steamId, username, connectedAt: new Date().toISOString() };
+  localStorage.setItem(steamStorageKey, JSON.stringify(profile));
+  return profile;
+};
+
+const displaySteamStatus = () => {
+  const profile = getSteamProfile();
+  const statusDiv = document.getElementById('profileStatus');
+  const statusMessage = document.getElementById('statusMessage');
+  const steamIdInput = document.getElementById('steamId');
+  const steamUsernameInput = document.getElementById('steamUsername');
+
+  if (profile) {
+    statusDiv.style.display = 'block';
+    statusMessage.innerHTML = `✓ <strong>Steam Connected!</strong><br>ID: ${profile.steamId}<br>Username: ${profile.username}`;
+    steamIdInput.value = profile.steamId;
+    steamUsernameInput.value = profile.username;
+  }
+};
+
+const connectSteamBtn = document.getElementById('connectSteamBtn');
+if (connectSteamBtn) {
+  connectSteamBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    const steamId = document.getElementById('steamId').value.trim();
+    const username = document.getElementById('steamUsername').value.trim();
+
+    if (!steamId || !username) {
+      showToast('Please enter both Steam ID and username');
+      return;
+    }
+
+    if (!/^\d{17}$/.test(steamId) && !/^\d+$/.test(steamId)) {
+      showToast('Invalid Steam ID format');
+      return;
+    }
+
+    setSteamProfile(steamId, username);
+    displaySteamStatus();
+    showToast('Steam account connected successfully!');
+  });
+}
+
+// Load Steam profile on page load
+displaySteamStatus();

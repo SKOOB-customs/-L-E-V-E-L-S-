@@ -460,6 +460,41 @@ textarea {
   padding: 22px 20px;
 }
 
+.profile-section {
+  padding: 22px 20px;
+}
+
+.profile-info {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--panel-soft);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.profile-info p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.profile-form {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-status {
+  background: rgba(79, 195, 127, 0.1);
+  border: 1px solid rgba(79, 195, 127, 0.3);
+  border-radius: 8px;
+}
+
+.profile-status p {
+  margin: 0;
+  color: #4fc37f;
+  font-size: 0.9rem;
+}
+
 .feature-icon {
   width: 40px;
   height: 40px;
@@ -734,6 +769,7 @@ textarea {
   .content-box,
   .community-card,
   .submit-section,
+  .profile-section,
   .site-footer {
     padding-left: 14px;
     padding-right: 14px;

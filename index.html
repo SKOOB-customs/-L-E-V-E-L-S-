@@ -40,6 +40,7 @@
         <button class="tab-button" data-tab="features" type="button">Features</button>
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
+        <button class="tab-button" data-tab="profile" type="button">Profile</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
 
@@ -252,6 +253,43 @@
               <a href="#">View updates</a>
             </article>
           </div>
+        </section>
+
+        <section class="tab-panel" id="profile" data-tab="profile">
+          <div class="section-header">
+            <p class="eyebrow">PROFILE</p>
+            <h2>Connect your Steam account</h2>
+          </div>
+
+          <section class="profile-section panel">
+            <div class="profile-info">
+              <p>Connect your Steam account to enable in-game features like mod access and custom skin selection.</p>
+            </div>
+
+            <form class="profile-form">
+              <div class="field-row">
+                <label>
+                  Steam ID
+                  <input type="text" id="steamId" placeholder="Enter your Steam ID (e.g., 76561198000000000)" />
+                </label>
+              </div>
+
+              <div class="field-row">
+                <label>
+                  Steam Username
+                  <input type="text" id="steamUsername" placeholder="Enter your Steam username" />
+                </label>
+              </div>
+
+              <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 4px;">
+                <p id="statusMessage"></p>
+              </div>
+
+              <div class="submit-actions">
+                <button type="button" class="action-button" id="connectSteamBtn">Connect Steam</button>
+              </div>
+            </form>
+          </section>
         </section>
 
         <section class="tab-panel" id="submit" data-tab="submit">
