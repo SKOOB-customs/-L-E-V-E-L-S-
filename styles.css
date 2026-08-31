@@ -3,8 +3,8 @@
   --panel: rgba(10, 12, 16, 0.86);
   --panel-soft: rgba(14, 17, 22, 0.7);
   --panel-strong: rgba(17, 20, 25, 0.92);
-  --line: rgba(255, 255, 255, 0.06);
-  --line-strong: rgba(255, 255, 255, 0.09);
+  --line: rgba(0, 0, 0, 0.3);
+  --line-strong: rgba(0, 0, 0, 0.5);
   --text: #edf2f8;
   --muted: #a7b3c2;
   --chrome-1: #f5f8ff;
@@ -140,7 +140,16 @@ textarea {
 .brand-name,
 .chrome-text,
 .section-header h2,
-.site-footer span {
+.site-footer span,
+heading,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.eyebrow,
+.hero-text {
   background: linear-gradient(180deg, var(--chrome-1) 0%, var(--chrome-2) 21%, var(--chrome-1) 45%, var(--chrome-3) 100%);
   -webkit-background-clip: text;
   background-clip: text;
