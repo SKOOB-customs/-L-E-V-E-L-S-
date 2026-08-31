@@ -13,6 +13,7 @@
   --accent: #d13d4d;
   --shadow: rgba(0, 0, 0, 0.28);
   --logo-font: "Permanent Marker", cursive;
+  --chat-bg: rgba(74, 52, 30, 0.55);
 }
 
 * {
@@ -153,7 +154,7 @@ body::before {
 .chat-message {
   padding: 6px 10px;
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--chat-bg);
   font-size: 0.82rem;
   word-break: break-word;
 }
@@ -684,6 +685,10 @@ h6,
   padding: 12px 14px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.chat-item {
+  background: var(--chat-bg);
 }
 
 .info-list div {
