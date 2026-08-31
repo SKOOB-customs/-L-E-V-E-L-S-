@@ -298,32 +298,16 @@
 
           <section class="profile-section panel">
             <div class="profile-info">
-              <p>Connect your Steam account to enable in-game features like mod access and custom skin selection.</p>
+              <p>Log in with Steam to enable in-game features like mod access and custom skin selection.</p>
             </div>
 
-            <form class="profile-form">
-              <div class="field-row">
-                <label>
-                  Steam ID
-                  <input type="text" id="steamId" placeholder="Enter your Steam ID (e.g., 76561198000000000)" />
-                </label>
-              </div>
+            <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 4px;">
+              <p id="statusMessage"></p>
+            </div>
 
-              <div class="field-row">
-                <label>
-                  Steam Username
-                  <input type="text" id="steamUsername" placeholder="Enter your Steam username" />
-                </label>
-              </div>
-
-              <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 4px;">
-                <p id="statusMessage"></p>
-              </div>
-
-              <div class="submit-actions">
-                <button type="button" class="action-button" id="connectSteamBtn">Connect Steam</button>
-              </div>
-            </form>
+            <div class="submit-actions">
+              <a class="action-button" id="connectSteamBtn" href="/api/steam-login">Login with Steam</a>
+            </div>
           </section>
         </section>
 

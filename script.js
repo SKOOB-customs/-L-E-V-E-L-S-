@@ -51,7 +51,9 @@ if (tabButtons.length) {
     });
   });
 
-  activateTab('gallery');
+  const hashTab = window.location.hash.replace('#', '').split('?')[0];
+  const hasHashTab = [...tabButtons].some((button) => button.dataset.tab === hashTab);
+  activateTab(hasHashTab ? hashTab : 'gallery');
 }
 
 const initialDiscordCount = getDiscordMemberCount();
@@ -97,39 +99,34 @@ const displaySteamStatus = () => {
   const profile = getSteamProfile();
   const statusDiv = document.getElementById('profileStatus');
   const statusMessage = document.getElementById('statusMessage');
-  const steamIdInput = document.getElementById('steamId');
-  const steamUsernameInput = document.getElementById('steamUsername');
 
   if (profile) {
     statusDiv.style.display = 'block';
     statusMessage.innerHTML = `✓ <strong>Steam Connected!</strong><br>ID: ${profile.steamId}<br>Username: ${profile.username}`;
-    steamIdInput.value = profile.steamId;
-    steamUsernameInput.value = profile.username;
   }
 };
 
-const connectSteamBtn = document.getElementById('connectSteamBtn');
-if (connectSteamBtn) {
-  connectSteamBtn.addEventListener('click', (event) => {
-    event.preventDefault();
-    const steamId = document.getElementById('steamId').value.trim();
-    const username = document.getElementById('steamUsername').value.trim();
+// Steam redirects back to /#profile?steam_id=...&steam_name=... after a successful login
+const consumeSteamRedirect = () => {
+  const hash = window.location.hash;
+  const queryIndex = hash.indexOf('?');
+  if (queryIndex === -1) return;
 
-    if (!steamId || !username) {
-      showToast('Please enter both Steam ID and username');
-      return;
-    }
+  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  const steamId = params.get('steam_id');
+  const steamName = params.get('steam_name');
 
-    if (!/^\d{17}$/.test(steamId) && !/^\d+$/.test(steamId)) {
-      showToast('Invalid Steam ID format');
-      return;
-    }
-
-    setSteamProfile(steamId, username);
-    displaySteamStatus();
+  if (params.get('steam_error')) {
+    showToast('Steam login failed. Please try again.');
+  } else if (steamId && /^\d{17}$/.test(steamId) && steamName) {
+    setSteamProfile(steamId, steamName);
     showToast('Steam account connected successfully!');
-  });
-}
+  }
+
+  history.replaceState(null, '', `${window.location.pathname}#profile`);
+};
+
+consumeSteamRedirect();
 
 // Load Steam profile on page load
 displaySteamStatus();
