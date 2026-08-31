@@ -14,6 +14,7 @@
   --shadow: rgba(0, 0, 0, 0.28);
   --logo-font: "Permanent Marker", cursive;
   --chat-bg: rgba(74, 52, 30, 0.55);
+  --chat-bg-solid: #4a341e;
 }
 
 * {
@@ -90,11 +91,12 @@ body::before {
   padding: 0.7rem 0.5rem;
   border: none;
   border-radius: 10px 0 0 10px;
-  background: var(--panel-strong);
-  color: var(--text);
+  background: var(--chat-bg-solid);
+  color: var(--chrome-1);
   cursor: pointer;
   writing-mode: vertical-rl;
   letter-spacing: 0.1em;
+  font-family: var(--logo-font);
   box-shadow: -4px 0 14px rgba(0, 0, 0, 0.28);
 }
 
@@ -109,10 +111,11 @@ body::before {
   height: 100vh;
   padding: 16px;
   gap: 10px;
-  background: var(--panel-strong);
+  background: var(--chat-bg-solid);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
   transform: translateX(100%);
   transition: transform 0.25s ease;
+  font-family: var(--logo-font);
 }
 
 .chat-sidebar.is-open {
@@ -123,14 +126,15 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-weight: 700;
-  font-size: 0.9rem;
+  font-weight: 400;
+  font-size: 1.1rem;
+  color: var(--chrome-1);
 }
 
 .chat-close {
   border: none;
   background: none;
-  color: var(--text);
+  color: var(--chrome-1);
   font-size: 1.3rem;
   line-height: 1;
   cursor: pointer;
@@ -139,7 +143,7 @@ body::before {
 .chat-note {
   margin: 0;
   font-size: 0.72rem;
-  color: var(--muted);
+  color: var(--chrome-2);
 }
 
 .chat-messages {
@@ -155,19 +159,21 @@ body::before {
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--chat-bg);
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   word-break: break-word;
+  color: var(--chrome-1);
 }
 
 .chat-message .chat-message-user {
-  font-weight: 700;
+  font-weight: 400;
   margin-right: 6px;
+  color: var(--chrome-1);
 }
 
 .chat-message .chat-message-time {
   float: right;
-  color: var(--muted);
-  font-size: 0.68rem;
+  color: var(--chrome-2);
+  font-size: 0.7rem;
 }
 
 .chat-form {
@@ -189,8 +195,9 @@ body::before {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--panel-soft);
-  color: var(--text);
+  background: var(--chat-bg);
+  color: var(--chrome-1);
+  font-family: var(--logo-font);
 }
 
 /* Honeypot field: hidden from sighted users and screen readers, catches simple bots */
