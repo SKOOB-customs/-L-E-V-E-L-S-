@@ -28,6 +28,10 @@ body {
   min-height: 100vh;
   font-family: "Inter", sans-serif;
   background: transparent;
+  background-image: url('assets/Forest.gif');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
   color: var(--text);
   line-height: 1.6;
   overflow-x: hidden;
@@ -43,15 +47,7 @@ body::before {
 }
 
 .forest-bg {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  z-index: 0;
-  display: block;
-  pointer-events: none;
+  display: none;
 }
 
 .toast {
