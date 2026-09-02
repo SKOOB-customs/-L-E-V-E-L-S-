@@ -720,6 +720,79 @@ h6,
   color: var(--muted);
 }
 
+.ticket-workspace,
+.ticket-dashboard {
+  display: grid;
+  gap: 20px;
+}
+
+.ticket-dashboard {
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.ticket-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ticket-list-header .mini-heading {
+  margin-bottom: 0;
+}
+
+.ticket-queue,
+.ticket-log {
+  display: grid;
+  gap: 10px;
+}
+
+.ticket-item,
+.ticket-log-entry {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  text-align: left;
+}
+
+.ticket-item {
+  cursor: pointer;
+}
+
+.ticket-item:hover,
+.ticket-item:focus-visible,
+.ticket-item.is-selected {
+  border-color: var(--accent);
+}
+
+.ticket-log-entry span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ticket-message-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.moderation-action-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+}
+
+.moderation-action-form .mini-heading {
+  margin-bottom: 0;
+}
+
 .mini-heading {
   margin-bottom: 14px;
   color: var(--text);

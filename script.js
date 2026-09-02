@@ -105,6 +105,7 @@ secondaryButtons.forEach((button) => {
 
 // Steam Profile & Staff Permission Management
 const steamStorageKey = 'levelsSteamProfile';
+const discordStorageKey = 'levelsDiscordProfile';
 const staffStorageKey = 'levelsStaffList';
 
 const defaultStaffList = [
@@ -144,6 +145,21 @@ const setSteamProfile = (steamId, username, staffRole = '') => {
   return profile;
 };
 
+const getDiscordProfile = () => {
+  try {
+    const saved = localStorage.getItem(discordStorageKey);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setDiscordProfile = (discordId, username, staffRole) => {
+  const profile = { discordId, username, staffRole, connectedAt: new Date().toISOString() };
+  localStorage.setItem(discordStorageKey, JSON.stringify(profile));
+  return profile;
+};
+
 const roleDetailsMap = {
   Owner: { badge: '👑 Owner', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn', 'manage_permissions'] },
   Admin: { badge: '🛡️ Admin', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn'] },
@@ -153,20 +169,31 @@ const roleDetailsMap = {
 };
 
 const staffRoleRank = { Player: 0, Staff: 1, Moderator: 2, Admin: 3, Owner: 4 };
+let currentStaffRole = 'Player';
+
+const hasDevToolsAccess = () => (staffRoleRank[currentStaffRole] || 0) >= staffRoleRank.Admin;
 
 const updateStaffArea = (role = 'Player') => {
   const rank = staffRoleRank[role] || 0;
   const staffTabButton = document.querySelector('.staff-tab-button');
+  const devToolsTabButton = document.querySelector('.dev-tools-tab-button');
   const staffWorkspace = document.getElementById('staffWorkspace');
   const staffAccessNotice = document.getElementById('staffAccessNotice');
+  const devToolsPanel = document.getElementById('dev-tools');
+  const ticketWorkspace = document.getElementById('ticketWorkspace');
   const staffAreaRole = document.getElementById('staffAreaRole');
   const staffAreaTitle = document.getElementById('staffAreaTitle');
   const staffAreaDescription = document.getElementById('staffAreaDescription');
 
   const hasStaffAccess = rank >= staffRoleRank.Moderator;
+  const canUseDevTools = rank >= staffRoleRank.Admin;
+  currentStaffRole = role;
   if (staffTabButton) staffTabButton.hidden = !hasStaffAccess;
+  if (devToolsTabButton) devToolsTabButton.hidden = !canUseDevTools;
   if (staffWorkspace) staffWorkspace.hidden = !hasStaffAccess;
   if (staffAccessNotice) staffAccessNotice.hidden = hasStaffAccess;
+  if (devToolsPanel) devToolsPanel.hidden = !canUseDevTools;
+  if (ticketWorkspace) ticketWorkspace.hidden = !canUseDevTools;
 
   document.querySelectorAll('[data-staff-level]').forEach((tool) => {
     tool.hidden = rank < staffRoleRank[tool.dataset.staffLevel];
@@ -226,6 +253,7 @@ const renderStaffRoster = () => {
 
 const displaySteamStatus = async () => {
   const profile = getSteamProfile();
+  const discordProfile = getDiscordProfile();
   const statusDiv = document.getElementById('profileStatus');
   const statusMessage = document.getElementById('statusMessage');
   const staffRoleBadge = document.getElementById('staffRoleBadge');
@@ -233,22 +261,25 @@ const displaySteamStatus = async () => {
 
   if (!statusDiv || !statusMessage) return;
 
-  if (profile) {
+  if (profile || discordProfile) {
     statusDiv.style.display = 'block';
-    statusMessage.innerHTML = `✓ <strong>Steam Account Connected!</strong><br>ID: <code>${profile.steamId}</code><br>Username: <strong>${profile.username}</strong>`;
+    statusMessage.innerHTML = profile
+      ? `✓ <strong>Steam Account Connected!</strong><br>ID: <code>${profile.steamId}</code><br>Username: <strong>${profile.username}</strong>`
+      : `✓ <strong>Discord Account Connected!</strong><br>Username: <strong>${discordProfile.username}</strong>`;
 
     // Check staff permissions either from local list or API
     const staffList = getStaffList();
-    const matchedStaff = staffList.find((s) => s.steamId === profile.steamId);
-    if (matchedStaff && profile.username && matchedStaff.username !== profile.username) {
+    const matchedStaff = profile ? staffList.find((s) => s.steamId === profile.steamId) : null;
+    if (matchedStaff && profile?.username && matchedStaff.username !== profile.username) {
       matchedStaff.username = profile.username;
       localStorage.setItem(staffStorageKey, JSON.stringify(staffList));
       renderStaffRoster();
     }
-    let activeRole = matchedStaff ? matchedStaff.role : (profile.staffRole || 'Player');
+    let activeRole = discordProfile?.staffRole || (matchedStaff ? matchedStaff.role : (profile?.staffRole || 'Player'));
 
     // Attempt API verification for latest server permissions
     try {
+      if (!profile) throw new Error('No Steam account connected');
       const res = await fetch(`/api/permissions?steam_id=${profile.steamId}`);
       if (res.ok) {
         const data = await res.json();
@@ -326,8 +357,16 @@ const consumeSteamRedirect = () => {
   const steamId = params.get('steam_id');
   const steamName = params.get('steam_name');
   const staffRole = params.get('staff_role');
+  const discordId = params.get('discord_id');
+  const discordName = params.get('discord_name');
+  const discordRole = params.get('discord_role');
 
-  if (params.get('steam_error')) {
+  if (params.get('discord_error')) {
+    showToast('Discord login failed. Make sure you are in the Levels Discord server.');
+  } else if (discordId && discordName && discordRole) {
+    setDiscordProfile(discordId, discordName, discordRole);
+    showToast('Discord permissions connected successfully!');
+  } else if (params.get('steam_error')) {
     showToast('Steam login failed. Please try again.');
   } else if (steamId && /^\d{17}$/.test(steamId) && steamName) {
     setSteamProfile(steamId, steamName, staffRole || '');
@@ -401,6 +440,7 @@ const addChatMessage = (name, text) => {
   messages.push({ name, text, ts: Date.now() });
   localStorage.setItem(chatMessagesKey, JSON.stringify(messages.slice(-chatMaxStored)));
   renderChatMessages();
+  renderWebsiteChatLog();
 };
 
 const openChat = () => {
@@ -460,3 +500,206 @@ chatForm?.addEventListener('submit', (event) => {
 });
 
 renderChatMessages();
+
+const ticketStorageKey = 'levelsStaffTickets';
+let selectedTicketId = null;
+
+const getTickets = () => {
+  try {
+    const tickets = JSON.parse(localStorage.getItem(ticketStorageKey) || '[]');
+    return Array.isArray(tickets) ? tickets : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveTickets = (tickets) => {
+  localStorage.setItem(ticketStorageKey, JSON.stringify(tickets));
+  renderTicketQueue();
+  renderTicketLog();
+};
+
+const formatLogTime = (timestamp) => new Date(timestamp).toLocaleString([], {
+  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
+const renderWebsiteChatLog = () => {
+  const chatLog = document.getElementById('websiteChatLog');
+  if (!chatLog || !hasDevToolsAccess()) return;
+
+  const messages = getChatMessages();
+  chatLog.replaceChildren();
+  if (!messages.length) {
+    chatLog.textContent = 'No website chat messages have been recorded on this device.';
+    return;
+  }
+
+  messages.slice(-20).reverse().forEach((message) => {
+    const entry = document.createElement('div');
+    entry.className = 'ticket-log-entry';
+    const meta = document.createElement('span');
+    meta.textContent = `${message.name} - ${formatLogTime(message.ts)}`;
+    const text = document.createElement('div');
+    text.textContent = message.text;
+    entry.append(meta, text);
+    chatLog.appendChild(entry);
+  });
+};
+
+const renderTicketQueue = () => {
+  const queue = document.getElementById('ticketQueue');
+  const filter = document.getElementById('ticketFilter');
+  if (!queue || !hasDevToolsAccess()) return;
+
+  const category = filter?.value || 'All';
+  const tickets = getTickets().filter((ticket) => category === 'All' || ticket.category === category);
+  queue.replaceChildren();
+  if (!tickets.length) {
+    queue.textContent = 'No tickets in this category.';
+    return;
+  }
+
+  tickets.sort((first, second) => second.createdAt - first.createdAt).forEach((ticket) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `ticket-item${ticket.id === selectedTicketId ? ' is-selected' : ''}`;
+    item.textContent = `${ticket.category} - ${ticket.subject} - ${formatLogTime(ticket.createdAt)}`;
+    item.addEventListener('click', () => {
+      selectedTicketId = ticket.id;
+      renderTicketQueue();
+      renderTicketLog();
+    });
+    queue.appendChild(item);
+  });
+};
+
+const renderTicketLog = () => {
+  const ticketLog = document.getElementById('ticketLog');
+  const messageForm = document.getElementById('ticketMessageForm');
+  const moderationActionForm = document.getElementById('moderationActionForm');
+  if (!ticketLog || !messageForm || !moderationActionForm || !hasDevToolsAccess()) return;
+
+  const ticket = getTickets().find((item) => item.id === selectedTicketId);
+  ticketLog.replaceChildren();
+  messageForm.hidden = !ticket;
+  moderationActionForm.hidden = !ticket;
+  if (!ticket) {
+    ticketLog.textContent = 'Select a ticket to view its conversation and image evidence.';
+    return;
+  }
+
+  ticket.entries.forEach((entry) => {
+    const logEntry = document.createElement('div');
+    logEntry.className = 'ticket-log-entry';
+    const meta = document.createElement('span');
+    meta.textContent = `${entry.author} - ${formatLogTime(entry.createdAt)}`;
+    const text = document.createElement('div');
+    text.textContent = entry.text;
+    logEntry.append(meta, text);
+    ticketLog.appendChild(logEntry);
+  });
+};
+
+document.getElementById('ticketFilter')?.addEventListener('change', renderTicketQueue);
+
+document.getElementById('ticketForm')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!hasDevToolsAccess()) return;
+
+  const category = document.getElementById('ticketCategory').value;
+  const subject = document.getElementById('ticketSubject').value.trim();
+  const details = document.getElementById('ticketDetails').value.trim();
+  const attachments = [...document.getElementById('ticketAttachments').files].map((file) => file.name);
+  const profile = getSteamProfile();
+  if (!subject || !details) return;
+
+  const createdAt = Date.now();
+  const ticket = {
+    id: crypto.randomUUID(),
+    category,
+    subject,
+    createdAt,
+    attachments,
+    entries: [{ author: profile?.username || 'Staff', text: details, createdAt }],
+  };
+  const tickets = getTickets();
+  tickets.push(ticket);
+  selectedTicketId = ticket.id;
+  saveTickets(tickets);
+  event.currentTarget.reset();
+  showToast('Ticket created.');
+});
+
+document.getElementById('ticketMessageForm')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!hasDevToolsAccess()) return;
+
+  const input = document.getElementById('ticketMessage');
+  const text = input.value.trim();
+  const tickets = getTickets();
+  const ticket = tickets.find((item) => item.id === selectedTicketId);
+  if (!ticket || !text) return;
+
+  ticket.entries.push({ author: getSteamProfile()?.username || 'Staff', text, createdAt: Date.now() });
+  saveTickets(tickets);
+  input.value = '';
+});
+
+const updateModerationActionFields = () => {
+  const action = document.getElementById('moderationAction')?.value;
+  const durationField = document.getElementById('moderationDurationField');
+  const duration = document.getElementById('moderationDuration');
+  const rulebreakField = document.getElementById('moderationRulebreakField');
+  const reasonField = document.getElementById('moderationReasonField');
+  const reason = document.getElementById('moderationReason');
+  if (!durationField || !duration || !rulebreakField || !reasonField || !reason) return;
+
+  durationField.hidden = action === 'Strike' || action === 'Ban';
+  duration.disabled = action === 'Strike' || action === 'Ban';
+  rulebreakField.hidden = action !== 'Strike';
+  reasonField.hidden = action !== 'Ban';
+  reason.required = action === 'Ban';
+
+  if (action === 'Kick') {
+    [...duration.options].forEach((option) => {
+      option.hidden = !['1 minute', '5 minutes', '10 minutes'].includes(option.value);
+    });
+    if (!['1 minute', '5 minutes', '10 minutes'].includes(duration.value)) duration.value = '1 minute';
+  } else {
+    [...duration.options].forEach((option) => {
+      option.hidden = false;
+    });
+  }
+};
+
+document.getElementById('moderationAction')?.addEventListener('change', updateModerationActionFields);
+updateModerationActionFields();
+
+document.getElementById('moderationActionForm')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!hasDevToolsAccess()) return;
+
+  const player = document.getElementById('moderationPlayer').value.trim();
+  const action = document.getElementById('moderationAction').value;
+  const duration = document.getElementById('moderationDuration').value;
+  const rulebreak = document.getElementById('moderationRulebreak').value;
+  const reason = document.getElementById('moderationReason').value.trim();
+  const tickets = getTickets();
+  const ticket = tickets.find((item) => item.id === selectedTicketId);
+  if (!ticket || !player || (action === 'Ban' && !reason)) return;
+
+  const detail = action === 'Mute' || action === 'Kick'
+    ? `${action}: ${player} for ${duration}.`
+    : action === 'Strike'
+      ? `Strike: ${player}. Rulebreak: ${rulebreak}.`
+      : `Ban: ${player}. Reason: ${reason}`;
+  ticket.entries.push({ author: getSteamProfile()?.username || 'Admin', text: detail, createdAt: Date.now() });
+  saveTickets(tickets);
+  event.currentTarget.reset();
+  updateModerationActionFields();
+  showToast(`${action} recorded in the ticket log.`);
+});
+
+renderTicketQueue();
+renderTicketLog();
+renderWebsiteChatLog();

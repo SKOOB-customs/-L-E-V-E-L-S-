@@ -76,6 +76,7 @@
         <button class="tab-button" data-tab="map" type="button">Map</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
+        <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
@@ -299,12 +300,12 @@
         <section class="tab-panel" id="profile" data-tab="profile">
           <div class="section-header">
             <p class="eyebrow">PROFILE & PERMISSIONS</p>
-            <h2>Connect Steam & Access Web Features</h2>
+            <h2>Connect Accounts & Access Web Features</h2>
           </div>
 
           <section class="profile-section panel">
             <div class="profile-info">
-              <p>Log in with Steam to verify your account and automatically receive staff permissions in-game.</p>
+              <p>Connect Steam for in-game access, or Discord to use your community role for website permissions.</p>
             </div>
 
             <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color, #333); border-radius: 6px;">
@@ -320,6 +321,7 @@
 
             <div class="submit-actions" style="margin-top: 1rem;">
               <a class="action-button" id="connectSteamBtn" href="/api/steam-login">Login with Steam</a>
+              <a class="secondary-button" id="connectDiscordBtn" href="/api/discord-login">Login with Discord</a>
             </div>
           </section>
 
@@ -362,6 +364,118 @@
                 <p>Manage staff roles and all server-level settings.</p>
               </article>
             </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="dev-tools" data-tab="dev-tools" aria-label="Dev Tools" hidden>
+          <div class="section-header">
+            <p class="eyebrow">DEV TOOLS</p>
+            <h2>Ticket center</h2>
+          </div>
+
+          <div class="ticket-workspace" id="ticketWorkspace" hidden>
+            <section class="ticket-create panel content-box">
+              <div class="mini-heading">Create ticket</div>
+              <form id="ticketForm" class="submit-form">
+                <div class="field-row two-up">
+                  <label>
+                    Category
+                    <select id="ticketCategory" required>
+                      <option value="General">General ticket</option>
+                      <option value="Rulebreak">Rulebreak ticket</option>
+                      <option value="Staff report">Staff report</option>
+                    </select>
+                  </label>
+                  <label>
+                    Subject
+                    <input id="ticketSubject" type="text" maxlength="80" placeholder="Short summary" required />
+                  </label>
+                </div>
+                <label>
+                  Details
+                  <textarea id="ticketDetails" rows="4" maxlength="1000" placeholder="Include the player, time, and relevant details." required></textarea>
+                </label>
+                <label>
+                  Image evidence
+                  <input id="ticketAttachments" type="file" accept="image/*" multiple />
+                </label>
+                <div class="submit-actions">
+                  <button class="action-button" type="submit">Create ticket</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="ticket-dashboard">
+              <div class="ticket-list panel content-box">
+                <div class="ticket-list-header">
+                  <div class="mini-heading">Ticket queue</div>
+                  <select id="ticketFilter" aria-label="Filter tickets">
+                    <option value="All">All tickets</option>
+                    <option value="General">General tickets</option>
+                    <option value="Rulebreak">Rulebreak tickets</option>
+                    <option value="Staff report">Staff reports</option>
+                  </select>
+                </div>
+                <div id="ticketQueue" class="ticket-queue"></div>
+              </div>
+
+              <div class="ticket-detail panel content-box">
+                <div class="mini-heading">Ticket log</div>
+                <div id="ticketLog" class="ticket-log">Select a ticket to view its conversation and image evidence.</div>
+                <form id="ticketMessageForm" class="ticket-message-form" hidden>
+                  <label>
+                    Add log entry
+                    <textarea id="ticketMessage" rows="3" maxlength="1000" placeholder="Add a staff response or case note."></textarea>
+                  </label>
+                  <button class="action-button small" type="submit">Add entry</button>
+                </form>
+                <form id="moderationActionForm" class="moderation-action-form" hidden>
+                  <div class="mini-heading">Moderation action</div>
+                  <label>
+                    Player Steam username, Steam ID, or keyword
+                    <input id="moderationPlayer" type="text" maxlength="80" placeholder="Enter a Steam username, Steam ID, or keyword" required />
+                  </label>
+                  <div class="field-row two-up">
+                    <label>
+                      Action
+                      <select id="moderationAction" required>
+                        <option value="Mute">Mute</option>
+                        <option value="Kick">Kick</option>
+                        <option value="Strike">Strike</option>
+                        <option value="Ban">Ban</option>
+                      </select>
+                    </label>
+                    <label id="moderationDurationField">
+                      Duration
+                      <select id="moderationDuration">
+                        <option value="1 minute">1 minute</option>
+                        <option value="5 minutes">5 minutes</option>
+                        <option value="10 minutes">10 minutes</option>
+                        <option value="30 minutes">30 minutes</option>
+                        <option value="1 hour">1 hour</option>
+                        <option value="1 day">1 day</option>
+                      </select>
+                    </label>
+                    <label id="moderationRulebreakField" hidden>
+                      Rulebreak
+                      <select id="moderationRulebreak">
+                        <option value="Rulebreak to be defined">Rulebreak to be defined</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label id="moderationReasonField" hidden>
+                    Ban reason
+                    <textarea id="moderationReason" rows="3" maxlength="500" placeholder="Written reason for this ban."></textarea>
+                  </label>
+                  <button class="action-button small" type="submit">Record action</button>
+                </form>
+              </div>
+            </section>
+
+            <section class="ticket-chat-log panel content-box">
+              <div class="mini-heading">Website chat log</div>
+              <div id="websiteChatLog" class="ticket-log">No website chat messages have been recorded on this device.</div>
+            </section>
           </div>
         </section>
 
