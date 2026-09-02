@@ -855,17 +855,20 @@ h6,
 .gallery-control {
   width: 42px;
   height: 42px;
-  border: 1px solid var(--line);
+  border: 1px solid #ffe59a;
   border-radius: 8px;
-  background: var(--panel-strong);
-  color: var(--chrome-1);
+  background: #e0ab2d;
+  color: #241400;
   cursor: pointer;
   font-size: 1.3rem;
+  font-weight: 800;
+  box-shadow: 0 0 16px rgba(224, 171, 45, 0.45);
 }
 
 .gallery-control:hover,
 .gallery-control:focus-visible {
-  border-color: var(--chrome-2);
+  background: #ffe59a;
+  border-color: #fff4c9;
 }
 
 .gallery-counter {
