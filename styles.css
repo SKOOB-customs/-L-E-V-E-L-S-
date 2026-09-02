@@ -31,9 +31,10 @@ body {
   min-height: 100vh;
   font-family: "Inter", sans-serif;
   background: transparent;
-  background-image: url('assets/levels_forest_rex_fixed.gif');
-  background-size: cover;
+  background-image: url('assets/levels_forest_rex_small.gif');
+  background-size: contain;
   background-position: center;
+  background-repeat: no-repeat;
   background-attachment: fixed;
   color: var(--text);
   line-height: 1.6;
