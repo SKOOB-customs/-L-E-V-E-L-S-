@@ -61,6 +61,23 @@ document.querySelector('.profile-access')?.addEventListener('click', () => {
   history.replaceState(null, '', `${window.location.pathname}#profile`);
 });
 
+const galleryItems = [...document.querySelectorAll('.gallery-item')];
+const galleryCounter = document.querySelector('.gallery-counter');
+let galleryIndex = 0;
+
+const showGalleryItem = (index) => {
+  if (!galleryItems.length) return;
+  galleryIndex = (index + galleryItems.length) % galleryItems.length;
+  galleryItems.forEach((item, itemIndex) => {
+    item.classList.toggle('is-current', itemIndex === galleryIndex);
+  });
+  if (galleryCounter) galleryCounter.textContent = `${galleryIndex + 1} of ${galleryItems.length}`;
+};
+
+document.querySelector('.gallery-previous')?.addEventListener('click', () => showGalleryItem(galleryIndex - 1));
+document.querySelector('.gallery-next')?.addEventListener('click', () => showGalleryItem(galleryIndex + 1));
+showGalleryItem(0);
+
 const initialDiscordCount = getDiscordMemberCount();
 setDiscordMemberCount(initialDiscordCount);
 

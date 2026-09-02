@@ -688,6 +688,24 @@ h6,
   grid-template-columns: 1.15fr 0.85fr;
 }
 
+.skins-panel {
+  justify-items: center;
+}
+
+.skins-panel > * {
+  width: min(100%, 860px);
+}
+
+.skins-panel .hero-copy,
+.skins-panel .section-header {
+  text-align: center;
+}
+
+.skins-panel .cta-row,
+.skins-panel .mini-list {
+  justify-content: center;
+}
+
 .map-mount {
   display: grid;
   min-height: 520px;
@@ -784,29 +802,33 @@ h6,
   padding-left: 18px;
 }
 
-.community-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.gallery-slideshow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
 }
 
+.gallery-track {
+  min-width: 0;
+}
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: none;
   gap: 20px;
 }
-
+  border-radius: 8px;
 .gallery-item {
   display: flex;
-  flex-direction: column;
   overflow: hidden;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
-  transition: transform 0.2s ease, border-color 0.2s ease;
+.gallery-item.is-current {
+  display: flex;
 }
 
 .gallery-item:hover {
   transform: translateY(-4px);
-  border-color: rgba(255, 255, 255, 0.12);
+  height: min(58vw, 500px);
 }
 
 .gallery-item img {
@@ -827,6 +849,23 @@ h6,
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.gallery-control {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.72rem;
+  background: var(--panel-strong);
+  color: var(--chrome-1);
+  cursor: pointer;
+}
+
+.gallery-counter {
+  grid-column: 2;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 .community-kicker {
@@ -921,7 +960,6 @@ textarea {
   .stats-row,
   .feature-grid,
   .community-grid,
-  .gallery-grid,
   .two-column-layout,
   .two-up,
   .staff-management-form {
@@ -942,6 +980,27 @@ textarea {
 
   .hero {
     display: grid;
+  }
+
+  .gallery-slideshow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .gallery-track {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .gallery-previous {
+    grid-column: 1;
+  }
+
+  .gallery-next {
+    grid-column: 2;
+  }
+
+  .gallery-counter {
+    grid-column: 1 / -1;
   }
 }
 
