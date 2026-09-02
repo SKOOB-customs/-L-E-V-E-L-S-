@@ -86,14 +86,21 @@ const steamStorageKey = 'levelsSteamProfile';
 const staffStorageKey = 'levelsStaffList';
 
 const defaultStaffList = [
-  { steamId: '76561198000000001', role: 'Owner' },
-  { steamId: '76561198000000002', role: 'Admin' },
+  { steamId: '76561199769378102', username: 'Owner', role: 'Owner' },
 ];
 
 const getStaffList = () => {
   try {
     const saved = localStorage.getItem(staffStorageKey);
-    return saved ? JSON.parse(saved) : defaultStaffList;
+    const staffList = saved ? JSON.parse(saved) : [];
+    if (!Array.isArray(staffList)) return defaultStaffList;
+
+    defaultStaffList.forEach((defaultMember) => {
+      if (!staffList.some((member) => member.steamId === defaultMember.steamId)) {
+        staffList.push(defaultMember);
+      }
+    });
+    return staffList;
   } catch {
     return defaultStaffList;
   }
@@ -177,7 +184,13 @@ const renderStaffRoster = () => {
     item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.5rem; background: rgba(255,255,255,0.04); border-radius: 4px; margin-bottom: 0.4rem;';
 
     const info = document.createElement('div');
-    info.innerHTML = `<strong>${member.role}</strong> &mdash; <code>${member.steamId}</code>`;
+    const role = document.createElement('strong');
+    role.textContent = member.role;
+    const username = document.createElement('span');
+    username.textContent = ` - ${member.username || 'No username recorded'}`;
+    const steamId = document.createElement('code');
+    steamId.textContent = ` (${member.steamId})`;
+    info.append(role, username, steamId);
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'action-button small';
@@ -211,6 +224,11 @@ const displaySteamStatus = async () => {
     // Check staff permissions either from local list or API
     const staffList = getStaffList();
     const matchedStaff = staffList.find((s) => s.steamId === profile.steamId);
+    if (matchedStaff && profile.username && matchedStaff.username !== profile.username) {
+      matchedStaff.username = profile.username;
+      localStorage.setItem(staffStorageKey, JSON.stringify(staffList));
+      renderStaffRoster();
+    }
     let activeRole = matchedStaff ? matchedStaff.role : (profile.staffRole || 'Player');
 
     // Attempt API verification for latest server permissions
@@ -252,13 +270,15 @@ if (addStaffForm) {
   addStaffForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const steamIdInput = document.getElementById('staffSteamIdInput');
+    const usernameInput = document.getElementById('staffUsernameInput');
     const roleSelect = document.getElementById('staffRoleSelect');
 
     const steamId = steamIdInput?.value.trim();
+    const username = usernameInput?.value.trim();
     const role = roleSelect?.value || 'Admin';
 
-    if (!steamId || !/^\d{17}$/.test(steamId)) {
-      showToast('Please enter a valid 17-digit SteamID64.');
+    if (!steamId || !/^\d{17}$/.test(steamId) || !username) {
+      showToast('Enter a Steam ID and username.');
       return;
     }
 
@@ -267,13 +287,15 @@ if (addStaffForm) {
 
     if (existingIndex >= 0) {
       staffList[existingIndex].role = role;
+      staffList[existingIndex].username = username;
     } else {
-      staffList.push({ steamId, role });
+      staffList.push({ steamId, username, role });
     }
 
     saveStaffList(staffList);
     steamIdInput.value = '';
-    showToast(`Saved ${role} permissions for Steam ID ${steamId}!`);
+    usernameInput.value = '';
+    showToast(`Saved ${role} permissions for ${username}.`);
     displaySteamStatus();
   });
 }
