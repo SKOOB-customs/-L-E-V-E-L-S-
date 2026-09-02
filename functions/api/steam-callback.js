@@ -35,6 +35,28 @@ export async function onRequestGet({ request, env }) {
     }
   }
 
-  const redirectParams = new URLSearchParams({ steam_id: steamId, steam_name: username });
+  // Check if user is staff for automatic in-game permission status
+  let staffRole = '';
+  if (env.STAFF_STEAM_IDS) {
+    try {
+      const staffMap = typeof env.STAFF_STEAM_IDS === 'string'
+        ? JSON.parse(env.STAFF_STEAM_IDS)
+        : env.STAFF_STEAM_IDS;
+      if (staffMap[steamId]) {
+        staffRole = staffMap[steamId];
+      }
+    } catch {
+      String(env.STAFF_STEAM_IDS).split(',').forEach(entry => {
+        const [id, role] = entry.trim().split(':');
+        if (id === steamId) staffRole = role || 'Admin';
+      });
+    }
+  }
+
+  const redirectParams = new URLSearchParams({
+    steam_id: steamId,
+    steam_name: username,
+    ...(staffRole ? { staff_role: staffRole } : {}),
+  });
   return Response.redirect(`${origin}/#profile?${redirectParams.toString()}`, 302);
 }

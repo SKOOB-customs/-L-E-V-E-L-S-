@@ -292,21 +292,66 @@
 
         <section class="tab-panel" id="profile" data-tab="profile">
           <div class="section-header">
-            <p class="eyebrow">PROFILE</p>
-            <h2>Connect your Steam account</h2>
+            <p class="eyebrow">PROFILE & PERMISSIONS</p>
+            <h2>Connect Steam & In-Game Staff Permissions</h2>
           </div>
 
           <section class="profile-section panel">
             <div class="profile-info">
-              <p>Log in with Steam to enable in-game features like mod access and custom skin selection.</p>
+              <p>Log in with Steam to verify your account and automatically receive staff permissions in-game.</p>
             </div>
 
-            <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 4px;">
+            <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color, #333); border-radius: 6px;">
               <p id="statusMessage"></p>
+              <div id="staffPermissionsBox" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px dashed rgba(255,255,255,0.15);">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+                  <strong>In-Game Staff Status:</strong>
+                  <span id="staffRoleBadge" class="badge" style="background: #2a2a3c; padding: 0.2rem 0.6rem; border-radius: 4px; font-weight: 600;">Player</span>
+                </div>
+                <div id="staffPermsList" style="margin-top: 0.5rem; font-size: 0.9em; opacity: 0.9;"></div>
+              </div>
             </div>
 
-            <div class="submit-actions">
+            <div class="submit-actions" style="margin-top: 1rem;">
               <a class="action-button" id="connectSteamBtn" href="/api/steam-login">Login with Steam</a>
+            </div>
+          </section>
+
+          <!-- Staff Team Management & Automatic In-Game Permissions Section -->
+          <section class="panel content-box" style="margin-top: 1.5rem;">
+            <div class="mini-heading">⚡ Automated In-Game Staff Permissions</div>
+            <p style="margin-bottom: 1rem; font-size: 0.95em; color: var(--text-muted, #aaa);">
+              Add your staff team's Steam IDs below. When staff members log in via Steam, the system automatically verifies their Steam ID and activates their in-game permissions.
+            </p>
+
+            <form id="addStaffForm" class="submit-form" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1.25rem;">
+              <label style="flex: 2; min-width: 220px;">
+                Steam ID (17-digit SteamID64)
+                <input type="text" id="staffSteamIdInput" placeholder="e.g. 76561198012345678" required pattern="\d{17}" />
+              </label>
+              <label style="flex: 1; min-width: 140px;">
+                In-Game Role
+                <select id="staffRoleSelect">
+                  <option value="Admin">🛡️ Admin</option>
+                  <option value="Moderator">⚔️ Moderator</option>
+                  <option value="Owner">👑 Owner</option>
+                  <option value="Staff">⭐ Staff</option>
+                </select>
+              </label>
+              <button type="submit" class="action-button small" style="height: 38px;">Save Staff Member</button>
+            </form>
+
+            <div class="mini-heading" style="margin-top: 1rem;">Configured Staff Roster</div>
+            <div id="staffRosterList" class="info-list" style="margin-top: 0.5rem;">
+              <p style="font-size: 0.9em; color: var(--text-muted, #aaa);">No staff Steam IDs configured yet.</p>
+            </div>
+
+            <div style="margin-top: 1.25rem; padding: 0.75rem; background: rgba(0, 0, 0, 0.25); border-radius: 4px; font-size: 0.85em;">
+              <strong>🎮 Game Server Integration Endpoint:</strong><br />
+              <code><a href="/api/permissions" target="_blank" style="color: #5ae4ff;">/api/permissions</a></code>
+              <p style="margin-top: 0.3rem; opacity: 0.8;">
+                Your game server plugin or RCON script can poll this JSON endpoint to automatically update admin lists and grant permissions in real-time.
+              </p>
             </div>
           </section>
         </section>

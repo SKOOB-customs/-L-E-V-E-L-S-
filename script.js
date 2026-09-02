@@ -81,30 +81,161 @@ secondaryButtons.forEach((button) => {
   });
 });
 
-// Steam Profile Management
+// Steam Profile & Staff Permission Management
 const steamStorageKey = 'levelsSteamProfile';
+const staffStorageKey = 'levelsStaffList';
+
+const defaultStaffList = [
+  { steamId: '76561198000000001', role: 'Owner' },
+  { steamId: '76561198000000002', role: 'Admin' },
+];
+
+const getStaffList = () => {
+  try {
+    const saved = localStorage.getItem(staffStorageKey);
+    return saved ? JSON.parse(saved) : defaultStaffList;
+  } catch {
+    return defaultStaffList;
+  }
+};
+
+const saveStaffList = (list) => {
+  localStorage.setItem(staffStorageKey, JSON.stringify(list));
+  renderStaffRoster();
+};
 
 const getSteamProfile = () => {
   const saved = localStorage.getItem(steamStorageKey);
   return saved ? JSON.parse(saved) : null;
 };
 
-const setSteamProfile = (steamId, username) => {
-  const profile = { steamId, username, connectedAt: new Date().toISOString() };
+const setSteamProfile = (steamId, username, staffRole = '') => {
+  const profile = { steamId, username, staffRole, connectedAt: new Date().toISOString() };
   localStorage.setItem(steamStorageKey, JSON.stringify(profile));
   return profile;
 };
 
-const displaySteamStatus = () => {
+const roleDetailsMap = {
+  Owner: { badge: '👑 Owner', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn', 'manage_permissions'] },
+  Admin: { badge: '🛡️ Admin', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn'] },
+  Moderator: { badge: '⚔️ Moderator', perms: ['kick', 'ban', 'teleport', 'mute'] },
+  Staff: { badge: '⭐ Staff', perms: ['teleport', 'kick', 'mute'] },
+  Player: { badge: '🎮 Player', perms: [] },
+};
+
+const renderStaffRoster = () => {
+  const rosterDiv = document.getElementById('staffRosterList');
+  if (!rosterDiv) return;
+
+  const staffList = getStaffList();
+  if (staffList.length === 0) {
+    rosterDiv.innerHTML = '<p style="font-size: 0.9em; color: var(--text-muted, #aaa);">No staff Steam IDs configured yet.</p>';
+    return;
+  }
+
+  rosterDiv.innerHTML = '';
+  staffList.forEach((member) => {
+    const item = document.createElement('div');
+    item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.5rem; background: rgba(255,255,255,0.04); border-radius: 4px; margin-bottom: 0.4rem;';
+
+    const info = document.createElement('div');
+    info.innerHTML = `<strong>${member.role}</strong> &mdash; <code>${member.steamId}</code>`;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'action-button small';
+    removeBtn.style.cssText = 'padding: 0.2rem 0.5rem; font-size: 0.8em; background: #c0392b; border: none;';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => {
+      const updated = getStaffList().filter((s) => s.steamId !== member.steamId);
+      saveStaffList(updated);
+      showToast(`Removed Steam ID ${member.steamId} from staff.`);
+      displaySteamStatus();
+    });
+
+    item.append(info, removeBtn);
+    rosterDiv.appendChild(item);
+  });
+};
+
+const displaySteamStatus = async () => {
   const profile = getSteamProfile();
   const statusDiv = document.getElementById('profileStatus');
   const statusMessage = document.getElementById('statusMessage');
+  const staffRoleBadge = document.getElementById('staffRoleBadge');
+  const staffPermsList = document.getElementById('staffPermsList');
+
+  if (!statusDiv || !statusMessage) return;
 
   if (profile) {
     statusDiv.style.display = 'block';
-    statusMessage.innerHTML = `✓ <strong>Steam Connected!</strong><br>ID: ${profile.steamId}<br>Username: ${profile.username}`;
+    statusMessage.innerHTML = `✓ <strong>Steam Account Connected!</strong><br>ID: <code>${profile.steamId}</code><br>Username: <strong>${profile.username}</strong>`;
+
+    // Check staff permissions either from local list or API
+    const staffList = getStaffList();
+    const matchedStaff = staffList.find((s) => s.steamId === profile.steamId);
+    let activeRole = matchedStaff ? matchedStaff.role : (profile.staffRole || 'Player');
+
+    // Attempt API verification for latest server permissions
+    try {
+      const res = await fetch(`/api/permissions?steam_id=${profile.steamId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.is_staff && data.role) {
+          activeRole = data.role;
+        }
+      }
+    } catch {
+      // Fallback to local staff list
+    }
+
+    const details = roleDetailsMap[activeRole] || roleDetailsMap.Player;
+
+    if (staffRoleBadge) {
+      staffRoleBadge.textContent = details.badge;
+      staffRoleBadge.style.color = activeRole !== 'Player' ? '#5ae4ff' : '#aaa';
+    }
+
+    if (staffPermsList) {
+      if (activeRole !== 'Player') {
+        staffPermsList.innerHTML = `✅ <strong>Automatic In-Game Permissions Granted:</strong><br><span style="font-family: monospace; color: #5ae4ff;">${details.perms.join(', ')}</span>`;
+      } else {
+        staffPermsList.innerHTML = `ℹ️ Standard player account. (Add Steam ID to Staff Roster below to auto-grant in-game permissions).`;
+      }
+    }
   }
 };
+
+// Handle adding new staff Steam IDs
+const addStaffForm = document.getElementById('addStaffForm');
+if (addStaffForm) {
+  addStaffForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const steamIdInput = document.getElementById('staffSteamIdInput');
+    const roleSelect = document.getElementById('staffRoleSelect');
+
+    const steamId = steamIdInput?.value.trim();
+    const role = roleSelect?.value || 'Admin';
+
+    if (!steamId || !/^\d{17}$/.test(steamId)) {
+      showToast('Please enter a valid 17-digit SteamID64.');
+      return;
+    }
+
+    const staffList = getStaffList();
+    const existingIndex = staffList.findIndex((s) => s.steamId === steamId);
+
+    if (existingIndex >= 0) {
+      staffList[existingIndex].role = role;
+    } else {
+      staffList.push({ steamId, role });
+    }
+
+    saveStaffList(staffList);
+    steamIdInput.value = '';
+    showToast(`Saved ${role} permissions for Steam ID ${steamId}!`);
+    displaySteamStatus();
+  });
+}
 
 // Steam redirects back to /#profile?steam_id=...&steam_name=... after a successful login
 const consumeSteamRedirect = () => {
@@ -115,11 +246,12 @@ const consumeSteamRedirect = () => {
   const params = new URLSearchParams(hash.slice(queryIndex + 1));
   const steamId = params.get('steam_id');
   const steamName = params.get('steam_name');
+  const staffRole = params.get('staff_role');
 
   if (params.get('steam_error')) {
     showToast('Steam login failed. Please try again.');
   } else if (steamId && /^\d{17}$/.test(steamId) && steamName) {
-    setSteamProfile(steamId, steamName);
+    setSteamProfile(steamId, steamName, staffRole || '');
     showToast('Steam account connected successfully!');
   }
 
@@ -128,7 +260,8 @@ const consumeSteamRedirect = () => {
 
 consumeSteamRedirect();
 
-// Load Steam profile on page load
+// Render staff roster and Steam profile status on page load
+renderStaffRoster();
 displaySteamStatus();
 
 // Global chat sidebar (local-only: no backend yet, so messages persist per browser)
