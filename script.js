@@ -83,7 +83,6 @@ secondaryButtons.forEach((button) => {
 
 // Steam Profile & Staff Permission Management
 const steamStorageKey = 'levelsSteamProfile';
-const discordStorageKey = 'levelsDiscordProfile';
 const staffStorageKey = 'levelsStaffList';
 
 const defaultStaffList = [
@@ -115,21 +114,6 @@ const saveStaffList = (list) => {
 const getSteamProfile = () => {
   const saved = localStorage.getItem(steamStorageKey);
   return saved ? JSON.parse(saved) : null;
-};
-
-const getDiscordProfile = () => {
-  try {
-    const saved = localStorage.getItem(discordStorageKey);
-    return saved ? JSON.parse(saved) : null;
-  } catch {
-    return null;
-  }
-};
-
-const setDiscordProfile = (discordId, username, role) => {
-  const profile = { discordId, username, role, connectedAt: new Date().toISOString() };
-  localStorage.setItem(discordStorageKey, JSON.stringify(profile));
-  return profile;
 };
 
 const setSteamProfile = (steamId, username, staffRole = '') => {
@@ -276,7 +260,7 @@ const displaySteamStatus = async () => {
       }
     }
   } else {
-    if (!getDiscordProfile()) updateStaffArea();
+    updateStaffArea();
   }
 };
 
@@ -326,16 +310,8 @@ const consumeSteamRedirect = () => {
   const steamId = params.get('steam_id');
   const steamName = params.get('steam_name');
   const staffRole = params.get('staff_role');
-  const discordId = params.get('discord_id');
-  const discordName = params.get('discord_name');
-  const discordRole = params.get('discord_role');
 
-  if (params.get('discord_error')) {
-    showToast('Discord login failed. Check the app configuration and try again.');
-  } else if (discordId && discordName && discordRole) {
-    setDiscordProfile(discordId, discordName, discordRole);
-    showToast('Discord account connected successfully!');
-  } else if (params.get('steam_error')) {
+  if (params.get('steam_error')) {
     showToast('Steam login failed. Please try again.');
   } else if (steamId && /^\d{17}$/.test(steamId) && steamName) {
     setSteamProfile(steamId, steamName, staffRole || '');
@@ -347,33 +323,9 @@ const consumeSteamRedirect = () => {
 
 consumeSteamRedirect();
 
-const displayDiscordStatus = () => {
-  const profile = getDiscordProfile();
-  const statusDiv = document.getElementById('profileStatus');
-  const statusMessage = document.getElementById('statusMessage');
-  const staffRoleBadge = document.getElementById('staffRoleBadge');
-  const staffPermsList = document.getElementById('staffPermsList');
-  if (!profile || !statusDiv || !statusMessage) return;
-
-  const details = roleDetailsMap[profile.role] || roleDetailsMap.Player;
-  statusDiv.style.display = 'block';
-  statusMessage.textContent = `Discord account: ${profile.username}`;
-  if (staffRoleBadge) {
-    staffRoleBadge.textContent = details.badge;
-    staffRoleBadge.style.color = profile.role !== 'Player' ? '#5ae4ff' : '#aaa';
-  }
-  if (staffPermsList) {
-    staffPermsList.textContent = profile.role === 'Player'
-      ? 'No staff role was found in this Discord server.'
-      : `Verified Discord role: ${profile.role}.`;
-  }
-  updateStaffArea(profile.role);
-};
-
 // Render staff roster and Steam profile status on page load
 renderStaffRoster();
 displaySteamStatus();
-displayDiscordStatus();
 
 // Global chat sidebar (local-only: no backend yet, so messages persist per browser)
 const chatToggle = document.getElementById('chatToggle');

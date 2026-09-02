@@ -331,19 +331,19 @@
         <section class="tab-panel" id="profile" data-tab="profile">
           <div class="section-header">
             <p class="eyebrow">PROFILE & PERMISSIONS</p>
-            <h2>Connect Discord & Staff Permissions</h2>
+            <h2>Connect Steam & In-Game Staff Permissions</h2>
           </div>
 
           <section class="profile-section panel">
             <div class="profile-info">
-              <p>Log in with Discord to verify your server roles and unlock staff access automatically.</p>
+              <p>Log in with Steam to verify your account and automatically receive staff permissions in-game.</p>
             </div>
 
             <div class="profile-status" id="profileStatus" style="display: none; margin-top: 1rem; padding: 1rem; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color, #333); border-radius: 6px;">
               <p id="statusMessage"></p>
               <div id="staffPermissionsBox" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px dashed rgba(255,255,255,0.15);">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
-                  <strong>Discord Staff Status:</strong>
+                  <strong>In-Game Staff Status:</strong>
                   <span id="staffRoleBadge" class="badge" style="background: #2a2a3c; padding: 0.2rem 0.6rem; border-radius: 4px; font-weight: 600;">Player</span>
                 </div>
                 <div id="staffPermsList" style="margin-top: 0.5rem; font-size: 0.9em; opacity: 0.9;"></div>
@@ -351,12 +351,12 @@
             </div>
 
             <div class="submit-actions" style="margin-top: 1rem;">
-              <a class="action-button" id="connectDiscordBtn" href="/api/discord-login">Login with Discord</a>
+              <a class="action-button" id="connectSteamBtn" href="/api/steam-login">Login with Steam</a>
             </div>
           </section>
 
           <!-- Staff Team Management & Automatic In-Game Permissions Section -->
-          <section class="panel content-box" style="margin-top: 1.5rem;" hidden>
+          <section class="panel content-box" style="margin-top: 1.5rem;">
             <div class="mini-heading">⚡ Automated In-Game Staff Permissions</div>
             <p style="margin-bottom: 1rem; font-size: 0.95em; color: var(--text-muted, #aaa);">
               Add your staff team's Steam IDs below. When staff members log in via Steam, the system automatically verifies their Steam ID and activates their in-game permissions.
@@ -406,7 +406,7 @@
 
           <section class="staff-access panel content-box" id="staffAccessNotice">
             <div class="mini-heading">Staff verification required</div>
-            <p>Connect your Discord account from the Profile tab to view staff tools.</p>
+            <p>Connect your Steam account from the Profile tab to view staff tools.</p>
           </section>
 
           <div class="staff-workspace" id="staffWorkspace" hidden>
