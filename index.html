@@ -75,6 +75,7 @@
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
         <button class="tab-button" data-tab="profile" type="button">Profile</button>
+        <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
@@ -390,6 +391,46 @@
               </p>
             </div>
           </section>
+        </section>
+
+        <section class="tab-panel" id="staff" data-tab="staff" aria-label="Staff area">
+          <div class="section-header">
+            <p class="eyebrow">STAFF AREA</p>
+            <h2>Team tools</h2>
+          </div>
+
+          <section class="staff-access panel content-box" id="staffAccessNotice">
+            <div class="mini-heading">Staff verification required</div>
+            <p>Connect your Steam account from the Profile tab to view staff tools.</p>
+          </section>
+
+          <div class="staff-workspace" id="staffWorkspace" hidden>
+            <div class="staff-role-summary panel content-box">
+              <span class="community-kicker" id="staffAreaRole">Staff</span>
+              <h3 id="staffAreaTitle">Staff access</h3>
+              <p id="staffAreaDescription"></p>
+            </div>
+
+            <div class="staff-tool-grid">
+              <article class="staff-tool panel content-box" data-staff-level="Moderator">
+                <div class="mini-heading">Moderation</div>
+                <h3>Player reports</h3>
+                <p>Review player reports, mute requests, and moderation notes.</p>
+              </article>
+
+              <article class="staff-tool panel content-box" data-staff-level="Admin">
+                <div class="mini-heading">Administration</div>
+                <h3>Server operations</h3>
+                <p>Review server events, manage announcements, and coordinate updates.</p>
+              </article>
+
+              <article class="staff-tool panel content-box" data-staff-level="Owner">
+                <div class="mini-heading">Owner</div>
+                <h3>Staff access</h3>
+                <p>Manage staff roles and all server-level settings.</p>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section class="tab-panel" id="inventory" data-tab="inventory">

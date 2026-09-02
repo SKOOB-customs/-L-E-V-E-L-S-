@@ -676,6 +676,28 @@ h6,
   grid-template-columns: 1.15fr 0.85fr;
 }
 
+.staff-workspace,
+.staff-tool-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.staff-tool-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.staff-role-summary h3,
+.staff-tool h3 {
+  margin: 0 0 10px;
+}
+
+.staff-role-summary p,
+.staff-tool p,
+.staff-access p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .mini-heading {
   margin-bottom: 14px;
   color: var(--text);
@@ -921,6 +943,7 @@ textarea {
   .feature-grid,
   .community-grid,
   .skin-pack-grid,
+  .staff-tool-grid,
   .gallery-grid,
   .two-column-layout,
   .two-up {

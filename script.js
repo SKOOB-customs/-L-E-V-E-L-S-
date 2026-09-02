@@ -123,6 +123,38 @@ const roleDetailsMap = {
   Player: { badge: '🎮 Player', perms: [] },
 };
 
+const staffRoleRank = { Player: 0, Staff: 1, Moderator: 2, Admin: 3, Owner: 4 };
+
+const updateStaffArea = (role = 'Player') => {
+  const rank = staffRoleRank[role] || 0;
+  const staffTabButton = document.querySelector('.staff-tab-button');
+  const staffWorkspace = document.getElementById('staffWorkspace');
+  const staffAccessNotice = document.getElementById('staffAccessNotice');
+  const staffAreaRole = document.getElementById('staffAreaRole');
+  const staffAreaTitle = document.getElementById('staffAreaTitle');
+  const staffAreaDescription = document.getElementById('staffAreaDescription');
+
+  const hasStaffAccess = rank >= staffRoleRank.Moderator;
+  if (staffTabButton) staffTabButton.hidden = !hasStaffAccess;
+  if (staffWorkspace) staffWorkspace.hidden = !hasStaffAccess;
+  if (staffAccessNotice) staffAccessNotice.hidden = hasStaffAccess;
+
+  document.querySelectorAll('[data-staff-level]').forEach((tool) => {
+    tool.hidden = rank < staffRoleRank[tool.dataset.staffLevel];
+  });
+
+  if (!hasStaffAccess) return;
+
+  const descriptions = {
+    Moderator: 'You can handle player reports and moderation notes.',
+    Admin: 'You have Moderator tools plus server operations controls.',
+    Owner: 'You have every staff role and full team access.',
+  };
+  if (staffAreaRole) staffAreaRole.textContent = role;
+  if (staffAreaTitle) staffAreaTitle.textContent = `${role} access`;
+  if (staffAreaDescription) staffAreaDescription.textContent = descriptions[role];
+};
+
 const renderStaffRoster = () => {
   const rosterDiv = document.getElementById('staffRosterList');
   if (!rosterDiv) return;
@@ -189,6 +221,7 @@ const displaySteamStatus = async () => {
     }
 
     const details = roleDetailsMap[activeRole] || roleDetailsMap.Player;
+    updateStaffArea(activeRole);
 
     if (staffRoleBadge) {
       staffRoleBadge.textContent = details.badge;
@@ -202,6 +235,8 @@ const displaySteamStatus = async () => {
         staffPermsList.innerHTML = `ℹ️ Standard player account. (Add Steam ID to Staff Roster below to auto-grant in-game permissions).`;
       }
     }
+  } else {
+    updateStaffArea();
   }
 };
 
