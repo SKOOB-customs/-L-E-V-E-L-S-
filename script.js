@@ -56,6 +56,11 @@ if (tabButtons.length) {
   activateTab(hasHashTab ? hashTab : 'gallery');
 }
 
+document.querySelector('.profile-access')?.addEventListener('click', () => {
+  activateTab('profile');
+  history.replaceState(null, '', `${window.location.pathname}#profile`);
+});
+
 const initialDiscordCount = getDiscordMemberCount();
 setDiscordMemberCount(initialDiscordCount);
 
@@ -146,7 +151,6 @@ const updateStaffArea = (role = 'Player') => {
 
   const hasStaffAccess = rank >= staffRoleRank.Moderator;
   if (staffTabButton) staffTabButton.hidden = !hasStaffAccess;
-  if (devToolsTabButton) devToolsTabButton.hidden = !hasStaffAccess;
   if (staffWorkspace) staffWorkspace.hidden = !hasStaffAccess;
   if (staffAccessNotice) staffAccessNotice.hidden = hasStaffAccess;
   if (ticketWorkspace) ticketWorkspace.hidden = !hasStaffAccess;

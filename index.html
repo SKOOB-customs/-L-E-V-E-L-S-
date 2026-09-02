@@ -54,13 +54,13 @@
 
     <div class="site-shell">
       <header class="site-header panel">
-        <div class="brand-wrap">
+        <button class="brand-wrap profile-access" type="button" aria-label="Open profile">
           <img class="brand-mark" src="assets/logo/LL.png" alt="LeveLs logo" />
           <div class="brand-copy">
             <span class="brand-name">LeveLs</span>
             <span class="brand-sub">COMMUNITY HUB</span>
           </div>
-        </div>
+        </button>
 
         <div class="header-actions">
           <a class="chrome-button small" href="https://steamcommunity.com/groups/SKOOB_customs" target="_blank" rel="noreferrer">Steam</a>
@@ -74,9 +74,8 @@
         <button class="tab-button" data-tab="features" type="button">Features</button>
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
-        <button class="tab-button" data-tab="profile" type="button">Profile</button>
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
-        <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
+        <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button">Dev Tools</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
@@ -355,47 +354,6 @@
             </div>
           </section>
 
-          <!-- Staff Team Management & Automatic In-Game Permissions Section -->
-          <section class="panel content-box" style="margin-top: 1.5rem;">
-            <div class="mini-heading">⚡ Automated In-Game Staff Permissions</div>
-            <p style="margin-bottom: 1rem; font-size: 0.95em; color: var(--text-muted, #aaa);">
-              Add your staff team's Steam IDs below. When staff members log in via Steam, the system automatically verifies their Steam ID and activates their in-game permissions.
-            </p>
-
-            <form id="addStaffForm" class="submit-form" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1.25rem;">
-              <label style="flex: 2; min-width: 220px;">
-                Steam ID (17-digit SteamID64)
-                <input type="text" id="staffSteamIdInput" placeholder="e.g. 76561198012345678" required pattern="\d{17}" />
-              </label>
-              <label style="flex: 1; min-width: 160px;">
-                Username
-                <input type="text" id="staffUsernameInput" placeholder="Steam username" maxlength="64" required />
-              </label>
-              <label style="flex: 1; min-width: 140px;">
-                In-Game Role
-                <select id="staffRoleSelect">
-                  <option value="Admin">🛡️ Admin</option>
-                  <option value="Moderator">⚔️ Moderator</option>
-                  <option value="Owner">👑 Owner</option>
-                  <option value="Staff">⭐ Staff</option>
-                </select>
-              </label>
-              <button type="submit" class="action-button small" style="height: 38px;">Save Staff Member</button>
-            </form>
-
-            <div class="mini-heading" style="margin-top: 1rem;">Configured Staff Roster</div>
-            <div id="staffRosterList" class="info-list" style="margin-top: 0.5rem;">
-              <p style="font-size: 0.9em; color: var(--text-muted, #aaa);">No staff Steam IDs configured yet.</p>
-            </div>
-
-            <div style="margin-top: 1.25rem; padding: 0.75rem; background: rgba(0, 0, 0, 0.25); border-radius: 4px; font-size: 0.85em;">
-              <strong>🎮 Game Server Integration Endpoint:</strong><br />
-              <code><a href="/api/permissions" target="_blank" style="color: #5ae4ff;">/api/permissions</a></code>
-              <p style="margin-top: 0.3rem; opacity: 0.8;">
-                Your game server plugin or RCON script can poll this JSON endpoint to automatically update admin lists and grant permissions in real-time.
-              </p>
-            </div>
-          </section>
         </section>
 
         <section class="tab-panel" id="staff" data-tab="staff" aria-label="Staff area">
@@ -511,6 +469,19 @@
             <section class="ticket-chat-log panel content-box">
               <div class="mini-heading">Website chat log</div>
               <div id="websiteChatLog" class="ticket-log">No website chat messages have been recorded on this device.</div>
+            </section>
+
+            <section class="panel content-box staff-management" data-staff-level="Admin">
+              <div class="mini-heading">Staff role assignments</div>
+              <p>Assign website and in-game roles by Steam ID and username.</p>
+              <form id="addStaffForm" class="staff-management-form">
+                <label>Steam ID (17-digit SteamID64)<input type="text" id="staffSteamIdInput" placeholder="e.g. 76561198012345678" required pattern="\d{17}" /></label>
+                <label>Username<input type="text" id="staffUsernameInput" placeholder="Steam username" maxlength="64" required /></label>
+                <label>Role<select id="staffRoleSelect"><option value="Admin">Admin</option><option value="Moderator">Moderator</option><option value="Owner">Owner</option><option value="Staff">Staff</option></select></label>
+                <button type="submit" class="action-button small">Save staff member</button>
+              </form>
+              <div class="mini-heading staff-roster-heading">Configured staff roster</div>
+              <div id="staffRosterList" class="info-list"></div>
             </section>
           </div>
         </section>
