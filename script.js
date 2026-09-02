@@ -140,22 +140,16 @@ const staffRoleRank = { Player: 0, Staff: 1, Moderator: 2, Admin: 3, Owner: 4 };
 const updateStaffArea = (role = 'Player') => {
   const rank = staffRoleRank[role] || 0;
   const staffTabButton = document.querySelector('.staff-tab-button');
-  const devToolsTabButton = document.querySelector('.dev-tools-tab-button');
   const staffWorkspace = document.getElementById('staffWorkspace');
   const staffAccessNotice = document.getElementById('staffAccessNotice');
-  const ticketWorkspace = document.getElementById('ticketWorkspace');
-  const devToolsAccessNotice = document.getElementById('devToolsAccessNotice');
   const staffAreaRole = document.getElementById('staffAreaRole');
   const staffAreaTitle = document.getElementById('staffAreaTitle');
   const staffAreaDescription = document.getElementById('staffAreaDescription');
 
   const hasStaffAccess = rank >= staffRoleRank.Moderator;
   if (staffTabButton) staffTabButton.hidden = !hasStaffAccess;
-  if (devToolsTabButton) devToolsTabButton.hidden = !hasStaffAccess;
   if (staffWorkspace) staffWorkspace.hidden = !hasStaffAccess;
   if (staffAccessNotice) staffAccessNotice.hidden = hasStaffAccess;
-  if (ticketWorkspace) ticketWorkspace.hidden = !hasStaffAccess;
-  if (devToolsAccessNotice) devToolsAccessNotice.hidden = hasStaffAccess;
 
   document.querySelectorAll('[data-staff-level]').forEach((tool) => {
     tool.hidden = rank < staffRoleRank[tool.dataset.staffLevel];
@@ -390,7 +384,6 @@ const addChatMessage = (name, text) => {
   messages.push({ name, text, ts: Date.now() });
   localStorage.setItem(chatMessagesKey, JSON.stringify(messages.slice(-chatMaxStored)));
   renderChatMessages();
-  renderWebsiteChatLog();
 };
 
 const openChat = () => {
@@ -450,167 +443,3 @@ chatForm?.addEventListener('submit', (event) => {
 });
 
 renderChatMessages();
-
-const ticketStorageKey = 'levelsStaffTickets';
-let selectedTicketId = null;
-
-const getTickets = () => {
-  try {
-    const tickets = JSON.parse(localStorage.getItem(ticketStorageKey) || '[]');
-    return Array.isArray(tickets) ? tickets : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveTickets = (tickets) => {
-  localStorage.setItem(ticketStorageKey, JSON.stringify(tickets));
-  renderTicketQueue();
-  renderTicketLog();
-};
-
-const formatLogTime = (timestamp) => new Date(timestamp).toLocaleString([], {
-  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-});
-
-const renderWebsiteChatLog = () => {
-  const chatLog = document.getElementById('websiteChatLog');
-  if (!chatLog) return;
-
-  const messages = getChatMessages();
-  chatLog.replaceChildren();
-  if (!messages.length) {
-    chatLog.textContent = 'No website chat messages have been recorded on this device.';
-    return;
-  }
-
-  messages.slice(-20).reverse().forEach((message) => {
-    const entry = document.createElement('div');
-    entry.className = 'ticket-log-entry';
-    const meta = document.createElement('span');
-    meta.textContent = `${message.name} · ${formatLogTime(message.ts)}`;
-    const text = document.createElement('div');
-    text.textContent = message.text;
-    entry.append(meta, text);
-    chatLog.appendChild(entry);
-  });
-};
-
-const renderTicketQueue = () => {
-  const queue = document.getElementById('ticketQueue');
-  const filter = document.getElementById('ticketFilter');
-  if (!queue) return;
-
-  const category = filter?.value || 'All';
-  const tickets = getTickets().filter((ticket) => category === 'All' || ticket.category === category);
-  queue.replaceChildren();
-
-  if (!tickets.length) {
-    queue.textContent = 'No tickets in this category.';
-    return;
-  }
-
-  tickets.sort((first, second) => second.createdAt - first.createdAt).forEach((ticket) => {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = `ticket-item${ticket.id === selectedTicketId ? ' is-selected' : ''}`;
-    const categoryLabel = document.createElement('span');
-    categoryLabel.textContent = `${ticket.category} · Open`;
-    const subject = document.createElement('strong');
-    subject.textContent = ticket.subject;
-    const timestamp = document.createElement('span');
-    timestamp.textContent = formatLogTime(ticket.createdAt);
-    item.append(categoryLabel, subject, timestamp);
-    item.addEventListener('click', () => {
-      selectedTicketId = ticket.id;
-      renderTicketQueue();
-      renderTicketLog();
-    });
-    queue.appendChild(item);
-  });
-};
-
-const renderTicketLog = () => {
-  const ticketLog = document.getElementById('ticketLog');
-  const messageForm = document.getElementById('ticketMessageForm');
-  if (!ticketLog || !messageForm) return;
-
-  const ticket = getTickets().find((item) => item.id === selectedTicketId);
-  ticketLog.replaceChildren();
-  messageForm.hidden = !ticket;
-  if (!ticket) {
-    ticketLog.textContent = 'Select a ticket to view its conversation and image evidence.';
-    return;
-  }
-
-  ticket.entries.forEach((entry) => {
-    const logEntry = document.createElement('div');
-    logEntry.className = 'ticket-log-entry';
-    const meta = document.createElement('span');
-    meta.textContent = `${entry.author} · ${formatLogTime(entry.createdAt)}`;
-    const text = document.createElement('div');
-    text.textContent = entry.text;
-    logEntry.append(meta, text);
-    ticketLog.appendChild(logEntry);
-  });
-
-  if (ticket.attachments.length) {
-    const evidence = document.createElement('div');
-    evidence.className = 'ticket-log-entry';
-    const heading = document.createElement('span');
-    heading.textContent = 'Image evidence';
-    const files = document.createElement('div');
-    files.textContent = ticket.attachments.join(', ');
-    evidence.append(heading, files);
-    ticketLog.appendChild(evidence);
-  }
-};
-
-document.getElementById('ticketFilter')?.addEventListener('change', renderTicketQueue);
-
-document.getElementById('ticketForm')?.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const category = document.getElementById('ticketCategory').value;
-  const subject = document.getElementById('ticketSubject').value.trim();
-  const details = document.getElementById('ticketDetails').value.trim();
-  const attachments = [...document.getElementById('ticketAttachments').files].map((file) => file.name);
-  const profile = getSteamProfile();
-  const createdAt = Date.now();
-
-  if (!subject || !details) return;
-
-  const tickets = getTickets();
-  const ticket = {
-    id: crypto.randomUUID(),
-    category,
-    subject,
-    createdAt,
-    attachments,
-    entries: [{ author: profile?.username || 'Staff', text: details, createdAt }],
-  };
-  tickets.push(ticket);
-  selectedTicketId = ticket.id;
-  saveTickets(tickets);
-  event.currentTarget.reset();
-  showToast('Ticket created.');
-});
-
-document.getElementById('ticketMessageForm')?.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const input = document.getElementById('ticketMessage');
-  const text = input.value.trim();
-  const profile = getSteamProfile();
-  if (!selectedTicketId || !text) return;
-
-  const tickets = getTickets();
-  const ticket = tickets.find((item) => item.id === selectedTicketId);
-  if (!ticket) return;
-
-  ticket.entries.push({ author: profile?.username || 'Staff', text, createdAt: Date.now() });
-  saveTickets(tickets);
-  input.value = '';
-});
-
-renderTicketQueue();
-renderTicketLog();
-renderWebsiteChatLog();

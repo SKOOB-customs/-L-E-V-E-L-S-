@@ -75,7 +75,6 @@
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
-        <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
@@ -393,96 +392,6 @@
                 <p>Manage staff roles and all server-level settings.</p>
               </article>
             </div>
-          </div>
-        </section>
-
-        <section class="tab-panel" id="dev-tools" data-tab="dev-tools" aria-label="Dev Tools">
-          <div class="section-header">
-            <p class="eyebrow">DEV TOOLS</p>
-            <h2>Ticket center</h2>
-          </div>
-
-          <section class="staff-access panel content-box" id="devToolsAccessNotice">
-            <div class="mini-heading">Staff verification required</div>
-            <p>Moderator access or higher is required to view tickets and logs.</p>
-          </section>
-
-          <div class="ticket-workspace" id="ticketWorkspace" hidden>
-            <section class="ticket-create panel content-box">
-              <div class="mini-heading">Create ticket</div>
-              <form id="ticketForm" class="submit-form">
-                <div class="field-row two-up">
-                  <label>
-                    Category
-                    <select id="ticketCategory" required>
-                      <option value="General">General ticket</option>
-                      <option value="Rulebreak">Rulebreak ticket</option>
-                      <option value="Staff report">Staff report</option>
-                    </select>
-                  </label>
-                  <label>
-                    Subject
-                    <input id="ticketSubject" type="text" maxlength="80" placeholder="Short summary" required />
-                  </label>
-                </div>
-                <label>
-                  Details
-                  <textarea id="ticketDetails" rows="4" maxlength="1000" placeholder="Include the player, time, and relevant details." required></textarea>
-                </label>
-                <label>
-                  Image evidence
-                  <input id="ticketAttachments" type="file" accept="image/*" multiple />
-                </label>
-                <div class="submit-actions">
-                  <button class="action-button" type="submit">Create ticket</button>
-                </div>
-              </form>
-            </section>
-
-            <section class="ticket-dashboard">
-              <div class="ticket-list panel content-box">
-                <div class="ticket-list-header">
-                  <div class="mini-heading">Ticket queue</div>
-                  <select id="ticketFilter" aria-label="Filter tickets">
-                    <option value="All">All tickets</option>
-                    <option value="General">General tickets</option>
-                    <option value="Rulebreak">Rulebreak tickets</option>
-                    <option value="Staff report">Staff reports</option>
-                  </select>
-                </div>
-                <div id="ticketQueue" class="ticket-queue"></div>
-              </div>
-
-              <div class="ticket-detail panel content-box">
-                <div class="mini-heading">Ticket log</div>
-                <div id="ticketLog" class="ticket-log">Select a ticket to view its conversation and image evidence.</div>
-                <form id="ticketMessageForm" class="ticket-message-form" hidden>
-                  <label>
-                    Add log entry
-                    <textarea id="ticketMessage" rows="3" maxlength="1000" placeholder="Add a staff response or case note."></textarea>
-                  </label>
-                  <button class="action-button small" type="submit">Add entry</button>
-                </form>
-              </div>
-            </section>
-
-            <section class="ticket-chat-log panel content-box">
-              <div class="mini-heading">Website chat log</div>
-              <div id="websiteChatLog" class="ticket-log">No website chat messages have been recorded on this device.</div>
-            </section>
-
-            <section class="panel content-box staff-management" data-staff-level="Admin">
-              <div class="mini-heading">Staff role assignments</div>
-              <p>Assign website and in-game roles by Steam ID and username.</p>
-              <form id="addStaffForm" class="staff-management-form">
-                <label>Steam ID (17-digit SteamID64)<input type="text" id="staffSteamIdInput" placeholder="e.g. 76561198012345678" required pattern="\d{17}" /></label>
-                <label>Username<input type="text" id="staffUsernameInput" placeholder="Steam username" maxlength="64" required /></label>
-                <label>Role<select id="staffRoleSelect"><option value="Admin">Admin</option><option value="Moderator">Moderator</option><option value="Owner">Owner</option><option value="Staff">Staff</option></select></label>
-                <button type="submit" class="action-button small">Save staff member</button>
-              </form>
-              <div class="mini-heading staff-roster-heading">Configured staff roster</div>
-              <div id="staffRosterList" class="info-list"></div>
-            </section>
           </div>
         </section>
 
