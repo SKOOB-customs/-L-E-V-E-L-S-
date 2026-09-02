@@ -688,6 +688,20 @@ h6,
   grid-template-columns: 1.15fr 0.85fr;
 }
 
+.map-mount {
+  display: grid;
+  min-height: 520px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.map-mount p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .mini-heading {
   margin-bottom: 14px;
   color: var(--text);
