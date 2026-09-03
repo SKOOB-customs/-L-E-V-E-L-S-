@@ -2,6 +2,10 @@ const toast = document.getElementById('toast');
 let toastTimer = null;
 
 const discordMemberStorageKey = 'levelsDiscordMemberCount';
+const skinPackCountStorageKey = 'levelsSkinPackCount';
+const serverIdStorageKey = 'levelsServerConfigId';
+const serverUptimeStorageKey = 'levelsServerUptime';
+const serverPlayersStorageKey = 'levelsServerPlayers';
 
 const getDiscordMemberCount = () => {
   const saved = Number.parseInt(localStorage.getItem(discordMemberStorageKey) || '0', 10);
@@ -15,6 +19,57 @@ const setDiscordMemberCount = (count) => {
   document.querySelectorAll('[data-discord-count]').forEach((element) => {
     element.textContent = safeCount.toLocaleString();
   });
+};
+
+const getSkinPackCount = () => {
+  const saved = Number.parseInt(localStorage.getItem(skinPackCountStorageKey) || '10', 10);
+  return Number.isFinite(saved) && saved >= 0 ? saved : 10;
+};
+
+const setSkinPackCount = (count) => {
+  const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 10;
+  localStorage.setItem(skinPackCountStorageKey, String(safeCount));
+
+  document.querySelectorAll('[data-skin-count]').forEach((element) => {
+    element.textContent = safeCount.toLocaleString();
+  });
+};
+
+const getServerConfigId = () => {
+  return localStorage.getItem(serverIdStorageKey) || 'levels-main';
+};
+
+const updateServerPlayers = (players, maxPlayers) => {
+  const display = `${Math.max(0, Math.floor(players))} / ${Math.max(0, Math.floor(maxPlayers))}`;
+  document.querySelectorAll('[data-server-players]').forEach((element) => {
+    element.textContent = display;
+  });
+  localStorage.setItem(serverPlayersStorageKey, display);
+};
+
+const setServerConfigId = (id) => {
+  if (id) {
+    localStorage.setItem(serverIdStorageKey, id);
+  } else {
+    localStorage.removeItem(serverIdStorageKey);
+  }
+};
+
+const updateActiveModsCount = (count) => {
+  const safeCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  document.querySelectorAll('[data-active-mods]').forEach((element) => {
+    element.textContent = safeCount.toLocaleString();
+  });
+};
+
+const updateServerUptime = (uptime) => {
+  const displayText = typeof uptime === 'number' ? `${uptime.toFixed(1)}%` : uptime || '--';
+  document.querySelectorAll('[data-server-uptime]').forEach((element) => {
+    element.textContent = displayText;
+  });
+  if (typeof uptime === 'number') {
+    localStorage.setItem(serverUptimeStorageKey, String(uptime));
+  }
 };
 
 const showToast = (message) => {
@@ -703,3 +758,88 @@ document.getElementById('moderationActionForm')?.addEventListener('submit', (eve
 renderTicketQueue();
 renderTicketLog();
 renderWebsiteChatLog();
+
+// Initialize storage values for skin packs and server uptime
+const initialSkinCount = getSkinPackCount();
+setSkinPackCount(initialSkinCount);
+
+const savedUptime = localStorage.getItem(serverUptimeStorageKey);
+if (savedUptime) {
+  updateServerUptime(Number.parseFloat(savedUptime));
+}
+
+// Server status monitoring system
+const pollServerStatus = async () => {
+  const serverId = getServerConfigId();
+  if (!serverId) {
+    updateServerUptime('--');
+    updateActiveModsCount(0);
+    return;
+  }
+
+  try {
+    // Poll your game server API endpoint for live status
+    // Replace this with your actual server status endpoint
+    // Expected response: { uptime: 99.9, active_mods: 18, players_online: 5 }
+    const response = await fetch(`/api/server-status?server_id=${encodeURIComponent(serverId)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (typeof data.uptime === 'number') {
+        updateServerUptime(data.uptime);
+      }
+      if (typeof data.active_mods === 'number') {
+        updateActiveModsCount(data.active_mods);
+      }
+      if (typeof data.players_online === 'number') {
+        updateServerPlayers(data.players_online, typeof data.max_players === 'number' ? data.max_players : 0);
+      }
+    }
+  } catch (error) {
+    console.debug('Server status poll failed:', error);
+  }
+};
+
+// Poll server status every 30 seconds if a server ID is configured
+let serverPollingInterval = null;
+
+const startServerPolling = () => {
+  if (serverPollingInterval) clearInterval(serverPollingInterval);
+  pollServerStatus(); // Poll immediately on start
+  serverPollingInterval = setInterval(pollServerStatus, 30000); // Then every 30 seconds
+};
+
+const stopServerPolling = () => {
+  if (serverPollingInterval) {
+    clearInterval(serverPollingInterval);
+    serverPollingInterval = null;
+  }
+};
+
+// Start polling if server ID already exists
+if (getServerConfigId()) {
+  startServerPolling();
+}
+
+// Expose server config functions for dev tools
+window.levelsServerConfig = {
+  setServerId: (id) => {
+    setServerConfigId(id);
+    if (id) {
+      showToast(`Server ID configured: ${id}`);
+      startServerPolling();
+    } else {
+      showToast('Server ID cleared.');
+      stopServerPolling();
+    }
+  },
+  getServerId: getServerConfigId,
+  setSkinPacks: (count) => {
+    setSkinPackCount(count);
+    showToast(`Skin Packs updated to: ${count}`);
+  },
+  getSkinPacks: getSkinPackCount,
+};
