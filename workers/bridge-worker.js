@@ -62,7 +62,15 @@ export default {
       return json({ error: 'Unauthorized' }, 401);
     }
     if (!env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD) {
-      return json({ error: 'RCON secrets are not configured' }, 503);
+      // TEMPORARY: reports which secret names are missing without exposing values, remove after debugging
+      return json({
+        error: 'RCON secrets are not configured',
+        missing: {
+          RCON_HOST: !env.RCON_HOST,
+          RCON_PORT: !env.RCON_PORT,
+          RCON_PASSWORD: !env.RCON_PASSWORD,
+        },
+      }, 503);
     }
 
     let socket;
