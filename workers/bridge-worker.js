@@ -57,7 +57,7 @@ const parsePlayers = (response) => {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname !== '/status') return json({ error: 'Not found' }, 404);
+    if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
     if (env.STATUS_API_TOKEN && request.headers.get('Authorization') !== `Bearer ${env.STATUS_API_TOKEN}`) {
       return json({ error: 'Unauthorized' }, 401);
     }
