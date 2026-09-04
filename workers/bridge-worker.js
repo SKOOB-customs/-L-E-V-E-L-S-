@@ -13,7 +13,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 
 const readUntil = async (reader, done, timeoutMs = 4500) => {
   let output = new Uint8Array();
-  let timer;
+  let timer
   try {
     while (true) {
       const result = await Promise.race([

@@ -1,4 +1,3 @@
-const stateCookieName = 'levels_discord_oauth_state';
 const roleOrder = ['Owner', 'Admin', 'Moderator'];
 
 const getCookie = (request, name) => {

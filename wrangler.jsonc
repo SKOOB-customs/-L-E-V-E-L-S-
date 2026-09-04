@@ -1,5 +1,5 @@
 {
-  "name": "bridge-worker",
+  "name": "l-e-v-e-l-s",
   "compatibility_date": "2026-08-31",
   "main": "workers/bridge-worker.js",
   // Scoped so the Worker only intercepts status requests, not the whole site (Pages must still serve "/")
