@@ -13,7 +13,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 
 const readUntil = async (reader, done, timeoutMs = 4500) => {
   let output = new Uint8Array();
-  let timer
+  let timer;
   try {
     while (true) {
       const result = await Promise.race([
@@ -62,7 +62,6 @@ export default {
       return json({ error: 'Unauthorized' }, 401);
     }
     if (!env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD) {
-      // TEMPORARY: reports which secret names are missing without exposing values, remove after debugging
       return json({
         error: 'RCON secrets are not configured',
         missing: {
@@ -70,6 +69,7 @@ export default {
           RCON_PORT: !env.RCON_PORT,
           RCON_PASSWORD: !env.RCON_PASSWORD,
         },
+        debug: { env_keys: Object.keys(env) },
       }, 503);
     }
 
