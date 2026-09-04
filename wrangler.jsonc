@@ -6,5 +6,6 @@
   "routes": [
     { "pattern": "l-e-v-e-l-s.app/server-status", "zone_name": "l-e-v-e-l-s.app" },
     { "pattern": "l-e-v-e-l-s.app/status", "zone_name": "l-e-v-e-l-s.app" }
-  ]
+  ],
+  "secrets": ["RCON_HOST", "RCON_PORT", "RCON_PASSWORD", "STATUS_API_TOKEN"]
 }
