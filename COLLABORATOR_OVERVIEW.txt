@@ -1,0 +1,130 @@
+LeveLs — Collaborator Overview
+================================
+
+Purpose
+-------
+This file explains the repository layout, how the main SPA is loaded, the API flows (Steam/Discord auth), server-status handling, and the Cloudflare worker. It's a concise guide for a new collaborator.
+
+Hosting & Entry
+---------------
+- The site is a lightweight single-page app served from `index.html`.
+- Static assets are in `assets/`; styles are in `styles.css`; client logic in `script.js`.
+- Run locally: `python3 -m http.server 8000` from the project root and open `http://localhost:8000`.
+
+Client (SPA) behavior
+---------------------
+- Navigation is hash-based tabs. `script.js` reads `window.location.hash` and calls `activateTab()` to show sections.
+- Page content (all tabs) lives inside `index.html` — there are no separate server-rendered pages.
+- `script.js` handles:
+  - Tab activation and hash navigation
+  - Gallery slideshow
+  - Local chat (stored to `localStorage` only)
+  - Staff/Steam/Discord profile display and local storage
+  - Polling `/api/server-status` every 30s for live server info
+  - Consuming redirect parameters after Steam/Discord login via `consumeSteamRedirect()`
+
+Client → Server API calls
+-------------------------
+- `/api/server-status` — polled by the client to show uptime, players, and mod counts. Implemented as a Pages Function (`functions/api/server-status.js`).
+- `/api/permissions?steam_id=...` — returns staff role & permissions; used by the client to enable staff UI. Implemented in `functions/api/permissions.js`.
+- `/api/steam-login` — redirect entrypoint to Steam OpenID (`functions/api/steam-login.js`).
+- `/api/steam-callback` — OpenID verification and redirect back to `/#profile?...` (`functions/api/steam-callback.js`).
+- `/api/discord-login` — starts Discord OAuth and sets a state cookie (`functions/api/discord-login.js`).
+- `/api/discord-callback` — exchanges code for token, checks guild membership, maps role, then redirects to `/#profile?...` (`functions/api/discord-callback.js`).
+
+Redirect / Auth flows (high level)
+---------------------------------
+- Steam flow:
+  1. User clicks `/api/steam-login` → server 302 to Steam OpenID.
+  2. Steam redirects to `/api/steam-callback` with OpenID params.
+  3. `steam-callback` verifies with Steam, optionally fetches `personaname` (if `STEAM_API_KEY` provided), determines `staff_role` from `STAFF_STEAM_IDS` env, then 302s to `https://<origin>/#profile?steam_id=...&steam_name=...&staff_role=...`.
+  4. Client `consumeSteamRedirect()` parses hash params, stores profile to `localStorage`, and updates UI.
+
+- Discord flow:
+  1. User clicks `/api/discord-login` → sets a state cookie and 302s to Discord OAuth.
+  2. Discord redirects to `/api/discord-callback` with `code` and `state`.
+  3. `discord-callback` exchanges code for a token, fetches `/users/@me` and guild membership, maps configured role IDs to a staff role, then 302s to `https://<origin>/#profile?discord_id=...&discord_name=...&discord_role=...`.
+  4. Client consumes hash params and updates UI similar to Steam.
+
+Server-side code & routing
+-------------------------
+- Dynamic endpoints are in `functions/api/`. These are Cloudflare Pages Functions.
+- Files:
+  - `functions/api/steam-login.js`
+  - `functions/api/steam-callback.js`
+  - `functions/api/discord-login.js`
+  - `functions/api/discord-callback.js`
+  - `functions/api/permissions.js`
+  - `functions/api/server-status.js`
+
+RCON Bridge Worker
+------------------
+- `workers/bridge-worker.js` is a Cloudflare Worker that connects to game server RCON (raw socket) to query players. It expects `RCON_HOST`, `RCON_PORT`, and `RCON_PASSWORD` env vars and an Authorization header with `STATUS_API_TOKEN` for protection.
+- `wrangler.jsonc` lists routes that map the worker to hostnames like `l-e-v-e-l-s.app/server-status` and `/status`.
+- Note: the static client polls `/api/server-status` (Pages Function). The Worker provides an alternative direct-RCON `/server-status` endpoint — both are present and used depending on deployment and secret setup.
+
+Environment variables & secrets
+-------------------------------
+- `STEAM_API_KEY` (optional): used by `steam-callback` to fetch `personaname`.
+- `STAFF_STEAM_IDS`: mapping of Steam IDs to roles (JSON or comma-separated `ID:Role` pairs). Used by `steam-callback` and `permissions.js`.
+- Discord OAuth:
+  - `DISCORD_CLIENT_ID`
+  - `DISCORD_CLIENT_SECRET`
+  - `DISCORD_GUILD_ID`
+  - `DISCORD_OWNER_ROLE_ID`, `DISCORD_ADMIN_ROLE_ID`, `DISCORD_MODERATOR_ROLE_ID` (role IDs for mapping)
+- Server status:
+  - `SERVER_STATUS_URL` (external game server status endpoint used by `functions/api/server-status.js`)
+  - `STATUS_API_TOKEN` (optional token for authenticating status requests)
+- RCON Worker secrets (if using `workers/bridge-worker.js`): `RCON_HOST`, `RCON_PORT`, `RCON_PASSWORD`, `STATUS_API_TOKEN`.
+
+Local data & storage keys
+------------------------
+- `localStorage` keys used by `script.js`:
+  - `levelsDiscordMemberCount`
+  - `levelsSkinPackCount`
+  - `levelsServerConfigId`
+  - `levelsServerUptime`
+  - `levelsServerPlayers`
+  - `levelsSteamProfile` (JSON)
+  - `levelsDiscordProfile` (JSON)
+  - `levelsStaffList` (JSON)
+  - `levelsChatMessages` (JSON)
+  - `levelsStaffTickets` (JSON)
+
+Important file pointers
+-----------------------
+- UI entry and markup: `index.html`
+- Client logic: `script.js`
+- Styling: `styles.css`
+- Pages Functions: `functions/api/*.js`
+- Worker (RCON): `workers/bridge-worker.js`
+- Worker routing: `wrangler.jsonc`
+
+Developer checklist / first tasks
+--------------------------------
+1. Verify environment secrets are set on Cloudflare Pages/Workers before testing auth or status endpoints.
+2. Test Steam login flow end-to-end (requires `STEAM_API_KEY` for nicer display names but not required for auth).
+3. Test Discord login with proper `DISCORD_*` env vars and role IDs mapped.
+4. If you want live RCON status, configure `RCON_*` environment variables and `STATUS_API_TOKEN`, and ensure `wrangler.jsonc` routes are applied for the Worker.
+5. Use browser devtools and `localStorage` to inspect saved profiles and the staff roster.
+
+Quick examples
+--------------
+- Example Steam callback redirect (browser ends up at):
+  https://l-e-v-e-l-s.app/#profile?steam_id=7656119XXXXXXXXXX&steam_name=PlayerName&staff_role=Admin
+
+- Example Discord callback redirect:
+  https://l-e-v-e-l-s.app/#profile?discord_id=123456789012345678&discord_name=CollabName&discord_role=Moderator
+
+Where to change things
+----------------------
+- UI content & tabs: edit `index.html`.
+- Client behavior and redirects: edit `script.js`.
+- Server-side auth logic and API responses: edit `functions/api/*.js`.
+- RCON logic: edit `workers/bridge-worker.js` (and `wrangler.jsonc` for routing).
+
+Questions & next steps
+----------------------
+- Want me to produce a call-graph of `/api/*` usage, or example curl requests for each endpoint? Reply with which you prefer and I'll generate them.
+
+-- End
