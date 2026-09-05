@@ -59,6 +59,10 @@ export async function onRequestGet(context) {
 
     clearTimeout(timeout);
 
+    // Read upstream body as text so we can provide debug info if it's not JSON
+    const upstreamContentType = response.headers.get('content-type') || '';
+    const upstreamBody = await response.text();
+
     if (!response.ok) {
       return new Response(
         JSON.stringify({
@@ -66,12 +70,92 @@ export async function onRequestGet(context) {
           active_mods: 0,
           players_online: 0,
           error: `Server responded with ${response.status}`,
+          upstream_status: response.status,
+          upstream_content_type: upstreamContentType,
+          upstream_preview: upstreamBody ? upstreamBody.slice(0, 300) : null,
         }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    const serverData = await response.json();
+    let serverData;
+    try {
+      serverData = JSON.parse(upstreamBody || '{}');
+    } catch (err) {
+      // Attempt fallback to the RCON Worker endpoint if configured
+      const origin = url.origin;
+      if (env.STATUS_API_TOKEN) {
+        try {
+          const workerRes = await fetch(`${origin}/server-status`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${env.STATUS_API_TOKEN}`, Accept: 'application/json' },
+          });
+          const workerText = await workerRes.text();
+          try {
+            const workerData = JSON.parse(workerText || '{}');
+            return new Response(
+              JSON.stringify({
+                uptime: typeof workerData.uptime === 'number' ? workerData.uptime : null,
+                active_mods: typeof workerData.active_mods === 'number' ? workerData.active_mods : 0,
+                players_online: typeof workerData.players_online === 'number' ? workerData.players_online : 0,
+                max_players: typeof workerData.max_players === 'number' ? workerData.max_players : 0,
+                source: 'rcon-worker',
+              }),
+              {
+                status: 200,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Cache-Control': 'no-store, max-age=0',
+                  'Access-Control-Allow-Origin': '*',
+                },
+              }
+            );
+          } catch (e) {
+            return new Response(
+              JSON.stringify({
+                uptime: null,
+                active_mods: 0,
+                players_online: 0,
+                error: 'Upstream did not return valid JSON',
+                upstream_status: response.status,
+                upstream_content_type: upstreamContentType,
+                upstream_preview: upstreamBody ? upstreamBody.slice(0, 300) : null,
+                worker_status: workerRes.status,
+                worker_preview: workerText ? workerText.slice(0, 300) : null,
+              }),
+              { status: 502, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+        } catch (workerErr) {
+          return new Response(
+            JSON.stringify({
+              uptime: null,
+              active_mods: 0,
+              players_online: 0,
+              error: 'Upstream did not return valid JSON',
+              upstream_status: response.status,
+              upstream_content_type: upstreamContentType,
+              upstream_preview: upstreamBody ? upstreamBody.slice(0, 300) : null,
+              worker_error: String(workerErr).slice(0, 300),
+            }),
+            { status: 502, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          uptime: null,
+          active_mods: 0,
+          players_online: 0,
+          error: 'Upstream did not return valid JSON',
+          upstream_status: response.status,
+          upstream_content_type: upstreamContentType,
+          upstream_preview: upstreamBody ? upstreamBody.slice(0, 300) : null,
+        }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Return normalized response
     return new Response(
