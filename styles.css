@@ -589,6 +589,107 @@ h6,
   font-size: clamp(1.5rem, 2vw, 2rem);
 }
 
+.dino-card {
+  padding: 20px 18px;
+  display: grid;
+  gap: 18px;
+}
+
+.dino-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+}
+
+.prime-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(216, 191, 125, 0.15);
+  color: var(--chrome-1);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.dino-class {
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dino-name {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.dino-stats {
+  display: grid;
+  gap: 12px;
+}
+
+.stat-bar-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 46px;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.stat-bar-row strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.stat-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  width: 0%;
+  transition: width 0.4s ease;
+}
+
+.stat-growth { background: var(--chrome-2); }
+.stat-health { background: var(--accent); }
+.stat-stamina { background: #9fd6ff; }
+.stat-hunger { background: #f0a860; }
+.stat-thirst { background: #6cc6f0; }
+
+.dino-position {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dino-position div {
+  padding: 12px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dino-position span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  margin-bottom: 4px;
+}
+
+.dino-position strong {
+  font-size: 1rem;
+}
+
 .section-header {
   margin-bottom: 4px;
 }

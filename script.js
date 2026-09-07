@@ -843,3 +843,84 @@ window.levelsServerConfig = {
   },
   getSkinPacks: getSkinPackCount,
 };
+
+// Live Dino monitoring
+const dinoSignedOut = document.querySelector('[data-dino-signed-out]');
+const dinoEmpty = document.querySelector('[data-dino-empty]');
+const dinoErrorBox = document.querySelector('[data-dino-error]');
+const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
+const dinoLiveCard = document.querySelector('[data-dino-live]');
+
+const setDinoView = (view, message) => {
+  if (dinoSignedOut) dinoSignedOut.hidden = view !== 'signed-out';
+  if (dinoEmpty) dinoEmpty.hidden = view !== 'empty';
+  if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
+  if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
+  if (view === 'error' && dinoErrorMessage && message) {
+    dinoErrorMessage.textContent = message;
+  }
+};
+
+const renderLiveDino = (dino) => {
+  const classEl = document.querySelector('[data-dino-class]');
+  const nameEl = document.querySelector('[data-dino-name]');
+  if (classEl) classEl.textContent = dino.class || 'Unknown';
+  if (nameEl) nameEl.textContent = dino.name || 'Unnamed';
+
+  const primeBadge = document.querySelector('[data-dino-prime]');
+  if (primeBadge) primeBadge.hidden = !dino.primeElder;
+
+  ['growth', 'health', 'stamina', 'hunger', 'thirst'].forEach((stat) => {
+    const percent = Math.round((dino[stat] || 0) * 100);
+    const clamped = Math.min(100, Math.max(0, percent));
+    const bar = document.querySelector(`[data-dino-bar="${stat}"]`);
+    const value = document.querySelector(`[data-dino-value="${stat}"]`);
+    if (bar) bar.style.width = `${clamped}%`;
+    if (value) value.textContent = `${clamped}%`;
+  });
+
+  const location = dino.location || {};
+  ['x', 'y', 'z'].forEach((axis) => {
+    const el = document.querySelector(`[data-dino-pos="${axis}"]`);
+    if (el) el.textContent = Math.round(location[axis] || 0).toLocaleString();
+  });
+
+  setDinoView('live');
+};
+
+const pollLiveDino = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    setDinoView('signed-out');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/live-dino?steam_id=${encodeURIComponent(profile.steamId)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await response.json();
+
+    if (data.found) {
+      renderLiveDino(data);
+    } else if (response.status === 404) {
+      setDinoView('empty');
+    } else {
+      setDinoView('error', data.error || "Couldn't reach the server right now.");
+    }
+  } catch (error) {
+    console.debug('Live dino poll failed:', error);
+    setDinoView('error', "Couldn't reach the server right now.");
+  }
+};
+
+let liveDinoPollingInterval = null;
+
+const startLiveDinoPolling = () => {
+  if (liveDinoPollingInterval) clearInterval(liveDinoPollingInterval);
+  pollLiveDino();
+  liveDinoPollingInterval = setInterval(pollLiveDino, 15000);
+};
+
+startLiveDinoPolling();

@@ -78,6 +78,7 @@
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
+        <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
 
@@ -513,6 +514,88 @@
                 <strong>03</strong>
                 <span>No Dinos stored yet — check back after the server launches.</span>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="live-dino" data-tab="live-dino">
+          <div class="section-header">
+            <p class="eyebrow">LIVE DINO</p>
+            <h2>Real-time dashboard for your in-game dinosaur</h2>
+          </div>
+
+          <div class="panel content-box" data-dino-signed-out>
+            <div class="mini-heading">Sign in required</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span>Connect with Steam to see your live dinosaur's stats.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-dino-empty hidden>
+            <div class="mini-heading">No dinosaur found</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span>You don't have a dinosaur spawned in-game right now.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-dino-error hidden>
+            <div class="mini-heading">Live dino status unavailable</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span data-dino-error-message>Couldn't reach the server right now.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dino-card panel" data-dino-live hidden>
+            <div class="dino-card-header">
+              <span class="status-dot"></span>
+              <span>LIVE DINOSAUR</span>
+              <span class="prime-badge" data-dino-prime hidden>PRIME</span>
+            </div>
+
+            <div class="dino-class" data-dino-class>—</div>
+            <div class="dino-name" data-dino-name>—</div>
+
+            <div class="dino-stats">
+              <div class="stat-bar-row">
+                <span>Growth</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-growth" data-dino-bar="growth"></div></div>
+                <strong data-dino-value="growth">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Health</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-health" data-dino-bar="health"></div></div>
+                <strong data-dino-value="health">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Stamina</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-stamina" data-dino-bar="stamina"></div></div>
+                <strong data-dino-value="stamina">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Hunger</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-hunger" data-dino-bar="hunger"></div></div>
+                <strong data-dino-value="hunger">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Thirst</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-thirst" data-dino-bar="thirst"></div></div>
+                <strong data-dino-value="thirst">0%</strong>
+              </div>
+            </div>
+
+            <div class="dino-position">
+              <div><span>Pos X</span><strong data-dino-pos="x">0</strong></div>
+              <div><span>Pos Y</span><strong data-dino-pos="y">0</strong></div>
+              <div><span>Pos Z</span><strong data-dino-pos="z">0</strong></div>
             </div>
           </div>
         </section>
