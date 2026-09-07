@@ -8,6 +8,7 @@ const decoder = new TextDecoder('latin1');
 const RCON_AUTH = 0x01;
 const RCON_EXECCOMMAND = 0x02;
 const PLAYERLIST_OPCODE = 0x40;
+const PLAYER_DATA_OPCODE = 0x77;
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -65,6 +66,54 @@ const parsePlayers = (response) => {
   return (lines[start] || '').split(',').map((value) => value.trim()).filter(Boolean).length;
 };
 
+// GetPlayerData emits one line per spawned player: comma-separated "Key: value" pairs,
+// e.g. "Name: Kasia, PlayerID: 765..., Location: X=1 Y=2 Z=3, Class: Stegosaurus,
+// Growth: 0.85, Health: 1.0, Stamina: 1.0, Hunger: 0.19, Thirst: 0.84, PrimeElder: false, ..."
+// bracketed mutation-slot fields also appear but aren't needed here.
+const parseLocation = (value) => {
+  const location = { x: 0, y: 0, z: 0 };
+  (value || '').split(' ').forEach((part) => {
+    const [axis, raw] = part.split('=');
+    const num = Number.parseFloat(raw);
+    if (axis === 'X') location.x = num;
+    if (axis === 'Y') location.y = num;
+    if (axis === 'Z') location.z = num;
+  });
+  return location;
+};
+
+const parsePlayerDataLine = (line) => {
+  const fields = {};
+  line.split(',').forEach((chunk) => {
+    const separator = chunk.indexOf(': ');
+    if (separator < 0) return;
+    fields[chunk.slice(0, separator).trim()] = chunk.slice(separator + 2).trim();
+  });
+  if (!fields.PlayerID) return null;
+  return {
+    name: fields.Name || '',
+    playerId: fields.PlayerID,
+    class: fields.Class || '',
+    location: parseLocation(fields.Location),
+    growth: Number.parseFloat(fields.Growth) || 0,
+    health: Number.parseFloat(fields.Health) || 0,
+    stamina: Number.parseFloat(fields.Stamina) || 0,
+    hunger: Number.parseFloat(fields.Hunger) || 0,
+    thirst: Number.parseFloat(fields.Thirst) || 0,
+    primeElder: (fields.PrimeElder || '').toLowerCase() === 'true',
+  };
+};
+
+const findPlayerDino = (response, steamId) => {
+  const lines = response.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (!line.includes('PlayerID')) continue;
+    const dino = parsePlayerDataLine(line);
+    if (dino && dino.playerId === steamId) return dino;
+  }
+  return null;
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -101,6 +150,22 @@ export default {
         await writer.close();
         reader.releaseLock();
         return json({ error: 'RCON authentication failed: ' + authResponse }, 502);
+      }
+
+      const steamId = url.searchParams.get('steam_id');
+
+      if (steamId) {
+        stage = 'player data command';
+        await writer.write(commandPacket(PLAYER_DATA_OPCODE));
+
+        stage = 'read player data response';
+        const response = await readUntil(reader, (value) => value.includes('PlayerDataEnd'));
+        await writer.close();
+        reader.releaseLock();
+
+        const dino = findPlayerDino(response, steamId);
+        if (!dino) return json({ found: false }, 404);
+        return json({ found: true, ...dino });
       }
 
       stage = 'player command';
