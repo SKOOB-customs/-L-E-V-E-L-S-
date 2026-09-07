@@ -74,12 +74,16 @@ export default {
     }
 
     let socket;
+    let stage = 'connect';
     try {
       socket = connect({ hostname: env.RCON_HOST, port: Number(env.RCON_PORT) });
       const writer = socket.writable.getWriter();
       const reader = socket.readable.getReader();
 
+      stage = 'send authentication';
       await writer.write(rconPacket(0, 3, env.RCON_PASSWORD));
+
+      stage = 'read authentication response';
       const authHeader = await readBytes(reader, 4);
       const authSize = new DataView(authHeader.buffer).getUint32(0, true);
       const authBody = await readBytes(reader, authSize);
@@ -90,7 +94,10 @@ export default {
         return json({ error: 'RCON authentication failed: ' + authResponse }, 502);
       }
 
+      stage = 'player command';
       await writer.write(rconPacket(1, 2, 'PlayerList'));
+
+      stage = 'read player response';
       const respHeader = await readBytes(reader, 4);
       const respSize = new DataView(respHeader.buffer).getUint32(0, true);
       const respBody = await readBytes(reader, respSize);
@@ -102,7 +109,7 @@ export default {
       return json({ uptime: null, active_mods: 0, players_online: players, max_players: 0 });
     } catch (error) {
       try { socket?.close(); } catch { }
-      return json({ error: error.message || 'RCON request failed' }, 502);
+      return json({ error: error.message || 'RCON request failed', stage }, 502);
     }
   },
 };
