@@ -850,15 +850,38 @@ const dinoEmpty = document.querySelector('[data-dino-empty]');
 const dinoErrorBox = document.querySelector('[data-dino-error]');
 const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
+const mapMarker = document.querySelector('[data-map-marker]');
 
 const setDinoView = (view, message) => {
   if (dinoSignedOut) dinoSignedOut.hidden = view !== 'signed-out';
   if (dinoEmpty) dinoEmpty.hidden = view !== 'empty';
   if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
   if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
+  if (mapMarker) mapMarker.hidden = view !== 'live';
   if (view === 'error' && dinoErrorMessage && message) {
     dinoErrorMessage.textContent = message;
   }
+};
+
+// Gateway map calibration (Vulnona-sourced, matches workers/bridge-worker.js's world bounds)
+const MAP_MIN_X = -607;
+const MAP_MAX_X = 509;
+const MAP_MIN_Y = -505;
+const MAP_MAX_Y = 607;
+
+const worldToMapFraction = (worldX, worldY) => {
+  const sx = worldX / 1000;
+  const sy = worldY / 1000;
+  const fx = (sy - MAP_MIN_Y) / (MAP_MAX_Y - MAP_MIN_Y);
+  const fy = (sx - MAP_MIN_X) / (MAP_MAX_X - MAP_MIN_X);
+  return { fx, fy };
+};
+
+const updateMapMarker = (location) => {
+  if (!mapMarker || !location) return;
+  const { fx, fy } = worldToMapFraction(location.x || 0, location.y || 0);
+  mapMarker.style.left = `${Math.min(100, Math.max(0, fx * 100))}%`;
+  mapMarker.style.top = `${Math.min(100, Math.max(0, fy * 100))}%`;
 };
 
 const renderLiveDino = (dino) => {
@@ -884,6 +907,7 @@ const renderLiveDino = (dino) => {
     const el = document.querySelector(`[data-dino-pos="${axis}"]`);
     if (el) el.textContent = Math.round(location[axis] || 0).toLocaleString();
   });
+  updateMapMarker(location);
 
   setDinoView('live');
 };

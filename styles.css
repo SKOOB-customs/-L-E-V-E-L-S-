@@ -808,17 +808,29 @@ h6,
 }
 
 .map-mount {
-  display: grid;
-  min-height: 520px;
-  place-items: center;
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+  line-height: 0;
 }
 
-.map-mount p {
-  margin: 0;
-  color: var(--muted);
+.map-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.map-marker {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 4px rgba(209, 61, 77, 0.35), 0 0 14px rgba(209, 61, 77, 0.8);
 }
 
 .ticket-workspace,
