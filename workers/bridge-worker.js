@@ -1,7 +1,7 @@
 import { connect } from 'cloudflare:sockets';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('latin1');
+const decoder = new TextDecoder('utf-8');
 
 // Evrima's RCON is a custom protocol, not Source RCON: 0x01 + password + \0 for auth,
 // 0x02 + opcode byte + payload + \0 for commands. No length-prefixed framing.
