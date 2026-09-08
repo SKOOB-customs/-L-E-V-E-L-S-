@@ -2,6 +2,16 @@
   "name": "l-e-v-e-l-s",
   "compatibility_date": "2026-08-31",
   "main": "workers/bridge-worker.js",
+  // Keeps the *.workers.dev URL enabled across redeploys — the Pages Function
+  // at functions/api/live-dino.js calls it directly (same-zone self-fetches to
+  // the apex domain get intercepted by the SPA instead of this Worker).
+  "workers_dev": true,
+  // Non-secret config so it survives redeploys (plain vars set only via the
+  // dashboard get wiped on every Workers Builds deploy; RCON_PORT/PASSWORD
+  // stay as dashboard/CLI secrets since those are meant to be sensitive).
+  "vars": {
+    "RCON_HOST": "144.126.153.233"
+  },
   // Scoped so the Worker only intercepts status requests, not the whole site (Pages must still serve "/")
   "routes": [
     { "pattern": "l-e-v-e-l-s.app/server-status", "zone_name": "l-e-v-e-l-s.app" },
