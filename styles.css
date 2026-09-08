@@ -674,6 +674,12 @@ h6,
 .stat-hunger { background: #f0a860; }
 .stat-thirst { background: #6cc6f0; }
 
+.dino-park-note {
+  margin: -8px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .dino-position {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -497,25 +497,36 @@
         <section class="tab-panel" id="inventory" data-tab="inventory">
           <div class="section-header">
             <p class="eyebrow">INVENTORY</p>
-            <h2>Store and redeem your in-game Dinos</h2>
+            <h2>Your parked dino snapshots</h2>
           </div>
 
           <div class="panel content-box">
-            <div class="mini-heading">How it will work</div>
+            <div class="mini-heading">How this works</div>
             <div class="info-list">
               <div>
                 <strong>01</strong>
-                <span>Once the server is live, Dinos you capture in-game will be tracked here.</span>
+                <span>"Park Dino" on the Live Dino tab saves a snapshot of your dino's stats here — species, growth, health, stamina, hunger, and thirst.</span>
               </div>
               <div>
                 <strong>02</strong>
-                <span>Stored Dinos can be redeemed back in-game whenever you want.</span>
+                <span>This is a reference log only — Evrima's RCON has no way to actually despawn or respawn a dino with saved stats, so parking here doesn't change anything in-game.</span>
               </div>
               <div>
                 <strong>03</strong>
-                <span>No Dinos stored yet — check back after the server launches.</span>
+                <span>"Unpark" just removes the entry once you're done referencing it.</span>
               </div>
             </div>
+          </div>
+
+          <div class="panel content-box">
+            <div class="mini-heading">Parked dinos</div>
+            <div id="inventoryEmpty" class="info-list">
+              <div>
+                <strong>—</strong>
+                <span>No dinos parked yet. Park one from the Live Dino tab while your dino is spawned in-game.</span>
+              </div>
+            </div>
+            <div id="inventoryList" class="mod-list"></div>
           </div>
         </section>
 
@@ -598,6 +609,11 @@
               <div><span>Pos Y</span><strong data-dino-pos="y">0</strong></div>
               <div><span>Pos Z</span><strong data-dino-pos="z">0</strong></div>
             </div>
+
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-park-dino>Park Dino</button>
+            </div>
+            <p class="dino-park-note">Saves a snapshot of these stats to your Inventory tab for reference. This doesn't affect your dino in-game — you still park/leave the server the normal way.</p>
           </div>
         </section>
 

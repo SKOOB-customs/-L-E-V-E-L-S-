@@ -872,12 +872,15 @@ const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
 const mapMarker = document.querySelector('[data-map-marker]');
 
+let currentLiveDino = null;
+
 const setDinoView = (view, message) => {
   if (dinoSignedOut) dinoSignedOut.hidden = view !== 'signed-out';
   if (dinoEmpty) dinoEmpty.hidden = view !== 'empty';
   if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
   if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
   if (mapMarker) mapMarker.hidden = view !== 'live';
+  if (view !== 'live') currentLiveDino = null;
   if (view === 'error' && dinoErrorMessage && message) {
     dinoErrorMessage.textContent = message;
   }
@@ -928,6 +931,7 @@ const renderLiveDino = (dino) => {
     if (el) el.textContent = Math.round(location[axis] || 0).toLocaleString();
   });
   updateMapMarker(location);
+  currentLiveDino = dino;
 
   setDinoView('live');
 };
@@ -968,3 +972,83 @@ const startLiveDinoPolling = () => {
 };
 
 startLiveDinoPolling();
+
+// Parked dino snapshots (reference log only — see the Inventory tab note for why
+// this can't actually despawn/respawn anything: Evrima's RCON has no such commands)
+const parkedDinosStorageKey = 'levelsParkedDinos';
+
+const getParkedDinos = () => {
+  try {
+    const saved = localStorage.getItem(parkedDinosStorageKey);
+    const list = saved ? JSON.parse(saved) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveParkedDinos = (list) => {
+  localStorage.setItem(parkedDinosStorageKey, JSON.stringify(list));
+  renderInventory();
+};
+
+const renderInventory = () => {
+  const listEl = document.getElementById('inventoryList');
+  const emptyEl = document.getElementById('inventoryEmpty');
+  if (!listEl || !emptyEl) return;
+
+  const profile = getSteamProfile();
+  const parked = getParkedDinos().filter((entry) => !profile || entry.steamId === profile.steamId);
+
+  emptyEl.hidden = parked.length > 0;
+  listEl.innerHTML = '';
+
+  parked
+    .slice()
+    .sort((a, b) => b.parkedAt - a.parkedAt)
+    .forEach((entry) => {
+      const article = document.createElement('article');
+      const parkedDate = new Date(entry.parkedAt).toLocaleString();
+      article.innerHTML = `
+        <h3>${entry.class || 'Unknown'}${entry.name ? ` — ${entry.name}` : ''}</h3>
+        <p>Growth ${Math.round((entry.growth || 0) * 100)}% · Health ${Math.round((entry.health || 0) * 100)}% · Stamina ${Math.round((entry.stamina || 0) * 100)}% · Hunger ${Math.round((entry.hunger || 0) * 100)}% · Thirst ${Math.round((entry.thirst || 0) * 100)}%</p>
+        <p>Parked ${parkedDate}</p>
+      `;
+      const unparkBtn = document.createElement('button');
+      unparkBtn.type = 'button';
+      unparkBtn.className = 'action-button small';
+      unparkBtn.textContent = 'Unpark';
+      unparkBtn.addEventListener('click', () => {
+        saveParkedDinos(getParkedDinos().filter((item) => item.id !== entry.id));
+        showToast('Removed from Inventory.');
+      });
+      article.appendChild(unparkBtn);
+      listEl.appendChild(article);
+    });
+};
+
+document.querySelector('[data-park-dino]')?.addEventListener('click', () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId || !currentLiveDino) {
+    showToast('No live dino to park right now.');
+    return;
+  }
+
+  const parked = getParkedDinos();
+  parked.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    steamId: profile.steamId,
+    name: currentLiveDino.name || '',
+    class: currentLiveDino.class || '',
+    growth: currentLiveDino.growth || 0,
+    health: currentLiveDino.health || 0,
+    stamina: currentLiveDino.stamina || 0,
+    hunger: currentLiveDino.hunger || 0,
+    thirst: currentLiveDino.thirst || 0,
+    parkedAt: Date.now(),
+  });
+  saveParkedDinos(parked);
+  showToast('Dino snapshot parked to your Inventory.');
+});
+
+renderInventory();
