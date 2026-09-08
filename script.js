@@ -111,6 +111,13 @@ if (tabButtons.length) {
   activateTab(hasHashTab ? hashTab : 'gallery');
 }
 
+document.getElementById('headerSteamBtn')?.addEventListener('click', (event) => {
+  if (!getSteamProfile()) return; // not logged in yet, let the link go to /api/steam-login
+  event.preventDefault();
+  activateTab('profile');
+  history.replaceState(null, '', `${window.location.pathname}#profile`);
+});
+
 document.querySelector('.profile-access')?.addEventListener('click', () => {
   activateTab('profile');
   history.replaceState(null, '', `${window.location.pathname}#profile`);
@@ -313,6 +320,19 @@ const displaySteamStatus = async () => {
   const statusMessage = document.getElementById('statusMessage');
   const staffRoleBadge = document.getElementById('staffRoleBadge');
   const staffPermsList = document.getElementById('staffPermsList');
+  const headerSteamBtn = document.getElementById('headerSteamBtn');
+  const connectSteamBtn = document.getElementById('connectSteamBtn');
+
+  if (headerSteamBtn) {
+    if (profile) {
+      headerSteamBtn.textContent = profile.username;
+      headerSteamBtn.href = '#profile';
+    } else {
+      headerSteamBtn.textContent = 'Steam';
+      headerSteamBtn.href = '/api/steam-login';
+    }
+  }
+  if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
 
   if (!statusDiv || !statusMessage) return;
 
