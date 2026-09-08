@@ -505,7 +505,7 @@
             <div class="info-list">
               <div>
                 <strong>01</strong>
-                <span>"Park Dino" on the Live Dino tab saves a snapshot of your dino's stats here — species, growth, health, stamina, hunger, and thirst.</span>
+                <span>"Park Dino" on the Live Dino tab saves a snapshot of your dino's stats here — species, growth, health, stamina, hunger, and thirst. Stats are re-verified from the server, not just whatever your browser last saw.</span>
               </div>
               <div>
                 <strong>02</strong>
@@ -513,20 +513,50 @@
               </div>
               <div>
                 <strong>03</strong>
-                <span>"Unpark" just removes the entry once you're done referencing it.</span>
+                <span>You can only have one parked dino at a time. "Unpark" removes it so you can park a different one.</span>
               </div>
             </div>
           </div>
 
-          <div class="panel content-box">
-            <div class="mini-heading">Parked dinos</div>
-            <div id="inventoryEmpty" class="info-list">
+          <div class="panel content-box" data-inventory-signed-out>
+            <div class="mini-heading">Sign in required</div>
+            <div class="info-list">
               <div>
-                <strong>—</strong>
-                <span>No dinos parked yet. Park one from the Live Dino tab while your dino is spawned in-game.</span>
+                <strong>!</strong>
+                <span>Connect with Steam to see your parked dino.</span>
               </div>
             </div>
-            <div id="inventoryList" class="mod-list"></div>
+          </div>
+
+          <div class="panel content-box" data-inventory-empty hidden>
+            <div class="mini-heading">Nothing parked</div>
+            <div class="info-list">
+              <div>
+                <strong>—</strong>
+                <span>No dino parked yet. Park one from the Live Dino tab while your dino is spawned in-game.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-inventory-error hidden>
+            <div class="mini-heading">Inventory unavailable</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span data-inventory-error-message>Couldn't reach the server right now.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mod-list" data-inventory-parked hidden>
+            <article>
+              <h3 data-inventory-class>—</h3>
+              <p data-inventory-stats></p>
+              <p data-inventory-date></p>
+              <div class="submit-actions">
+                <button class="action-button small" type="button" data-unpark-dino>Unpark</button>
+              </div>
+            </article>
           </div>
         </section>
 

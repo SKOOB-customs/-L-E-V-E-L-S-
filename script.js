@@ -872,15 +872,12 @@ const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
 const mapMarker = document.querySelector('[data-map-marker]');
 
-let currentLiveDino = null;
-
 const setDinoView = (view, message) => {
   if (dinoSignedOut) dinoSignedOut.hidden = view !== 'signed-out';
   if (dinoEmpty) dinoEmpty.hidden = view !== 'empty';
   if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
   if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
   if (mapMarker) mapMarker.hidden = view !== 'live';
-  if (view !== 'live') currentLiveDino = null;
   if (view === 'error' && dinoErrorMessage && message) {
     dinoErrorMessage.textContent = message;
   }
@@ -931,7 +928,6 @@ const renderLiveDino = (dino) => {
     if (el) el.textContent = Math.round(location[axis] || 0).toLocaleString();
   });
   updateMapMarker(location);
-  currentLiveDino = dino;
 
   setDinoView('live');
 };
@@ -974,81 +970,120 @@ const startLiveDinoPolling = () => {
 startLiveDinoPolling();
 
 // Parked dino snapshots (reference log only — see the Inventory tab note for why
-// this can't actually despawn/respawn anything: Evrima's RCON has no such commands)
-const parkedDinosStorageKey = 'levelsParkedDinos';
+// this can't actually despawn/respawn anything: Evrima's RCON has no such commands).
+// Stored server-side in Cloudflare KV via /api/inventory, one per Steam ID, so it
+// survives cleared browser data and follows the player across devices.
+const inventorySignedOut = document.querySelector('[data-inventory-signed-out]');
+const inventoryEmpty = document.querySelector('[data-inventory-empty]');
+const inventoryErrorBox = document.querySelector('[data-inventory-error]');
+const inventoryErrorMessage = document.querySelector('[data-inventory-error-message]');
+const inventoryParkedCard = document.querySelector('[data-inventory-parked]');
 
-const getParkedDinos = () => {
-  try {
-    const saved = localStorage.getItem(parkedDinosStorageKey);
-    const list = saved ? JSON.parse(saved) : [];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
+const setInventoryView = (view, message) => {
+  if (inventorySignedOut) inventorySignedOut.hidden = view !== 'signed-out';
+  if (inventoryEmpty) inventoryEmpty.hidden = view !== 'empty';
+  if (inventoryErrorBox) inventoryErrorBox.hidden = view !== 'error';
+  if (inventoryParkedCard) inventoryParkedCard.hidden = view !== 'parked';
+  if (view === 'error' && inventoryErrorMessage && message) {
+    inventoryErrorMessage.textContent = message;
   }
 };
 
-const saveParkedDinos = (list) => {
-  localStorage.setItem(parkedDinosStorageKey, JSON.stringify(list));
-  renderInventory();
+const renderParkedDino = (entry) => {
+  const classEl = document.querySelector('[data-inventory-class]');
+  const statsEl = document.querySelector('[data-inventory-stats]');
+  const dateEl = document.querySelector('[data-inventory-date]');
+  if (classEl) classEl.textContent = `${entry.class || 'Unknown'}${entry.name ? ` — ${entry.name}` : ''}`;
+  if (statsEl) {
+    statsEl.textContent = ['growth', 'health', 'stamina', 'hunger', 'thirst']
+      .map((stat) => `${stat[0].toUpperCase()}${stat.slice(1)} ${Math.round((entry[stat] || 0) * 100)}%`)
+      .join(' · ');
+  }
+  if (dateEl) dateEl.textContent = `Parked ${new Date(entry.parkedAt).toLocaleString()}`;
+  setInventoryView('parked');
 };
 
-const renderInventory = () => {
-  const listEl = document.getElementById('inventoryList');
-  const emptyEl = document.getElementById('inventoryEmpty');
-  if (!listEl || !emptyEl) return;
-
+const loadInventory = async () => {
   const profile = getSteamProfile();
-  const parked = getParkedDinos().filter((entry) => !profile || entry.steamId === profile.steamId);
-
-  emptyEl.hidden = parked.length > 0;
-  listEl.innerHTML = '';
-
-  parked
-    .slice()
-    .sort((a, b) => b.parkedAt - a.parkedAt)
-    .forEach((entry) => {
-      const article = document.createElement('article');
-      const parkedDate = new Date(entry.parkedAt).toLocaleString();
-      article.innerHTML = `
-        <h3>${entry.class || 'Unknown'}${entry.name ? ` — ${entry.name}` : ''}</h3>
-        <p>Growth ${Math.round((entry.growth || 0) * 100)}% · Health ${Math.round((entry.health || 0) * 100)}% · Stamina ${Math.round((entry.stamina || 0) * 100)}% · Hunger ${Math.round((entry.hunger || 0) * 100)}% · Thirst ${Math.round((entry.thirst || 0) * 100)}%</p>
-        <p>Parked ${parkedDate}</p>
-      `;
-      const unparkBtn = document.createElement('button');
-      unparkBtn.type = 'button';
-      unparkBtn.className = 'action-button small';
-      unparkBtn.textContent = 'Unpark';
-      unparkBtn.addEventListener('click', () => {
-        saveParkedDinos(getParkedDinos().filter((item) => item.id !== entry.id));
-        showToast('Removed from Inventory.');
-      });
-      article.appendChild(unparkBtn);
-      listEl.appendChild(article);
-    });
-};
-
-document.querySelector('[data-park-dino]')?.addEventListener('click', () => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId || !currentLiveDino) {
-    showToast('No live dino to park right now.');
+  if (!profile?.steamId) {
+    setInventoryView('signed-out');
     return;
   }
 
-  const parked = getParkedDinos();
-  parked.push({
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    steamId: profile.steamId,
-    name: currentLiveDino.name || '',
-    class: currentLiveDino.class || '',
-    growth: currentLiveDino.growth || 0,
-    health: currentLiveDino.health || 0,
-    stamina: currentLiveDino.stamina || 0,
-    hunger: currentLiveDino.hunger || 0,
-    thirst: currentLiveDino.thirst || 0,
-    parkedAt: Date.now(),
-  });
-  saveParkedDinos(parked);
-  showToast('Dino snapshot parked to your Inventory.');
+  try {
+    const response = await fetch(`/api/inventory?steam_id=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      setInventoryView('error', data.error || "Couldn't reach the server right now.");
+      return;
+    }
+    if (data.parked) {
+      renderParkedDino(data.parked);
+    } else {
+      setInventoryView('empty');
+    }
+  } catch (error) {
+    console.debug('Inventory load failed:', error);
+    setInventoryView('error', "Couldn't reach the server right now.");
+  }
+};
+
+document.querySelector('[data-park-dino]')?.addEventListener('click', async (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steam_id: profile.steamId }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      showToast(data.error || 'Could not park your dino right now.');
+      return;
+    }
+    showToast('Dino snapshot parked to your Inventory.');
+    loadInventory();
+  } catch (error) {
+    console.debug('Park failed:', error);
+    showToast('Could not park your dino right now.');
+  } finally {
+    button.disabled = false;
+  }
 });
+
+document.querySelector('[data-unpark-dino]')?.addEventListener('click', async (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/inventory?steam_id=${encodeURIComponent(profile.steamId)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      showToast(data.error || 'Could not unpark right now.');
+      return;
+    }
+    showToast('Removed from Inventory.');
+    loadInventory();
+  } catch (error) {
+    console.debug('Unpark failed:', error);
+    showToast('Could not unpark right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadInventory);
+loadInventory();
 
 renderInventory();
