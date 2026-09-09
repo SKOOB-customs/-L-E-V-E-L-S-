@@ -27,6 +27,16 @@ local MOD_NAME = "LevelsPark"
 local SAVED_DIR = "Mods/LevelsPark/Saved"
 local PARKED_DIR = SAVED_DIR .. "/parked"
 local FRESH_SPAWN_GROWTH_CEILING = 0.30
+
+-- os.execute() spawns a child process (cmd.exe) whose working directory does
+-- NOT match the relative path base that UE4SS's own Lua io.open() resolves
+-- against — confirmed live: curl reported success but the relative-path
+-- output file never appeared where Lua looked for it. Use an absolute path
+-- (from this server's confirmed UE4SS root directory, logged at boot) for
+-- anything written via os.execute. If this mod is moved to a different
+-- server/host, update this to match that server's UE4SS.log "root directory"
+-- line.
+local ABS_SAVED_DIR = "Z:\\home\\container\\TheIsle\\Binaries\\Win64\\ue4ss\\Mods\\LevelsPark\\Saved"
 local ACTION_DELAY_MS = 3000
 
 local function log(msg)
@@ -324,15 +334,16 @@ end
 -- Safe/cheap: curl --version does no network I/O, so this can't hang or
 -- freeze the server even if something's wrong.
 local function processTestCurl(steam)
-    local outPath = (SAVED_DIR .. "/curltest.txt"):gsub("/", "\\")
-    os.remove(SAVED_DIR .. "/curltest.txt")
+    local outPathAbs = ABS_SAVED_DIR .. "\\curltest.txt"
+    local outPathRel = SAVED_DIR .. "/curltest.txt"
+    os.remove(outPathRel)
 
     local execOk, execErr = pcall(function()
-        return os.execute('curl --version > "' .. outPath .. '" 2>&1')
+        return os.execute('curl --version > "' .. outPathAbs .. '" 2>&1')
     end)
     log("testcurl: os.execute pcall ok=" .. tostring(execOk) .. " result=" .. tostring(execErr))
 
-    local body = readAll(SAVED_DIR .. "/curltest.txt")
+    local body = readAll(outPathRel)
     if body ~= nil and body ~= "" then
         log("testcurl output: " .. body)
         safeNotify(steam, "curl works: " .. body:sub(1, 150))
