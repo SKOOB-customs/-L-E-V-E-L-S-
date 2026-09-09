@@ -357,22 +357,37 @@ local function registerChatHook()
     local ok, err = pcall(function()
         RegisterHook("/Script/TheIsle.TIPlayerController:GetChatMessage",
             function(_self, newText, senderCtrlParam, _chatMode, _noFilter)
+                log("HOOK FIRED")
+
                 local senderCtrl
-                pcall(function() senderCtrl = senderCtrlParam:get() end)
+                local unwrapOk, unwrapErr = pcall(function() senderCtrl = senderCtrlParam:get() end)
+                log("unwrap sender: ok=" .. tostring(unwrapOk) .. " err=" .. tostring(unwrapErr)
+                    .. " senderCtrl=" .. tostring(senderCtrl))
                 if senderCtrl == nil then return end
 
                 local steam = getControllerSteamId(senderCtrl)
+                log("sender steam=[" .. steam .. "]")
                 if steam == "" then return end
 
                 local message
-                pcall(function() message = newText:ToString() end)
+                local textOk, textErr = pcall(function() message = newText:ToString() end)
+                log("raw message: ok=" .. tostring(textOk) .. " err=" .. tostring(textErr)
+                    .. " message=[" .. tostring(message) .. "]")
                 if message == nil then return end
                 message = message:lower():match("^%s*(.-)%s*$") or ""
+                log("normalized message=[" .. message .. "]")
 
                 if message ~= "!park" and message ~= "!unpark" and message ~= "!parkstatus"
-                    and message ~= "!testcurl" then return end
-                if alreadyHandled(steam, message) then return end
+                    and message ~= "!testcurl" then
+                    log("no command match, ignoring")
+                    return
+                end
+                if alreadyHandled(steam, message) then
+                    log("deduped, ignoring")
+                    return
+                end
 
+                log("dispatching command: " .. message)
                 if message == "!park" then queueAction("park", steam)
                 elseif message == "!unpark" then queueAction("unpark", steam)
                 elseif message == "!parkstatus" then queueAction("status", steam)
