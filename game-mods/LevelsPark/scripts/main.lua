@@ -36,7 +36,7 @@ local FRESH_SPAWN_GROWTH_CEILING = 0.30
 -- anything written via os.execute. If this mod is moved to a different
 -- server/host, update this to match that server's UE4SS.log "root directory"
 -- line.
-local ABS_SAVED_DIR = "Z:\\home\\container\\TheIsle\\Binaries\\Win64\\ue4ss\\Mods\\LevelsPark\\Saved"
+local ABS_SAVED_DIR = "Z:/home/container/TheIsle/Binaries/Win64/ue4ss/Mods/LevelsPark/Saved"
 local ACTION_DELAY_MS = 3000
 
 local function log(msg)
@@ -334,14 +334,17 @@ end
 -- Safe/cheap: curl --version does no network I/O, so this can't hang or
 -- freeze the server even if something's wrong.
 local function processTestCurl(steam)
-    local outPathAbs = ABS_SAVED_DIR .. "\\curltest.txt"
+    local outPathAbs = ABS_SAVED_DIR .. "/curltest.txt"
     local outPathRel = SAVED_DIR .. "/curltest.txt"
     os.remove(outPathRel)
 
-    local execOk, execErr = pcall(function()
-        return os.execute('curl --version > "' .. outPathAbs .. '" 2>&1')
+    local cmd = 'curl --version > "' .. outPathAbs .. '" 2>&1'
+    log("testcurl: running command: " .. cmd)
+    local execOk, r1, r2, r3 = pcall(function()
+        return os.execute(cmd)
     end)
-    log("testcurl: os.execute pcall ok=" .. tostring(execOk) .. " result=" .. tostring(execErr))
+    log("testcurl: os.execute pcall ok=" .. tostring(execOk) .. " r1=" .. tostring(r1)
+        .. " r2=" .. tostring(r2) .. " r3=" .. tostring(r3))
 
     local body = readAll(outPathRel)
     if body ~= nil and body ~= "" then
