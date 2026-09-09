@@ -56,12 +56,18 @@ local function livePawnFromCtrl(ctrl)
     return pawn
 end
 
+-- On this build, some UE string values arrive as plain Lua strings already
+-- (calling :ToString() on those fails, since strings don't have that method),
+-- while others are wrapper userdata that need :ToString() to get real content
+-- (tostring() on those just yields "FString: 0x..." / "UObject: 0x..." junk).
+-- Check which case it is before trying to convert.
 local function safeString(value)
     if value == nil then return "" end
-    local ok, s = pcall(function() return tostring(value) end)
-    if ok and type(s) == "string" and s ~= "" and not s:find("^UObject") then return s end
+    if type(value) == "string" then return value end
     local okT, t = pcall(function() return value:ToString() end)
-    if okT and type(t) == "string" then return t end
+    if okT and type(t) == "string" and t ~= "" then return t end
+    local ok, s = pcall(function() return tostring(value) end)
+    if ok and type(s) == "string" and not s:find("^%a+: 0x") then return s end
     return ""
 end
 
@@ -369,11 +375,9 @@ local function registerChatHook()
                 log("sender steam=[" .. steam .. "]")
                 if steam == "" then return end
 
-                local message
-                local textOk, textErr = pcall(function() message = newText:ToString() end)
-                log("raw message: ok=" .. tostring(textOk) .. " err=" .. tostring(textErr)
-                    .. " message=[" .. tostring(message) .. "]")
-                if message == nil then return end
+                local message = safeString(newText)
+                log("raw message=[" .. message .. "]")
+                if message == "" then return end
                 message = message:lower():match("^%s*(.-)%s*$") or ""
                 log("normalized message=[" .. message .. "]")
 
