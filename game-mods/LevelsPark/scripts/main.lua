@@ -25,7 +25,10 @@
 
 local MOD_NAME = "LevelsPark"
 local SAVED_DIR = "Mods/LevelsPark/Saved"
-local PARKED_DIR = SAVED_DIR .. "/parked"
+-- Flattened into SAVED_DIR directly (parked_<steam>.json) rather than a
+-- Saved/parked/ subfolder: one less directory that has to exist on disk
+-- before saves can work, since Lua's writer won't create missing folders.
+local PARKED_DIR = SAVED_DIR
 local FRESH_SPAWN_GROWTH_CEILING = 0.30
 
 -- os.execute() spawns a child process (cmd.exe) whose working directory does
@@ -182,7 +185,7 @@ local function writeAll(path, body)
 end
 
 local function parkedFilePath(steam)
-    return PARKED_DIR .. "/" .. steam .. ".json"
+    return PARKED_DIR .. "/parked_" .. steam .. ".json"
 end
 
 local function loadParkedState(steam)
@@ -431,4 +434,9 @@ local function registerChatHook()
 end
 
 log("Boot")
+if writeAll(SAVED_DIR .. "/_boot_check.txt", "ok") then
+    log("boot check: [" .. SAVED_DIR .. "] is writable")
+else
+    log("boot check: [" .. SAVED_DIR .. "] is NOT writable — !park will fail until this exists")
+end
 registerChatHook()
