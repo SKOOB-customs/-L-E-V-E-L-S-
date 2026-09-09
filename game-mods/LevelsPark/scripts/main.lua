@@ -171,8 +171,11 @@ local function readAll(path)
 end
 
 local function writeAll(path, body)
-    local f = io.open(path, "wb")
-    if f == nil then return false end
+    local f, err = io.open(path, "wb")
+    if f == nil then
+        log("writeAll failed for [" .. tostring(path) .. "]: " .. tostring(err))
+        return false
+    end
     f:write(body)
     f:close()
     return true
