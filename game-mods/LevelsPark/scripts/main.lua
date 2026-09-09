@@ -56,18 +56,29 @@ local function livePawnFromCtrl(ctrl)
     return pawn
 end
 
+-- Hook params can arrive as a generic RemoteUnrealParam wrapper that needs
+-- :get() to reach the real underlying value (same pattern as unwrapping the
+-- sender controller). Harmless no-op if value doesn't have :get().
+local function unwrapIfNeeded(value)
+    if value == nil then return nil end
+    local ok, unwrapped = pcall(function() return value:get() end)
+    if ok and unwrapped ~= nil then return unwrapped end
+    return value
+end
+
 -- On this build, some UE string values arrive as plain Lua strings already
 -- (calling :ToString() on those fails, since strings don't have that method),
 -- while others are wrapper userdata that need :ToString() to get real content
--- (tostring() on those just yields "FString: 0x..." / "UObject: 0x..." junk).
--- Check which case it is before trying to convert.
-local function safeString(value)
+-- (tostring() on those just yields "FString: <hexaddr>" / "UObject: <hexaddr>"
+-- junk — note: no "0x" prefix on this build, just raw hex digits).
+local function safeString(rawValue)
+    local value = unwrapIfNeeded(rawValue)
     if value == nil then return "" end
     if type(value) == "string" then return value end
     local okT, t = pcall(function() return value:ToString() end)
     if okT and type(t) == "string" and t ~= "" then return t end
     local ok, s = pcall(function() return tostring(value) end)
-    if ok and type(s) == "string" and not s:find("^%a+: 0x") then return s end
+    if ok and type(s) == "string" and not s:find("^%a+:%s*%x+$") then return s end
     return ""
 end
 
