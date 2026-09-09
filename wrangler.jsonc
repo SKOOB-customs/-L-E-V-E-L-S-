@@ -10,7 +10,7 @@
   // dashboard get wiped on every Workers Builds deploy; RCON_PORT/PASSWORD
   // stay as dashboard/CLI secrets since those are meant to be sensitive).
   "vars": {
-    "RCON_HOST": "144.126.153.233"
+    "RCON_HOST": "168.100.160.159"
   },
   // Scoped so the Worker only intercepts status requests, not the whole site (Pages must still serve "/")
   "routes": [
