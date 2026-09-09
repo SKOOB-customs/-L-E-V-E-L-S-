@@ -302,6 +302,29 @@ local function processParkStatus(steam)
         tostring(state.classPath), (state.growth or 0) * 100, ageMin))
 end
 
+-- TEMPORARY diagnostic: checks whether os.execute + curl.exe are usable from
+-- this Lua environment at all, before building the real webhook on top of it.
+-- Safe/cheap: curl --version does no network I/O, so this can't hang or
+-- freeze the server even if something's wrong.
+local function processTestCurl(steam)
+    local outPath = (SAVED_DIR .. "/curltest.txt"):gsub("/", "\\")
+    os.remove(SAVED_DIR .. "/curltest.txt")
+
+    local execOk, execErr = pcall(function()
+        return os.execute('curl --version > "' .. outPath .. '" 2>&1')
+    end)
+    log("testcurl: os.execute pcall ok=" .. tostring(execOk) .. " result=" .. tostring(execErr))
+
+    local body = readAll(SAVED_DIR .. "/curltest.txt")
+    if body ~= nil and body ~= "" then
+        log("testcurl output: " .. body)
+        safeNotify(steam, "curl works: " .. body:sub(1, 150))
+    else
+        log("testcurl: no output file — os.execute or curl.exe unavailable")
+        safeNotify(steam, "curl test FAILED — no output produced. Check UE4SS.log.")
+    end
+end
+
 LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     if #pendingActions == 0 then return end
     local drain = pendingActions
@@ -311,6 +334,7 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
             if action.kind == "park" then processPark(action.steam)
             elseif action.kind == "unpark" then processUnpark(action.steam)
             elseif action.kind == "status" then processParkStatus(action.steam)
+            elseif action.kind == "testcurl" then processTestCurl(action.steam)
             end
         end)
         if not ok then log("Action " .. tostring(action.kind) .. " failed: " .. tostring(err)) end
@@ -345,12 +369,14 @@ local function registerChatHook()
                 if message == nil then return end
                 message = message:lower():match("^%s*(.-)%s*$") or ""
 
-                if message ~= "!park" and message ~= "!unpark" and message ~= "!parkstatus" then return end
+                if message ~= "!park" and message ~= "!unpark" and message ~= "!parkstatus"
+                    and message ~= "!testcurl" then return end
                 if alreadyHandled(steam, message) then return end
 
                 if message == "!park" then queueAction("park", steam)
                 elseif message == "!unpark" then queueAction("unpark", steam)
-                else queueAction("status", steam) end
+                elseif message == "!parkstatus" then queueAction("status", steam)
+                else queueAction("testcurl", steam) end
             end)
     end)
     if ok then log("Chat hook registered")
