@@ -1,4 +1,0 @@
-Placeholder so this empty folder ships with the mod. Parked-state JSON files
-(one per Steam ID) get written here at runtime. Safe to delete this file
-manually on the server; the folder itself must exist for saves to work,
-since Lua's file writer does not create missing parent directories.
