@@ -114,9 +114,102 @@ const findPlayerDino = (response, steamId) => {
   return null;
 };
 
+// ── Mod <-> website bridge ──
+//
+// The LevelsPark UE4SS mod (game-mods/LevelsPark) writes one JSON snapshot
+// per player to Mods/LevelsPark/Saved/parked_<steamid>.json on the game
+// server's local disk when a player types !park. The mod itself has no way
+// to push that data anywhere — os.execute/curl doesn't work in this
+// Wine-hosted environment (confirmed live: curl.exe isn't installed at all).
+// Per the community's own reference architecture for this exact problem
+// (file-based IPC — the mod only ever touches local files, an external
+// process does the network calls), this Worker plays that external-process
+// role via Bropanel's Pterodactyl-based Client API (plain HTTPS + API key),
+// polling on a Cron Trigger. No extra hosting needed beyond this Worker.
+const PARKED_SAVED_DIR = '/TheIsle/Binaries/Win64/ue4ss/Mods/LevelsPark/Saved';
+
+const pterodactylFetch = async (env, path) => {
+  const url = `${env.PTERODACTYL_BASE_URL}/api/client/servers/${env.PTERODACTYL_SERVER_ID}${path}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${env.PTERODACTYL_API_KEY}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Pterodactyl API ${path} failed: ${response.status} ${await response.text()}`);
+  }
+  return response;
+};
+
+const listParkedFiles = async (env) => {
+  const response = await pterodactylFetch(
+    env,
+    `/files/list?directory=${encodeURIComponent(PARKED_SAVED_DIR)}`,
+  );
+  const body = await response.json();
+  return (body.data || [])
+    .map((entry) => entry.attributes)
+    .filter((attrs) => attrs?.is_file && /^parked_\d+\.json$/.test(attrs.name));
+};
+
+const readParkedFile = async (env, filename) => {
+  const path = `${PARKED_SAVED_DIR}/${filename}`;
+  const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+  return response.text();
+};
+
+// Syncs every parked_<steamid>.json currently on disk into KV as one
+// aggregated document, keyed by steam ID. Deleting a file (via !unpark)
+// naturally drops it from the next sync since we rebuild the whole map
+// each run rather than merging.
+const syncParkedDinos = async (env) => {
+  const files = await listParkedFiles(env);
+  const parked = {};
+  for (const file of files) {
+    const raw = await readParkedFile(env, file.name);
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue; // skip partially-written or corrupt files rather than failing the whole sync
+    }
+    if (data?.steam) parked[data.steam] = data;
+  }
+  await env.PARKED_KV.put('parked:index', JSON.stringify({ updatedAt: Date.now(), parked }));
+  return parked;
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Manual trigger for testing the bridge without waiting for the cron
+    // schedule — same bearer-token gate as the RCON routes below.
+    if (url.pathname === '/sync-parked') {
+      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({
+          error: 'Pterodactyl bridge is not configured',
+          missing: {
+            PTERODACTYL_API_KEY: !env.PTERODACTYL_API_KEY,
+            PTERODACTYL_BASE_URL: !env.PTERODACTYL_BASE_URL,
+            PTERODACTYL_SERVER_ID: !env.PTERODACTYL_SERVER_ID,
+            PARKED_KV: !env.PARKED_KV,
+          },
+        }, 503);
+      }
+      try {
+        const parked = await syncParkedDinos(env);
+        return json({ ok: true, count: Object.keys(parked).length, parked });
+      } catch (error) {
+        return json({ error: error.message || 'Sync failed' }, 502);
+      }
+    }
+
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
 
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
@@ -182,5 +275,11 @@ export default {
       try { socket?.close(); } catch { }
       return json({ error: error.message || 'RCON request failed', stage }, 502);
     }
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      syncParkedDinos(env).catch((error) => console.error('syncParkedDinos failed:', error.message)),
+    );
   },
 };

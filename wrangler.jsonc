@@ -8,9 +8,29 @@
   "workers_dev": true,
   // Non-secret config so it survives redeploys (plain vars set only via the
   // dashboard get wiped on every Workers Builds deploy; RCON_PORT/PASSWORD
-  // stay as dashboard/CLI secrets since those are meant to be sensitive).
+  // and PTERODACTYL_API_KEY stay as dashboard/CLI secrets since those are
+  // meant to be sensitive).
   "vars": {
-    "RCON_HOST": "168.100.160.159"
+    "RCON_HOST": "168.100.160.159",
+    // Bropanel (Game Host Bros) is Pterodactyl-based and exposes the standard
+    // Client API for scripting file read/write over plain HTTPS — this is
+    // the "external process with filesystem access" the mod's park/unpark
+    // JSON files need, since the game server itself has no working HTTP
+    // client (confirmed: curl.exe isn't installed and os.execute has no
+    // other way to reach the internet).
+    "PTERODACTYL_BASE_URL": "https://bropanel.gamehostbros.com",
+    "PTERODACTYL_SERVER_ID": "db5c10f0"
+  },
+  // Aggregated parked-dino data synced from the game server's
+  // Mods/LevelsPark/Saved/parked_<steamid>.json files on a cron schedule —
+  // read by functions/api/parked-list.js.
+  "kv_namespaces": [
+    { "binding": "PARKED_KV", "id": "6cdde6c4833f48d9ace3f24c0a474120" }
+  ],
+  // Polls the game server's parked-state files every 2 minutes (see the
+  // `scheduled` handler in bridge-worker.js).
+  "triggers": {
+    "crons": ["*/2 * * * *"]
   },
   // Scoped so the Worker only intercepts status requests, not the whole site (Pages must still serve "/")
   "routes": [
