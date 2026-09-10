@@ -1,8 +1,11 @@
 -- LevelsPark: real in-game park/unpark for The Isle EVRIMA.
 --
--- !park   captures growth/health/stamina/hunger/thirst for the sender's live
---         dino, saves it to disk, then kills the dino (SetHealth(0)). The
---         player naturally lands on the respawn/species-select screen.
+-- !park [name]  captures growth/health/stamina/hunger/thirst (plus the
+--         display-only extras below) for the sender's live dino, saves it to
+--         disk, then kills the dino (SetHealth(0)). The player naturally
+--         lands on the respawn/species-select screen. The optional name
+--         (e.g. "!park Rex") is our own metadata for the website gallery —
+--         the game has no such field, so it's just stored as-is.
 -- !unpark applies the saved stats onto the sender's current live pawn, IF the
 --         species matches what was parked and the pawn is a fresh spawn
 --         (growth below FRESH_SPAWN_GROWTH_CEILING). Consumes (deletes) the
@@ -17,8 +20,10 @@
 --     calls any respawn API. !park kills the pawn and lets the player
 --     respawn through the normal game UI; !unpark mutates the resulting
 --     fresh juvenile in-place via scalar setters.
---   - No mutations/nutrients/skin/prime handling. Deliberately out of scope;
---     this mod only round-trips growth + the four core vitals.
+--   - No mutations/nutrients/skin restore. Deliberately out of scope; this
+--     mod only round-trips growth + the four core vitals. PRIME status and
+--     body color ARE captured, but display-only (for the website gallery,
+--     not applied on !unpark).
 --   - Heavy actions (kill, restore) are deferred a few seconds off the chat
 --     hook and re-resolve the pawn fresh at fire time (hook parameter
 --     wrappers and cached pawns are unsafe across ticks).
@@ -146,6 +151,10 @@ local function jsonReadNumber(body, fieldName)
     return tonumber(string.match(body or "", '"' .. fieldName .. '"%s*:%s*(-?%d+%.?%d*)'))
 end
 
+local function jsonReadBool(body, fieldName)
+    return string.match(body or "", '"' .. fieldName .. '"%s*:%s*(true)') ~= nil
+end
+
 local function jsonEscape(s)
     if s == nil then return "" end
     s = tostring(s)
@@ -192,25 +201,36 @@ local function loadParkedState(steam)
     local body = readAll(path)
     if body == nil or body == "" then return nil end
     return {
+        name = jsonReadString(body, "name"),
         classPath = jsonReadString(body, "classPath"),
         growth = jsonReadNumber(body, "growth"),
         health = jsonReadNumber(body, "health"),
+        maxHealth = jsonReadNumber(body, "maxHealth"),
         stamina = jsonReadNumber(body, "stamina"),
         hunger = jsonReadNumber(body, "hunger"),
         thirst = jsonReadNumber(body, "thirst"),
         maxHunger = jsonReadNumber(body, "maxHunger"),
         maxThirst = jsonReadNumber(body, "maxThirst"),
         maxStamina = jsonReadNumber(body, "maxStamina"),
+        primeElder = jsonReadBool(body, "primeElder"),
+        bodyColorR = jsonReadNumber(body, "bodyColorR"),
+        bodyColorG = jsonReadNumber(body, "bodyColorG"),
+        bodyColorB = jsonReadNumber(body, "bodyColorB"),
         capturedAt = jsonReadNumber(body, "capturedAt"),
     }
 end
 
 local function saveParkedState(steam, state)
     local json = string.format(
-        '{"version":1,"steam":"%s","classPath":"%s","growth":%f,"health":%f,"stamina":%f,' ..
-        '"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,"maxStamina":%f,"capturedAt":%d}',
-        jsonEscape(steam), jsonEscape(state.classPath), state.growth, state.health, state.stamina,
-        state.hunger, state.thirst, state.maxHunger, state.maxThirst, state.maxStamina, state.capturedAt
+        '{"version":1,"steam":"%s","name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
+        '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
+        '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
+        '"capturedAt":%d}',
+        jsonEscape(steam), jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
+        state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
+        state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
+        state.primeElder and "true" or "false", state.bodyColorR or 0, state.bodyColorG or 0,
+        state.bodyColorB or 0, state.capturedAt
     )
     return writeAll(parkedFilePath(steam), json)
 end
@@ -226,14 +246,41 @@ local function capturePawnState(pawn)
     pcall(function() state.classPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
     pcall(function() state.growth = pawn:GetGrowth() end)
     pcall(function() state.health = pawn:GetHealth() end)
+    pcall(function() state.maxHealth = pawn:GetMaxHealth() end)
     pcall(function() state.stamina = pawn:GetStamina() end)
     pcall(function() state.hunger = pawn:GetHunger() end)
     pcall(function() state.thirst = pawn:GetThirst() end)
     pcall(function() state.maxHunger = pawn:GetMaxHunger() end)
     pcall(function() state.maxThirst = pawn:GetMaxThirst() end)
     pcall(function() state.maxStamina = pawn:GetMaxStamina() end)
+    -- Display-only extras for the website gallery (not needed for restore,
+    -- so a failed read here must never block !park — always pcall-guarded).
+    pcall(function() state.primeElder = pawn:GetIsEligiblePrimeElder() end)
+    pcall(function()
+        -- Read the live CustomizerData property directly rather than via
+        -- GetCustomizerData() — the getter is unreliable post-0.21.720 per
+        -- the community's customizer field-map notes; the live property read
+        -- is a plain POD field access and safe.
+        local color = pawn.CustomizerData.BodyColor
+        state.bodyColorR = color.R
+        state.bodyColorG = color.G
+        state.bodyColorB = color.B
+    end)
     state.capturedAt = os.time()
     return state
+end
+
+-- Player-supplied label for their parked dino (e.g. "!park Rex"), purely our
+-- own metadata — the game has no such field. Trim, cap length, strip
+-- anything that isn't a plain printable character so it's safe to store and
+-- later render as plain text on the website.
+local MAX_NAME_LENGTH = 24
+local function sanitizeName(raw)
+    if raw == nil then return "" end
+    local name = raw:match("^%s*(.-)%s*$") or ""
+    name = name:gsub("[^%w %-_']", "")
+    if #name > MAX_NAME_LENGTH then name = name:sub(1, MAX_NAME_LENGTH) end
+    return name
 end
 
 -- Apply order matters (GAS-attribute auto-refill on growth change; see
@@ -254,11 +301,11 @@ end
 
 local pendingActions = {}
 
-local function queueAction(kind, steam)
-    pendingActions[#pendingActions + 1] = { kind = kind, steam = steam }
+local function queueAction(kind, steam, extra)
+    pendingActions[#pendingActions + 1] = { kind = kind, steam = steam, extra = extra }
 end
 
-local function processPark(steam)
+local function processPark(steam, name)
     local gm = findGameMode()
     if gm == nil then return end
     local ctrl
@@ -270,6 +317,7 @@ local function processPark(steam)
     end
 
     local state = capturePawnState(pawn)
+    state.name = sanitizeName(name)
     if state.classPath == nil or state.growth == nil then
         safeNotify(steam, "Park failed: could not read dino state.")
         return
@@ -281,8 +329,10 @@ local function processPark(steam)
     end
 
     pcall(function() pawn:SetHealth(0) end)
-    log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth) .. ")")
-    safeNotify(steam, "Dino parked. Respawn as the same species, then type !unpark to restore it.")
+    log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth)
+        .. (state.name ~= "" and (", name=" .. state.name) or "") .. ")")
+    safeNotify(steam, "Dino parked" .. (state.name ~= "" and (" as \"" .. state.name .. "\"") or "")
+        .. ". Respawn as the same species, then type !unpark to restore it.")
 end
 
 local function processUnpark(steam)
@@ -329,8 +379,10 @@ local function processParkStatus(steam)
         return
     end
     local ageMin = math.floor((os.time() - (state.capturedAt or os.time())) / 60)
+    local label = (state.name and state.name ~= "") and (state.name .. " (" .. tostring(state.classPath) .. ")")
+        or tostring(state.classPath)
     safeNotify(steam, string.format("Parked: %s, growth %.0f%%, parked %d min ago.",
-        tostring(state.classPath), (state.growth or 0) * 100, ageMin))
+        label, (state.growth or 0) * 100, ageMin))
 end
 
 -- TEMPORARY diagnostic: checks whether os.execute + curl.exe are usable from
@@ -365,7 +417,7 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     pendingActions = {}
     for _, action in ipairs(drain) do
         local ok, err = pcall(function()
-            if action.kind == "park" then processPark(action.steam)
+            if action.kind == "park" then processPark(action.steam, action.extra)
             elseif action.kind == "unpark" then processUnpark(action.steam)
             elseif action.kind == "status" then processParkStatus(action.steam)
             elseif action.kind == "testcurl" then processTestCurl(action.steam)
@@ -403,26 +455,40 @@ local function registerChatHook()
                 log("sender steam=[" .. steam .. "]")
                 if steam == "" then return end
 
-                local message = safeString(newText)
-                log("raw message=[" .. message .. "]")
-                if message == "" then return end
-                message = message:lower():match("^%s*(.-)%s*$") or ""
-                log("normalized message=[" .. message .. "]")
+                local rawMessage = safeString(newText)
+                log("raw message=[" .. rawMessage .. "]")
+                if rawMessage == "" then return end
+                -- Keep original casing for the !park name argument; only the
+                -- command word itself is matched case-insensitively.
+                local trimmed = rawMessage:match("^%s*(.-)%s*$") or ""
+                local lower = trimmed:lower()
+                log("normalized message=[" .. lower .. "]")
 
-                if message ~= "!park" and message ~= "!unpark" and message ~= "!parkstatus"
-                    and message ~= "!testcurl" then
+                local command, nameArg
+                if lower == "!park" or lower:match("^!park%s") then
+                    command = "!park"
+                    nameArg = trimmed:match("^%S+%s*(.-)%s*$") or ""
+                elseif lower == "!unpark" then
+                    command = "!unpark"
+                elseif lower == "!parkstatus" then
+                    command = "!parkstatus"
+                elseif lower == "!testcurl" then
+                    command = "!testcurl"
+                end
+
+                if command == nil then
                     log("no command match, ignoring")
                     return
                 end
-                if alreadyHandled(steam, message) then
+                if alreadyHandled(steam, lower) then
                     log("deduped, ignoring")
                     return
                 end
 
-                log("dispatching command: " .. message)
-                if message == "!park" then queueAction("park", steam)
-                elseif message == "!unpark" then queueAction("unpark", steam)
-                elseif message == "!parkstatus" then queueAction("status", steam)
+                log("dispatching command: " .. command)
+                if command == "!park" then queueAction("park", steam, nameArg)
+                elseif command == "!unpark" then queueAction("unpark", steam)
+                elseif command == "!parkstatus" then queueAction("status", steam)
                 else queueAction("testcurl", steam) end
             end)
     end)

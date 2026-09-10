@@ -9,3 +9,6 @@ config.local.*
 # OS / editor cruft
 .DS_Store
 Thumbs.db
+
+# Wrangler CLI local build cache
+.wrangler/
