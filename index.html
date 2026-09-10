@@ -512,7 +512,7 @@
             <div class="info-list">
               <div>
                 <strong>01</strong>
-                <span>Type <code>!park</code> in in-game chat while your dino is alive. It saves your growth, health, stamina, hunger, and thirst, then despawns the dino so you can leave the server safely.</span>
+                <span>Type <code>!park</code> (optionally <code>!park &lt;name&gt;</code>) in in-game chat while your dino is alive. It saves your growth, health, stamina, hunger, and thirst, then despawns the dino so you can leave the server safely.</span>
               </div>
               <div>
                 <strong>02</strong>
@@ -524,6 +524,40 @@
               </div>
             </div>
           </div>
+
+          <div class="gallery-toolbar">
+            <span class="gallery-count" data-parked-count>0 parked</span>
+            <div class="gallery-controls">
+              <input type="text" class="gallery-search" data-parked-search placeholder="Search name or species..." />
+              <select class="gallery-sort" data-parked-sort>
+                <option value="recent">Recently parked</option>
+                <option value="growth">Growth (highest)</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-parked-empty hidden>
+            <div class="mini-heading">Nothing parked yet</div>
+            <div class="info-list">
+              <div>
+                <strong>—</strong>
+                <span>No dinos are currently parked on the server. Be the first — type <code>!park</code> in-game.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-parked-error hidden>
+            <div class="mini-heading">Couldn't load parked dinos</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span data-parked-error-message>Couldn't reach the server right now.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="parked-grid" data-parked-grid></div>
         </section>
 
         <section class="tab-panel" id="live-dino" data-tab="live-dino">

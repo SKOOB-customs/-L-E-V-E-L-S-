@@ -996,7 +996,176 @@ const startLiveDinoPolling = () => {
 
 startLiveDinoPolling();
 
-// Inventory tab is now static (in-game !park/!unpark/!parkstatus, see
-// index.html) — the old Cloudflare KV-backed reference-log page and its
-// dead Park/Unpark website buttons were retired since they never actually
-// affected anything in-game.
+// Inventory gallery — server-wide view of every currently-parked dino,
+// synced from the game server by workers/bridge-worker.js's scheduled sync
+// (see functions/api/parked-list.js). Parking/unparking itself only ever
+// happens in-game (!park/!unpark/!parkstatus, see index.html); this tab is
+// read-only.
+const parkedCountEl = document.querySelector('[data-parked-count]');
+const parkedSearchEl = document.querySelector('[data-parked-search]');
+const parkedSortEl = document.querySelector('[data-parked-sort]');
+const parkedGridEl = document.querySelector('[data-parked-grid]');
+const parkedEmptyEl = document.querySelector('[data-parked-empty]');
+const parkedErrorEl = document.querySelector('[data-parked-error]');
+const parkedErrorMessageEl = document.querySelector('[data-parked-error-message]');
+
+let parkedEntries = [];
+
+const speciesFromClassPath = (classPath) => {
+  const match = /\/Dinosaurs\/([^/]+)\//.exec(classPath || '');
+  return match ? match[1] : 'Unknown';
+};
+
+const colorHex = (entry) => {
+  const toByte = (v) => Math.max(0, Math.min(255, Math.round((Number(v) || 0) * 255)));
+  const r = toByte(entry.bodyColorR).toString(16).padStart(2, '0');
+  const g = toByte(entry.bodyColorG).toString(16).padStart(2, '0');
+  const b = toByte(entry.bodyColorB).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`.toUpperCase();
+};
+
+const pct = (value, max) => {
+  if (!max || max <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round(((Number(value) || 0) / max) * 100)));
+};
+
+const buildStatRow = (label, className, value, max) => {
+  const row = document.createElement('div');
+  row.className = 'stat-bar-row';
+
+  const labelEl = document.createElement('span');
+  labelEl.textContent = label;
+
+  const track = document.createElement('div');
+  track.className = 'stat-bar-track';
+  const fill = document.createElement('div');
+  fill.className = `stat-bar-fill ${className}`;
+  fill.style.width = `${pct(value, max)}%`;
+  track.appendChild(fill);
+
+  const valueEl = document.createElement('strong');
+  valueEl.textContent = `${pct(value, max)}%`;
+
+  row.append(labelEl, track, valueEl);
+  return row;
+};
+
+const buildParkedCard = (entry) => {
+  const card = document.createElement('article');
+  card.className = 'parked-card';
+
+  const badges = document.createElement('div');
+  badges.className = 'parked-card-badges';
+
+  if (entry.primeElder) {
+    const prime = document.createElement('span');
+    prime.className = 'parked-prime-badge';
+    prime.textContent = 'Prime';
+    badges.appendChild(prime);
+  } else {
+    badges.appendChild(document.createElement('span'));
+  }
+
+  const colorBadge = document.createElement('span');
+  colorBadge.className = 'parked-color-badge';
+  const dot = document.createElement('span');
+  dot.className = 'parked-color-dot';
+  dot.style.background = colorHex(entry);
+  const hexLabel = document.createElement('span');
+  hexLabel.textContent = colorHex(entry);
+  colorBadge.append(dot, hexLabel);
+  badges.appendChild(colorBadge);
+
+  const image = document.createElement('div');
+  image.className = 'parked-card-image';
+  const imageLabel = document.createElement('span');
+  imageLabel.textContent = entry.species; // placeholder watermark until real art is added
+  image.appendChild(imageLabel);
+
+  const species = document.createElement('p');
+  species.className = 'parked-species';
+  species.textContent = entry.species;
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'parked-title-row';
+  const name = document.createElement('h3');
+  name.className = 'parked-name';
+  name.textContent = entry.name || entry.species;
+  const growthValue = document.createElement('span');
+  growthValue.className = 'parked-growth-value';
+  const growthPercentLabel = document.createElement('small');
+  growthPercentLabel.textContent = '%';
+  growthValue.append(`${Math.round((entry.growth || 0) * 100)}`, growthPercentLabel);
+  titleRow.append(name, growthValue);
+
+  const growthBar = document.createElement('div');
+  growthBar.className = 'stat-bar-track';
+  const growthFill = document.createElement('div');
+  growthFill.className = 'stat-bar-fill stat-growth';
+  growthFill.style.width = `${Math.round((entry.growth || 0) * 100)}%`;
+  growthBar.appendChild(growthFill);
+
+  const stats = document.createElement('div');
+  stats.className = 'parked-stats';
+  stats.append(
+    buildStatRow('Health', 'stat-health', entry.health, entry.maxHealth),
+    buildStatRow('Stamina', 'stat-stamina', entry.stamina, entry.maxStamina),
+    buildStatRow('Hunger', 'stat-hunger', entry.hunger, entry.maxHunger),
+    buildStatRow('Thirst', 'stat-thirst', entry.thirst, entry.maxThirst),
+  );
+
+  card.append(badges, image, species, titleRow, growthBar, stats);
+  return card;
+};
+
+const renderParkedGrid = () => {
+  const query = (parkedSearchEl?.value || '').trim().toLowerCase();
+  const sort = parkedSortEl?.value || 'recent';
+
+  let visible = parkedEntries;
+  if (query) {
+    visible = visible.filter((entry) =>
+      entry.species.toLowerCase().includes(query) || (entry.name || '').toLowerCase().includes(query));
+  }
+
+  visible = [...visible].sort((a, b) => {
+    if (sort === 'growth') return (b.growth || 0) - (a.growth || 0);
+    if (sort === 'name') return (a.name || a.species).localeCompare(b.name || b.species);
+    return (b.capturedAt || 0) - (a.capturedAt || 0);
+  });
+
+  if (parkedCountEl) parkedCountEl.textContent = `${parkedEntries.length} parked`;
+  if (parkedEmptyEl) parkedEmptyEl.hidden = parkedEntries.length !== 0;
+  if (parkedGridEl) {
+    parkedGridEl.innerHTML = '';
+    visible.forEach((entry) => parkedGridEl.appendChild(buildParkedCard(entry)));
+  }
+};
+
+const loadParkedList = async () => {
+  try {
+    const response = await fetch('/api/parked-list');
+    const data = await response.json();
+    if (!response.ok) {
+      if (parkedErrorEl) parkedErrorEl.hidden = false;
+      if (parkedErrorMessageEl) parkedErrorMessageEl.textContent = data.error || "Couldn't reach the server right now.";
+      return;
+    }
+    if (parkedErrorEl) parkedErrorEl.hidden = true;
+    parkedEntries = Object.entries(data.parked || {}).map(([steamId, entry]) => ({
+      steamId,
+      ...entry,
+      species: speciesFromClassPath(entry.classPath),
+    }));
+    renderParkedGrid();
+  } catch (error) {
+    console.debug('Parked list load failed:', error);
+    if (parkedErrorEl) parkedErrorEl.hidden = false;
+    if (parkedErrorMessageEl) parkedErrorMessageEl.textContent = "Couldn't reach the server right now.";
+  }
+};
+
+parkedSearchEl?.addEventListener('input', renderParkedGrid);
+parkedSortEl?.addEventListener('change', renderParkedGrid);
+document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadParkedList);
+loadParkedList();
