@@ -1016,6 +1016,14 @@ const speciesFromClassPath = (classPath) => {
   return match ? match[1] : 'Unknown';
 };
 
+// Per-species card art. Species without an entry here fall back to the
+// watermark placeholder — add more as art gets added to assets/Dino Art/.
+const speciesArt = {
+  Allosaurus: 'assets/Dino Art/allo.png',
+  Stegosaurus: 'assets/Dino Art/stego.png',
+  Triceratops: 'assets/Dino Art/trike.png',
+};
+
 const colorHex = (entry) => {
   const toByte = (v) => Math.max(0, Math.min(255, Math.round((Number(v) || 0) * 255)));
   const r = toByte(entry.bodyColorR).toString(16).padStart(2, '0');
@@ -1078,9 +1086,18 @@ const buildParkedCard = (entry) => {
 
   const image = document.createElement('div');
   image.className = 'parked-card-image';
-  const imageLabel = document.createElement('span');
-  imageLabel.textContent = entry.species; // placeholder watermark until real art is added
-  image.appendChild(imageLabel);
+  const artSrc = speciesArt[entry.species];
+  if (artSrc) {
+    const img = document.createElement('img');
+    img.src = artSrc;
+    img.alt = entry.species;
+    img.loading = 'lazy';
+    image.appendChild(img);
+  } else {
+    const imageLabel = document.createElement('span');
+    imageLabel.textContent = entry.species; // placeholder watermark until art exists for this species
+    image.appendChild(imageLabel);
+  }
 
   const species = document.createElement('p');
   species.className = 'parked-species';
