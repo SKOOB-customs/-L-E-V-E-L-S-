@@ -839,31 +839,43 @@ h6,
 
 .map-marker {
   position: absolute;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
   z-index: 2;
 }
 
-.map-marker::before {
-  content: '';
+.map-marker__pulse {
   position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
-  z-index: 2;
-}
-
-.map-marker::after {
-  content: '';
-  position: absolute;
-  inset: -9px;
+  inset: 5px;
   border-radius: 50%;
   background: rgba(209, 61, 77, 0.45);
   animation: map-marker-pulse 1.8s ease-out infinite;
   z-index: 1;
+}
+
+.map-marker__arrow {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transform-origin: 50% 50%;
+  transition: transform 0.4s ease-out;
+  z-index: 2;
+  will-change: transform;
+}
+
+.map-marker__arrow svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.7));
+}
+
+.map-marker__arrow polygon {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }
 
 @keyframes map-marker-pulse {
