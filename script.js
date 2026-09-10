@@ -871,6 +871,7 @@ const dinoErrorBox = document.querySelector('[data-dino-error]');
 const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
 const mapMarker = document.querySelector('[data-map-marker]');
+const mapMarkerArrow = document.querySelector('[data-map-marker-arrow]');
 
 const setDinoView = (view, message) => {
   if (dinoSignedOut) dinoSignedOut.hidden = view !== 'signed-out';
@@ -897,11 +898,37 @@ const worldToMapFraction = (worldX, worldY) => {
   return { fx, fy };
 };
 
+// Snaps the marker to one of 8 compass headings (N/NE/E/SE/S/SW/W/NW) based on
+// movement since the last poll, rather than pointing at an arbitrary angle.
+let lastMarkerFraction = null;
+let markerHeading = 0; // cumulative degrees, so rotation animates the short way around
+const MARKER_MOVEMENT_THRESHOLD = 0.0015; // ignore sub-pixel jitter between polls
+
+const updateMapMarkerHeading = (fx, fy) => {
+  if (!mapMarkerArrow) return;
+  if (lastMarkerFraction) {
+    const dx = fx - lastMarkerFraction.fx;
+    const dy = fy - lastMarkerFraction.fy;
+    if (Math.hypot(dx, dy) >= MARKER_MOVEMENT_THRESHOLD) {
+      const bearing = (Math.atan2(dx, -dy) * 180) / Math.PI;
+      const snapped = (((Math.round(bearing / 45) * 45) % 360) + 360) % 360;
+      const current = ((markerHeading % 360) + 360) % 360;
+      let delta = snapped - current;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      markerHeading += delta;
+      mapMarkerArrow.style.transform = `rotate(${markerHeading}deg)`;
+    }
+  }
+  lastMarkerFraction = { fx, fy };
+};
+
 const updateMapMarker = (location) => {
   if (!mapMarker || !location) return;
   const { fx, fy } = worldToMapFraction(location.x || 0, location.y || 0);
   mapMarker.style.left = `${Math.min(100, Math.max(0, fx * 100))}%`;
   mapMarker.style.top = `${Math.min(100, Math.max(0, fy * 100))}%`;
+  updateMapMarkerHeading(fx, fy);
 };
 
 const renderLiveDino = (dino) => {
@@ -969,121 +996,7 @@ const startLiveDinoPolling = () => {
 
 startLiveDinoPolling();
 
-// Parked dino snapshots (reference log only — see the Inventory tab note for why
-// this can't actually despawn/respawn anything: Evrima's RCON has no such commands).
-// Stored server-side in Cloudflare KV via /api/inventory, one per Steam ID, so it
-// survives cleared browser data and follows the player across devices.
-const inventorySignedOut = document.querySelector('[data-inventory-signed-out]');
-const inventoryEmpty = document.querySelector('[data-inventory-empty]');
-const inventoryErrorBox = document.querySelector('[data-inventory-error]');
-const inventoryErrorMessage = document.querySelector('[data-inventory-error-message]');
-const inventoryParkedCard = document.querySelector('[data-inventory-parked]');
-
-const setInventoryView = (view, message) => {
-  if (inventorySignedOut) inventorySignedOut.hidden = view !== 'signed-out';
-  if (inventoryEmpty) inventoryEmpty.hidden = view !== 'empty';
-  if (inventoryErrorBox) inventoryErrorBox.hidden = view !== 'error';
-  if (inventoryParkedCard) inventoryParkedCard.hidden = view !== 'parked';
-  if (view === 'error' && inventoryErrorMessage && message) {
-    inventoryErrorMessage.textContent = message;
-  }
-};
-
-const renderParkedDino = (entry) => {
-  const classEl = document.querySelector('[data-inventory-class]');
-  const statsEl = document.querySelector('[data-inventory-stats]');
-  const dateEl = document.querySelector('[data-inventory-date]');
-  if (classEl) classEl.textContent = `${entry.class || 'Unknown'}${entry.name ? ` — ${entry.name}` : ''}`;
-  if (statsEl) {
-    statsEl.textContent = ['growth', 'health', 'stamina', 'hunger', 'thirst']
-      .map((stat) => `${stat[0].toUpperCase()}${stat.slice(1)} ${Math.round((entry[stat] || 0) * 100)}%`)
-      .join(' · ');
-  }
-  if (dateEl) dateEl.textContent = `Parked ${new Date(entry.parkedAt).toLocaleString()}`;
-  setInventoryView('parked');
-};
-
-const loadInventory = async () => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId) {
-    setInventoryView('signed-out');
-    return;
-  }
-
-  try {
-    const response = await fetch(`/api/inventory?steam_id=${encodeURIComponent(profile.steamId)}`);
-    const data = await response.json();
-    if (!response.ok) {
-      setInventoryView('error', data.error || "Couldn't reach the server right now.");
-      return;
-    }
-    if (data.parked) {
-      renderParkedDino(data.parked);
-    } else {
-      setInventoryView('empty');
-    }
-  } catch (error) {
-    console.debug('Inventory load failed:', error);
-    setInventoryView('error', "Couldn't reach the server right now.");
-  }
-};
-
-document.querySelector('[data-park-dino]')?.addEventListener('click', async (event) => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId) {
-    showToast('Sign in with Steam first.');
-    return;
-  }
-
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const response = await fetch('/api/inventory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steam_id: profile.steamId }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      showToast(data.error || 'Could not park your dino right now.');
-      return;
-    }
-    showToast('Dino snapshot parked to your Inventory.');
-    loadInventory();
-  } catch (error) {
-    console.debug('Park failed:', error);
-    showToast('Could not park your dino right now.');
-  } finally {
-    button.disabled = false;
-  }
-});
-
-document.querySelector('[data-unpark-dino]')?.addEventListener('click', async (event) => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId) return;
-
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const response = await fetch(`/api/inventory?steam_id=${encodeURIComponent(profile.steamId)}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      showToast(data.error || 'Could not unpark right now.');
-      return;
-    }
-    showToast('Removed from Inventory.');
-    loadInventory();
-  } catch (error) {
-    console.debug('Unpark failed:', error);
-    showToast('Could not unpark right now.');
-  } finally {
-    button.disabled = false;
-  }
-});
-
-document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadInventory);
-loadInventory();
-
-renderInventory();
+// Inventory tab is now static (in-game !park/!unpark/!parkstatus, see
+// index.html) — the old Cloudflare KV-backed reference-log page and its
+// dead Park/Unpark website buttons were retired since they never actually
+// affected anything in-game.

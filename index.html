@@ -489,7 +489,14 @@
           <section class="panel content-box map-panel">
             <div id="mapMount" class="map-mount" aria-live="polite">
               <img class="map-image" src="assets/Map/gateway.png" alt="LeveLs Gateway map" />
-              <div class="map-marker" data-map-marker hidden></div>
+              <div class="map-marker" data-map-marker hidden>
+                <span class="map-marker__pulse"></span>
+                <span class="map-marker__arrow" data-map-marker-arrow>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <polygon points="12,2 18,20 12,15 6,20" />
+                  </svg>
+                </span>
+              </div>
             </div>
           </section>
         </section>
@@ -497,7 +504,7 @@
         <section class="tab-panel" id="inventory" data-tab="inventory">
           <div class="section-header">
             <p class="eyebrow">INVENTORY</p>
-            <h2>Your parked dino snapshots</h2>
+            <h2>Park your dino in-game</h2>
           </div>
 
           <div class="panel content-box">
@@ -505,58 +512,17 @@
             <div class="info-list">
               <div>
                 <strong>01</strong>
-                <span>"Park Dino" on the Live Dino tab saves a snapshot of your dino's stats here — species, growth, health, stamina, hunger, and thirst. Stats are re-verified from the server, not just whatever your browser last saw.</span>
+                <span>Type <code>!park</code> in in-game chat while your dino is alive. It saves your growth, health, stamina, hunger, and thirst, then despawns the dino so you can leave the server safely.</span>
               </div>
               <div>
                 <strong>02</strong>
-                <span>This is a reference log only — Evrima's RCON has no way to actually despawn or respawn a dino with saved stats, so parking here doesn't change anything in-game.</span>
+                <span>Spawn back in as the same species and type <code>!unpark</code> — your saved stats are restored onto the fresh spawn.</span>
               </div>
               <div>
                 <strong>03</strong>
-                <span>You can only have one parked dino at a time. "Unpark" removes it so you can park a different one.</span>
+                <span>Type <code>!parkstatus</code> any time to check what's currently parked. You can only have one parked dino at a time.</span>
               </div>
             </div>
-          </div>
-
-          <div class="panel content-box" data-inventory-signed-out>
-            <div class="mini-heading">Sign in required</div>
-            <div class="info-list">
-              <div>
-                <strong>!</strong>
-                <span>Connect with Steam to see your parked dino.</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel content-box" data-inventory-empty hidden>
-            <div class="mini-heading">Nothing parked</div>
-            <div class="info-list">
-              <div>
-                <strong>—</strong>
-                <span>No dino parked yet. Park one from the Live Dino tab while your dino is spawned in-game.</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel content-box" data-inventory-error hidden>
-            <div class="mini-heading">Inventory unavailable</div>
-            <div class="info-list">
-              <div>
-                <strong>!</strong>
-                <span data-inventory-error-message>Couldn't reach the server right now.</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="mod-list" data-inventory-parked hidden>
-            <article>
-              <h3 data-inventory-class>—</h3>
-              <p data-inventory-stats></p>
-              <p data-inventory-date></p>
-              <div class="submit-actions">
-                <button class="action-button small" type="button" data-unpark-dino>Unpark</button>
-              </div>
-            </article>
           </div>
         </section>
 
@@ -640,10 +606,7 @@
               <div><span>Pos Z</span><strong data-dino-pos="z">0</strong></div>
             </div>
 
-            <div class="submit-actions">
-              <button class="action-button" type="button" data-park-dino>Park Dino</button>
-            </div>
-            <p class="dino-park-note">Saves a snapshot of these stats to your Inventory tab for reference. This doesn't affect your dino in-game — you still park/leave the server the normal way.</p>
+            <p class="dino-park-note">To park this dino, type <code>!park</code> in in-game chat — see the Inventory tab for details.</p>
           </div>
         </section>
 
