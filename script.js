@@ -871,6 +871,7 @@ const dinoErrorBox = document.querySelector('[data-dino-error]');
 const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
 const mapDinoStrip = document.querySelector('[data-map-dino-strip]');
+const mapNumbers = document.querySelector('[data-map-numbers]');
 const mapMarker = document.querySelector('[data-map-marker]');
 const mapMarkerArrow = document.querySelector('[data-map-marker-arrow]');
 
@@ -880,6 +881,7 @@ const setDinoView = (view, message) => {
   if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
   if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
   if (mapDinoStrip) mapDinoStrip.hidden = view !== 'live';
+  if (mapNumbers) mapNumbers.hidden = view !== 'live';
   if (mapMarker) mapMarker.hidden = view !== 'live';
   if (view === 'error' && dinoErrorMessage && message) {
     dinoErrorMessage.textContent = message;

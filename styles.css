@@ -1011,6 +1011,49 @@ h6,
   justify-content: center;
 }
 
+.map-panel-body {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.map-numbers {
+  flex: 0 0 150px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.map-number-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.map-number-row:last-child {
+  border-bottom: none;
+}
+
+.map-number-row strong {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.map-viewport-col {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .map-viewport {
   position: relative;
   width: 100%;
@@ -1509,6 +1552,22 @@ textarea {
 
   .five-up {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-panel-body {
+    flex-direction: column;
+  }
+
+  .map-numbers {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .map-number-row {
+    flex: 1 1 30%;
+    border-bottom: none;
   }
 
   .site-header {
