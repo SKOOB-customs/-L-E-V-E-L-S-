@@ -727,6 +727,11 @@ h6,
   border-radius: 14px;
   background: var(--panel-soft);
   border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.parked-card.is-expanded {
+  border-color: var(--chrome-3);
 }
 
 .parked-card-badges {
@@ -826,6 +831,38 @@ h6,
 .parked-stats {
   display: grid;
   gap: 8px;
+}
+
+.parked-details {
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  cursor: default;
+}
+
+.parked-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.parked-detail-stats dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.parked-detail-stats dd {
+  margin: 2px 0 0;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.parked-redeem-button {
+  width: 100%;
 }
 
 .dino-park-note {

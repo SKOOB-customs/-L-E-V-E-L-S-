@@ -998,9 +998,10 @@ startLiveDinoPolling();
 
 // Inventory gallery — server-wide view of every currently-parked dino,
 // synced from the game server by workers/bridge-worker.js's scheduled sync
-// (see functions/api/parked-list.js). Parking/unparking itself only ever
-// happens in-game (!park/!unpark/!parkstatus, see index.html); this tab is
-// read-only.
+// (see functions/api/parked-list.js). Parking always happens in-game
+// (!park/!redeem/!parkstatus, see index.html); redeeming a SPECIFIC parked
+// dino (rather than the most-recent same-species one !redeem picks) can also
+// be done from a card here via functions/api/redeem.js — see requestRedeem.
 const parkedCountEl = document.querySelector('[data-parked-count]');
 const parkedSearchEl = document.querySelector('[data-parked-search]');
 const parkedSortEl = document.querySelector('[data-parked-sort]');
@@ -1131,8 +1132,122 @@ const buildParkedCard = (entry) => {
     buildStatRow('Thirst', 'stat-thirst', entry.thirst, entry.maxThirst),
   );
 
-  card.append(badges, image, species, titleRow, growthBar, stats);
+  const details = document.createElement('div');
+  details.className = 'parked-details';
+  details.hidden = true;
+
+  const detailStats = document.createElement('dl');
+  detailStats.className = 'parked-detail-stats';
+  const addDetail = (label, value) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    detailStats.append(dt, dd);
+  };
+  addDetail('Health', `${Math.round(entry.health || 0)} / ${Math.round(entry.maxHealth || 0)}`);
+  addDetail('Stamina', `${Math.round(entry.stamina || 0)} / ${Math.round(entry.maxStamina || 0)}`);
+  addDetail('Hunger', `${Math.round(entry.hunger || 0)} / ${Math.round(entry.maxHunger || 0)}`);
+  addDetail('Thirst', `${Math.round(entry.thirst || 0)} / ${Math.round(entry.maxThirst || 0)}`);
+  addDetail('Parked', entry.capturedAt ? new Date(entry.capturedAt * 1000).toLocaleString() : 'Unknown');
+  details.appendChild(detailStats);
+
+  // Redeeming someone else's dino makes no sense, so the button is only
+  // offered for the viewer's own cards. The API still only trusts the
+  // client-supplied steamId either way — same trust model the rest of this
+  // site already uses (/api/live-dino, the old inventory API), not a new gap.
+  const viewerSteamId = getSteamProfile()?.steamId;
+  if (entry.steam && viewerSteamId && entry.steam === viewerSteamId) {
+    const redeemButton = document.createElement('button');
+    redeemButton.type = 'button';
+    redeemButton.className = 'action-button small parked-redeem-button';
+    redeemButton.textContent = 'Redeem';
+    redeemButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      requestRedeem(entry, redeemButton);
+    });
+    details.appendChild(redeemButton);
+  }
+
+  card.append(badges, image, species, titleRow, growthBar, stats, details);
+  card.addEventListener('click', () => {
+    details.hidden = !details.hidden;
+    card.classList.toggle('is-expanded', !details.hidden);
+  });
   return card;
+};
+
+const REDEEM_POLL_INTERVAL_MS = 2000;
+const REDEEM_POLL_TIMEOUT_MS = 20000;
+
+// Asks the mod (via functions/api/redeem.js -> the bridge Worker -> a
+// redeem_request_<steamid>.json the mod's poll loop picks up) to redeem this
+// exact snapshot, then polls for the mod's real result — see the plan notes
+// on why this can't be instant (the mod only checks every few seconds, and
+// the check only happens once, since the player is presumably online right
+// now to have clicked this at all).
+const requestRedeem = async (entry, buttonEl) => {
+  buttonEl.disabled = true;
+  buttonEl.textContent = 'Requesting…';
+
+  let requestId;
+  try {
+    const response = await fetch('/api/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steamId: entry.steam, snapshotId: entry.capturedAt }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.requestId) {
+      showToast(data.error || 'Could not request redeem right now.');
+      buttonEl.disabled = false;
+      buttonEl.textContent = 'Redeem';
+      return;
+    }
+    requestId = data.requestId;
+  } catch (error) {
+    console.debug('Redeem request failed:', error);
+    showToast('Could not request redeem right now.');
+    buttonEl.disabled = false;
+    buttonEl.textContent = 'Redeem';
+    return;
+  }
+
+  buttonEl.textContent = 'Waiting for in-game…';
+  const startedAt = Date.now();
+
+  const poll = async () => {
+    if (Date.now() - startedAt > REDEEM_POLL_TIMEOUT_MS) {
+      showToast("Didn't hear back — check in-game.");
+      buttonEl.disabled = false;
+      buttonEl.textContent = 'Redeem';
+      return;
+    }
+    try {
+      const pollResponse = await fetch(
+        `/api/redeem?steamId=${encodeURIComponent(entry.steam)}&requestId=${encodeURIComponent(requestId)}`,
+      );
+      const pollData = await pollResponse.json();
+      if (pollData.ok === true) {
+        showToast(pollData.message || 'Redeemed!');
+        parkedEntries = parkedEntries.filter(
+          (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
+        );
+        renderParkedGrid();
+        return;
+      }
+      if (pollData.ok === false) {
+        showToast(pollData.message || 'Redeem failed.');
+        buttonEl.disabled = false;
+        buttonEl.textContent = 'Redeem';
+        return;
+      }
+    } catch (error) {
+      console.debug('Redeem result poll failed:', error);
+    }
+    setTimeout(poll, REDEEM_POLL_INTERVAL_MS);
+  };
+  setTimeout(poll, REDEEM_POLL_INTERVAL_MS);
 };
 
 const renderParkedGrid = () => {
@@ -1169,8 +1284,11 @@ const loadParkedList = async () => {
       return;
     }
     if (parkedErrorEl) parkedErrorEl.hidden = true;
-    parkedEntries = Object.entries(data.parked || {}).map(([steamId, entry]) => ({
-      steamId,
+    // Each value already carries its own "steam" field (added by the bridge
+    // Worker when flattening) and "capturedAt" (its snapshot id) — the KV
+    // object's key is just `${steam}_${capturedAt}` for uniqueness, not
+    // meant to be parsed, so this reads values only.
+    parkedEntries = Object.values(data.parked || {}).map((entry) => ({
       ...entry,
       species: speciesFromClassPath(entry.classPath),
     }));
