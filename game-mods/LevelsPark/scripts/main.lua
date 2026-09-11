@@ -579,57 +579,15 @@ local function processTestCurl(steam)
     end
 end
 
--- TEMPORARY (admin-tiers discovery, remove once real UFunction names for
--- Ban/Timeout/SetWeather/AllowedClasses are confirmed): walks a handful of
--- candidate classes' UFunctions looking for names that smell like native
--- admin actions, so we can find the real names to RegisterHook without
--- guessing (guessing risks a hook that silently never fires).
-local ADMIN_DUMP_KEYWORDS = { "ban", "kick", "timeout", "weather", "allowedclass", "admin" }
-local ADMIN_DUMP_CANDIDATE_CLASSES = {
-    "TIPlayerController", "TIPlayerState", "TIGameStateBase",
-    "BP_SurvivalGameMode_C", "TIAdminManager", "AdminManager_C",
-}
-
-local function processAdminDump(steam)
-    local outPath = SAVED_DIR .. "/admin_dump.txt"
-    local lines = {}
-    for _, className in ipairs(ADMIN_DUMP_CANDIDATE_CLASSES) do
-        local inst
-        pcall(function() inst = FindFirstOf(className) end)
-        if inst == nil then
-            table.insert(lines, className .. ": FindFirstOf returned nil (no live instance)")
-        else
-            local cls
-            pcall(function() cls = inst:GetClass() end)
-            if cls == nil then
-                table.insert(lines, className .. ": GetClass() returned nil")
-            else
-                local forEachOk, forEachErr = pcall(function()
-                    cls:ForEachFunction(function(fn)
-                        local fnName = ""
-                        pcall(function() fnName = fn:GetFName():ToString() end)
-                        local lowerName = fnName:lower()
-                        for _, kw in ipairs(ADMIN_DUMP_KEYWORDS) do
-                            if lowerName:find(kw, 1, true) then
-                                local fullName = fnName
-                                pcall(function() fullName = fn:GetFullName() end)
-                                table.insert(lines, className .. " -> " .. fullName)
-                                break
-                            end
-                        end
-                    end)
-                end)
-                if not forEachOk then
-                    table.insert(lines, className .. ": ForEachFunction FAILED: " .. tostring(forEachErr))
-                end
-            end
-        end
-    end
-    local body = table.concat(lines, "\n")
-    log("admindump:\n" .. body)
-    writeAll(outPath, body)
-    safeNotify(steam, "Admin function dump written (" .. #lines .. " lines). Check the log/file.")
-end
+-- REMOVED: a temporary !admindump diagnostic used to live here to enumerate
+-- native UFunctions by walking a class's function list looking for
+-- ban/timeout/weather/allowedclass-like names. Confirmed live (2026-09-11)
+-- that UE4SS's ForEachFunction hard-crashes this build with
+-- EXCEPTION_ACCESS_VIOLATION inside UE4SS.dll — a native crash, NOT a Lua
+-- error, so it isn't catchable by pcall and takes the whole server process
+-- down. Do not reintroduce ForEachFunction (or anything else that walks a
+-- UClass's reflection data this way) on this build. Native-function
+-- discovery for admin-tier enforcement needs a different approach.
 
 LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     if #pendingActions == 0 then return end
@@ -641,7 +599,6 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
             elseif action.kind == "redeem" then processRedeem(action.steam, action.extra)
             elseif action.kind == "status" then processParkStatus(action.steam)
             elseif action.kind == "testcurl" then processTestCurl(action.steam)
-            elseif action.kind == "admindump" then processAdminDump(action.steam)
             end
         end)
         if not ok then log("Action " .. tostring(action.kind) .. " failed: " .. tostring(err)) end
@@ -817,8 +774,6 @@ local function registerChatHook()
                     command = "!parkstatus"
                 elseif lower == "!testcurl" then
                     command = "!testcurl"
-                elseif lower == "!admindump" then
-                    command = "!admindump"
                 end
 
                 if command == nil then
@@ -834,7 +789,6 @@ local function registerChatHook()
                 if command == "!park" then queueAction("park", steam, nameArg)
                 elseif command == "!redeem" then queueAction("redeem", steam, nameArg)
                 elseif command == "!parkstatus" then queueAction("status", steam)
-                elseif command == "!admindump" then queueAction("admindump", steam)
                 else queueAction("testcurl", steam) end
             end)
     end)
