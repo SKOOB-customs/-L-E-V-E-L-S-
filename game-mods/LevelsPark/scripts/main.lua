@@ -32,14 +32,19 @@
 --     wrappers and cached pawns are unsafe across ticks).
 --   - Website-triggered redeem: the mod can't list directory contents from
 --     Lua at all, so it can't discover a request file for an arbitrary
---     player. Instead a poll loop walks GameState.PlayerArray (the safe,
---     verified way to enumerate online players — see
---     EVRIMA_Lua_Safety_Rules.md Rule 3; FindAllOf("TIPlayerController") is
---     NOT safe, it crashes on stale post-disconnect entries) and checks each
---     currently-online player's own fixed-name request file. This means a
---     website redeem can only ever be processed while that player is
---     actually connected — which is required anyway, since applying stats
---     needs a live pawn.
+--     player. Instead a poll loop walks gm.AllPlayerControllers (a
+--     TSet<APlayerController*>, iterated via :ForEach — NOT indexable with
+--     #/[i], that's a TSet-vs-TArray gotcha) and checks each currently-online
+--     player's own fixed-name request file. FindAllOf("TIPlayerController")
+--     is NOT safe (crashes on stale post-disconnect entries, per
+--     EVRIMA_Lua_Safety_Rules.md Rule 3), and GameState.PlayerArray — the
+--     OTHER pattern the same rule documents as safe — turned out to return
+--     "TrivialObject" entries on THIS build that UE4SS hasn't bound methods
+--     for (:GetOwningController() throws), confirmed live; AllPlayerControllers
+--     hands back real, fully-bound controllers directly and doesn't have that
+--     problem. This means a website redeem can only ever be processed while
+--     that player is actually connected — which is required anyway, since
+--     applying stats needs a live pawn.
 
 local MOD_NAME = "LevelsPark"
 -- Confirmed live: a relative path ("Mods/LevelsPark/Saved/...") fails with
@@ -513,9 +518,9 @@ end)
 -- Pterodactyl API — see workers/bridge-worker.js) when a player clicks
 -- Redeem on a specific parked-dino card. This mod has no way to list
 -- directory contents, so it can't discover that file for an arbitrary
--- player; instead this loop walks the currently-online players (the safe
--- GameState.PlayerArray pattern, not FindAllOf — see the header notes) and
--- checks each one's own fixed-name request file.
+-- player; instead this loop walks the currently-online players (via
+-- gm.AllPlayerControllers, not FindAllOf or GameState.PlayerArray — see the
+-- header notes) and checks each one's own fixed-name request file.
 local REDEEM_REQUEST_POLL_MS = 3000
 
 local function redeemRequestFilePath(steam)
@@ -549,32 +554,50 @@ local function checkWebsiteRedeemRequest(steam)
     writeAll(redeemResultFilePath(steam), resultJson)
 end
 
-local function findGameState()
-    local gs
-    pcall(function() gs = FindFirstOf("TIGameStateBase") end)
-    return gs
+-- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
+-- too often to log unconditionally) so a silent failure here is actually
+-- visible instead of just never doing anything. Gated ONCE per tick (not per
+-- individual log call) so a genuinely silent failure (no GameMode, no
+-- AllPlayerControllers) is still visible without spamming every tick.
+local lastRedeemPollLogAt = 0
+local function redeemPollShouldLog()
+    local now = os.time()
+    if now - lastRedeemPollLogAt < 30 then return false end
+    lastRedeemPollLogAt = now
+    return true
 end
 
+-- Confirmed live on this build: GameState.PlayerArray entries come back as
+-- opaque "TrivialObject" values UE4SS hasn't bound methods for — calling
+-- :GetOwningController() on one throws ("attempt to call a TrivialObject
+-- value"). gm.AllPlayerControllers (a TSet<APlayerController*> on the game
+-- mode, iterated via :ForEach — NOT indexable with #/[i], that's the
+-- TSet-vs-TArray gotcha the safety docs warn about) hands back controllers
+-- directly, sidestepping the broken call entirely — but each one still
+-- arrives as a RemoteUnrealParam wrapper needing :get(), same as chat-hook
+-- parameters elsewhere in this mod (confirmed live).
 LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
-    local gameState = findGameState()
-    if gameState == nil then return end
-    local playerArray
-    pcall(function() playerArray = gameState.PlayerArray end)
-    if playerArray == nil then return end
-
-    local count = 0
-    pcall(function() count = #playerArray end)
-    for i = 1, count do
-        local ok, err = pcall(function()
-            local ps = playerArray[i]
-            if ps == nil then return end
-            local ctrl
-            pcall(function() ctrl = ps:GetOwningController() end)
-            local steam = getControllerSteamId(ctrl)
-            if steam ~= "" then checkWebsiteRedeemRequest(steam) end
-        end)
-        if not ok then log("Redeem-request poll failed for index " .. i .. ": " .. tostring(err)) end
+    local gm = findGameMode()
+    if gm == nil then
+        if redeemPollShouldLog() then log("Redeem-request poll: no GameMode found") end
+        return
     end
+    local controllers
+    pcall(function() controllers = gm.AllPlayerControllers end)
+    if controllers == nil then
+        if redeemPollShouldLog() then log("Redeem-request poll: AllPlayerControllers not available") end
+        return
+    end
+
+    pcall(function()
+        controllers:ForEach(function(ctrl)
+            local ok, err = pcall(function()
+                local steam = getControllerSteamId(unwrapIfNeeded(ctrl))
+                if steam ~= "" then checkWebsiteRedeemRequest(steam) end
+            end)
+            if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end
+        end)
+    end)
 end)
 
 -- ── Chat command hook ──
