@@ -1375,14 +1375,24 @@ const buildParkedCard = (entry) => {
   const badges = document.createElement('div');
   badges.className = 'parked-card-badges';
 
+  const badgesLeft = document.createElement('div');
+  badgesLeft.className = 'parked-badges-left';
   if (entry.primeElder) {
     const prime = document.createElement('span');
     prime.className = 'parked-prime-badge';
     prime.textContent = 'Prime';
-    badges.appendChild(prime);
-  } else {
-    badges.appendChild(document.createElement('span'));
+    badgesLeft.appendChild(prime);
   }
+  if (entry.entombments) {
+    // Visible before the player ever clicks in, per the ask — the full
+    // mutation breakdown (which tiers/slots those entombments unlocked)
+    // only shows once they open the zoomed-in modal below.
+    const elder = document.createElement('span');
+    elder.className = 'parked-elder-badge';
+    elder.textContent = `Elder ×${entry.entombments}`;
+    badgesLeft.appendChild(elder);
+  }
+  badges.appendChild(badgesLeft);
 
   const colorBadge = document.createElement('span');
   colorBadge.className = 'parked-color-badge';
@@ -1442,9 +1452,86 @@ const buildParkedCard = (entry) => {
     buildStatRow('Thirst', 'stat-thirst', entry.thirst, entry.maxThirst),
   );
 
-  const details = document.createElement('div');
-  details.className = 'parked-details';
-  details.hidden = true;
+  card.append(badges, image, species, titleRow, growthBar, stats);
+  card.addEventListener('click', () => openParkedDinoModal(entry));
+  return card;
+};
+
+const mutationSlotShortLabel = (field) => {
+  const match = field.match(/(\d[AB]?)$/);
+  return match ? `Slot ${match[1]}` : field;
+};
+
+const parkedModalOverlay = document.querySelector('[data-parked-modal]');
+const parkedModalContent = document.querySelector('[data-parked-modal-content]');
+
+const closeParkedModal = () => {
+  if (parkedModalOverlay) parkedModalOverlay.hidden = true;
+  if (parkedModalContent) parkedModalContent.innerHTML = '';
+};
+
+document.querySelector('[data-parked-modal-close]')?.addEventListener('click', closeParkedModal);
+parkedModalOverlay?.addEventListener('click', (event) => {
+  if (event.target === parkedModalOverlay) closeParkedModal();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && parkedModalOverlay && !parkedModalOverlay.hidden) closeParkedModal();
+});
+
+// The "zoomed in" detail view — bigger card, full stat numbers, every
+// unlocked mutation slot (so a player can actually tell parked dinos of
+// the same species apart before picking which one to redeem), and the
+// rename/redeem/release actions that used to live inline on the grid card.
+const openParkedDinoModal = (entry) => {
+  if (!parkedModalOverlay || !parkedModalContent) return;
+  parkedModalContent.innerHTML = '';
+
+  const image = document.createElement('div');
+  image.className = 'parked-modal-image';
+  const artSrc = speciesArt[entry.species];
+  if (artSrc) {
+    const img = document.createElement('img');
+    img.src = artSrc;
+    img.alt = entry.species;
+    image.appendChild(img);
+  } else {
+    const label = document.createElement('span');
+    label.textContent = entry.species;
+    image.appendChild(label);
+  }
+
+  const species = document.createElement('p');
+  species.className = 'parked-species';
+  species.textContent = entry.species;
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'parked-title-row';
+  const name = document.createElement('h3');
+  name.className = 'parked-name';
+  name.textContent = entry.name || 'ayoo gimme a name son';
+  name.classList.toggle('is-placeholder', !entry.name);
+  const growthValue = document.createElement('span');
+  growthValue.className = 'parked-growth-value';
+  const growthPercentLabel = document.createElement('small');
+  growthPercentLabel.textContent = '%';
+  growthValue.append(`${Math.round((entry.growth || 0) * 100)}`, growthPercentLabel);
+  titleRow.append(name, growthValue);
+
+  const growthBar = document.createElement('div');
+  growthBar.className = 'stat-bar-track';
+  const growthFill = document.createElement('div');
+  growthFill.className = 'stat-bar-fill stat-growth';
+  growthFill.style.width = `${Math.round((entry.growth || 0) * 100)}%`;
+  growthBar.appendChild(growthFill);
+
+  const stats = document.createElement('div');
+  stats.className = 'parked-stats';
+  stats.append(
+    buildStatRow('Health', 'stat-health', entry.health, entry.maxHealth),
+    buildStatRow('Stamina', 'stat-stamina', entry.stamina, entry.maxStamina),
+    buildStatRow('Hunger', 'stat-hunger', entry.hunger, entry.maxHunger),
+    buildStatRow('Thirst', 'stat-thirst', entry.thirst, entry.maxThirst),
+  );
 
   const detailStats = document.createElement('dl');
   detailStats.className = 'parked-detail-stats';
@@ -1462,9 +1549,41 @@ const buildParkedCard = (entry) => {
   addDetail('Parked', entry.capturedAt ? new Date(entry.capturedAt * 1000).toLocaleString() : 'Unknown');
   if (entry.compCode) addDetail('Reference #', entry.compCode);
   if (entry.skin) addDetail('Skin', entry.skin.name || 'Attached');
-  details.appendChild(detailStats);
+  if (entry.entombments) addDetail('Elder stacks', String(entry.entombments));
 
-  // Redeeming someone else's dino makes no sense, so the button is only
+  parkedModalContent.append(image, species, titleRow, growthBar, stats, detailStats);
+
+  // Mutation slots, grouped by tier, limited to whatever this dino's own
+  // entombment level actually unlocked — mutationSlotTiers/MUTATION_TIER_LABELS
+  // are the same ones loadMutationCatalog() already fetches for the
+  // Compensation form (no admin gate on that endpoint, so it's populated
+  // for every signed-in visitor already).
+  const entombments = entry.entombments || 0;
+  const allMutationFields = mutationSlotTiers.flat();
+  const hasAnyMutation = entombments > 0 || allMutationFields.some((field) => entry[field]);
+  if (mutationSlotTiers.length > 0 && hasAnyMutation) {
+    mutationSlotTiers.slice(0, entombments + 1).forEach((fields, tierIndex) => {
+      const heading = document.createElement('div');
+      heading.className = 'parked-modal-mutation-tier';
+      heading.textContent = `${MUTATION_TIER_LABELS[tierIndex] || 'Tier'} mutations`;
+      const grid = document.createElement('div');
+      grid.className = 'parked-modal-mutation-grid';
+      fields.forEach((field) => {
+        const value = entry[field];
+        const filled = Boolean(value);
+        const slot = document.createElement('div');
+        slot.className = `parked-modal-mutation-slot${filled ? '' : ' is-empty'}`;
+        const label = document.createElement('small');
+        label.textContent = mutationSlotShortLabel(field);
+        slot.appendChild(label);
+        slot.append(filled ? value : '— empty —');
+        grid.appendChild(slot);
+      });
+      parkedModalContent.append(heading, grid);
+    });
+  }
+
+  // Redeeming someone else's dino makes no sense, so these are only
   // offered for the viewer's own cards. The API still only trusts the
   // client-supplied steamId either way — same trust model the rest of this
   // site already uses (/api/live-dino, the old inventory API), not a new gap.
@@ -1472,7 +1591,6 @@ const buildParkedCard = (entry) => {
   if (entry.steam && viewerSteamId && entry.steam === viewerSteamId) {
     const renameRow = document.createElement('div');
     renameRow.className = 'parked-rename-row';
-    renameRow.addEventListener('click', (event) => event.stopPropagation());
 
     const renameInput = document.createElement('input');
     renameInput.type = 'text';
@@ -1516,24 +1634,20 @@ const buildParkedCard = (entry) => {
       }
     });
     renameRow.append(renameInput, renameButton);
-    details.appendChild(renameRow);
+    parkedModalContent.appendChild(renameRow);
 
     const redeemButton = document.createElement('button');
     redeemButton.type = 'button';
     redeemButton.className = 'action-button small parked-redeem-button';
     redeemButton.textContent = 'Redeem';
-    redeemButton.addEventListener('click', (event) => {
-      event.stopPropagation();
-      requestRedeem(entry, redeemButton);
-    });
-    details.appendChild(redeemButton);
+    redeemButton.addEventListener('click', () => requestRedeem(entry, redeemButton));
+    parkedModalContent.appendChild(redeemButton);
 
     const releaseButton = document.createElement('button');
     releaseButton.type = 'button';
     releaseButton.className = 'action-button small parked-release-button';
     releaseButton.textContent = 'Release to the wild';
-    releaseButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
+    releaseButton.addEventListener('click', async () => {
       const confirmLabel = entry.name ? `${entry.species} ("${entry.name}")` : entry.species;
       if (!window.confirm(`Release this ${confirmLabel}? This can't be undone.`)) return;
       releaseButton.disabled = true;
@@ -1558,21 +1672,17 @@ const buildParkedCard = (entry) => {
           (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
         );
         renderParkedGrid();
+        closeParkedModal();
       } catch (error) {
         console.debug('Release failed:', error);
         showToast('Could not reach the server right now.');
         releaseButton.disabled = false;
       }
     });
-    details.appendChild(releaseButton);
+    parkedModalContent.appendChild(releaseButton);
   }
 
-  card.append(badges, image, species, titleRow, growthBar, stats, details);
-  card.addEventListener('click', () => {
-    details.hidden = !details.hidden;
-    card.classList.toggle('is-expanded', !details.hidden);
-  });
-  return card;
+  parkedModalOverlay.hidden = false;
 };
 
 // Asks the mod (via functions/api/redeem.js -> the bridge Worker -> a
@@ -1591,6 +1701,7 @@ const requestRedeem = (entry, buttonEl) => requestActionAndPoll({
       (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
     );
     renderParkedGrid();
+    closeParkedModal();
   },
 });
 
