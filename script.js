@@ -931,6 +931,101 @@ const updateMapMarker = (location) => {
   updateMapMarkerHeading(fx, fy);
 };
 
+// Map pan/zoom — dependency-free. Pans and scales the whole .map-mount
+// layer (image + marker together) via a CSS transform inside a
+// fixed-aspect-ratio .map-viewport; the marker's own left/top percentages
+// (set by updateMapMarker above) stay relative to .map-mount, so it moves
+// and scales with the map for free, no extra coordination needed.
+{
+  const mapViewport = document.querySelector('[data-map-viewport]');
+  const mapMount = document.querySelector('[data-map-mount]');
+
+  if (mapViewport && mapMount) {
+    const MIN_SCALE = 1;
+    const MAX_SCALE = 4;
+    let scale = MIN_SCALE;
+    let tx = 0;
+    let ty = 0;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    const applyTransform = () => {
+      mapMount.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    };
+
+    const clampPan = () => {
+      const rect = mapViewport.getBoundingClientRect();
+      const minX = Math.min(0, rect.width - rect.width * scale);
+      const minY = Math.min(0, rect.height - rect.height * scale);
+      tx = Math.min(0, Math.max(minX, tx));
+      ty = Math.min(0, Math.max(minY, ty));
+    };
+
+    const setScale = (nextScale, originX, originY) => {
+      const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, nextScale));
+      if (clamped === scale) return;
+      const rect = mapViewport.getBoundingClientRect();
+      const px = originX ?? rect.width / 2;
+      const py = originY ?? rect.height / 2;
+      const ratio = clamped / scale;
+      tx = px - (px - tx) * ratio;
+      ty = py - (py - ty) * ratio;
+      scale = clamped;
+      if (scale === MIN_SCALE) {
+        tx = 0;
+        ty = 0;
+      }
+      clampPan();
+      applyTransform();
+      mapViewport.classList.toggle('is-zoomed', scale > MIN_SCALE);
+    };
+
+    mapViewport.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const rect = mapViewport.getBoundingClientRect();
+      setScale(scale + (event.deltaY > 0 ? -0.35 : 0.35), event.clientX - rect.left, event.clientY - rect.top);
+    }, { passive: false });
+
+    mapViewport.addEventListener('dblclick', (event) => {
+      const rect = mapViewport.getBoundingClientRect();
+      setScale(scale >= MAX_SCALE ? MIN_SCALE : scale + 1.5, event.clientX - rect.left, event.clientY - rect.top);
+    });
+
+    mapViewport.addEventListener('pointerdown', (event) => {
+      if (scale <= MIN_SCALE) return;
+      dragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      mapViewport.classList.add('is-dragging');
+      mapViewport.setPointerCapture(event.pointerId);
+    });
+
+    mapViewport.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      tx += event.clientX - lastX;
+      ty += event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      clampPan();
+      applyTransform();
+    });
+
+    const endDrag = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      mapViewport.classList.remove('is-dragging');
+      try { mapViewport.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    };
+    mapViewport.addEventListener('pointerup', endDrag);
+    mapViewport.addEventListener('pointercancel', endDrag);
+
+    document.querySelector('[data-map-zoom-in]')?.addEventListener('click', () => setScale(scale + 0.5));
+    document.querySelector('[data-map-zoom-out]')?.addEventListener('click', () => setScale(scale - 0.5));
+    document.querySelector('[data-map-zoom-reset]')?.addEventListener('click', () => setScale(MIN_SCALE));
+  }
+}
+
 // The Park button lives inside the same panel as the live dino's stats, so
 // it's normally hidden along with everything else once the dino is gone —
 // but SetHealth(0) (what parking does server-side) doesn't despawn the pawn
