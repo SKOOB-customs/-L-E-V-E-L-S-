@@ -399,20 +399,32 @@ const classPathForSpecies = (species) =>
 // own file format — mirrors main.lua's writeParkedDinos envelope exactly,
 // so !redeem / the website's Redeem button need zero changes to handle a
 // compensation-granted dino.
-const grantCompensationDino = async (env, targetSteamId, dino) => {
-  const path = `${PARKED_SAVED_DIR}/parked_${targetSteamId}.json`;
-  let dinos = [];
+const parkedFilePathFor = (steamId) => `${PARKED_SAVED_DIR}/parked_${steamId}.json`;
+
+// Shared by compensation, rename, and release — every write to a player's
+// parked_<steamid>.json goes through this same read-modify-write pair so
+// the envelope shape (main.lua's writeParkedDinos format) stays consistent
+// no matter which admin-panel or inventory action touched the file.
+const readParkedDinosArray = async (env, steamId) => {
   try {
-    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(parkedFilePathFor(steamId))}`);
     const raw = await response.text();
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed?.dinos)) dinos = parsed.dinos;
+    return Array.isArray(parsed?.dinos) ? parsed.dinos : [];
   } catch {
-    dinos = []; // no existing file for this player yet
+    return []; // no existing file for this player yet
   }
+};
+
+const writeParkedDinosArray = async (env, steamId, dinos) => {
+  const body = JSON.stringify({ version: 2, steam: steamId, dinos });
+  await pterodactylWriteFile(env, parkedFilePathFor(steamId), body);
+};
+
+const grantCompensationDino = async (env, targetSteamId, dino) => {
+  const dinos = await readParkedDinosArray(env, targetSteamId);
   dinos.push(dino);
-  const body = JSON.stringify({ version: 2, steam: targetSteamId, dinos });
-  await pterodactylWriteFile(env, path, body);
+  await writeParkedDinosArray(env, targetSteamId, dinos);
 };
 
 const pctToFraction = (value) => Math.min(100, Math.max(0, Number(value) || 0)) / 100;
@@ -641,6 +653,79 @@ export default {
         return json({ ok: true, dino });
       } catch (error) {
         return json({ error: error.message || 'Compensation grant failed' }, 502);
+      }
+    }
+
+    // Inventory: a player renames one of their own parked dinos. Same
+    // read-modify-write as compensation, but on an existing entry (matched
+    // by capturedAt, which doubles as its snapshot id — see main.lua) and
+    // gated to the dino's own owner, not an admin tier.
+    if (url.pathname === '/rename-parked-dino' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, snapshotId, name } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Not the owner of this dino' }, 403);
+      }
+      if (typeof snapshotId !== 'number') {
+        return json({ error: 'Missing or invalid snapshotId' }, 400);
+      }
+      if (typeof name !== 'string') {
+        return json({ error: 'Invalid name' }, 400);
+      }
+      try {
+        const dinos = await readParkedDinosArray(env, steamId);
+        const dino = dinos.find((d) => d.capturedAt === snapshotId);
+        if (!dino) return json({ error: 'Snapshot not found' }, 404);
+        dino.name = name.slice(0, 24);
+        await writeParkedDinosArray(env, steamId, dinos);
+        return json({ ok: true, dino });
+      } catch (error) {
+        return json({ error: error.message || 'Rename failed' }, 502);
+      }
+    }
+
+    // Inventory: a player releases (deletes) one of their own parked dinos.
+    // Irreversible — the website gates this behind a confirm dialog before
+    // ever calling here, but the real gate is the owner check below.
+    if (url.pathname === '/release-parked-dino' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, snapshotId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Not the owner of this dino' }, 403);
+      }
+      if (typeof snapshotId !== 'number') {
+        return json({ error: 'Missing or invalid snapshotId' }, 400);
+      }
+      try {
+        const dinos = await readParkedDinosArray(env, steamId);
+        const nextDinos = dinos.filter((d) => d.capturedAt !== snapshotId);
+        if (nextDinos.length === dinos.length) return json({ error: 'Snapshot not found' }, 404);
+        await writeParkedDinosArray(env, steamId, nextDinos);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Release failed' }, 502);
       }
     }
 

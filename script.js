@@ -1079,11 +1079,23 @@ const renderLiveDino = (dino) => {
   document.querySelectorAll('[data-dino-name]').forEach((el) => { el.textContent = dino.name || 'Unnamed'; });
   document.querySelectorAll('[data-dino-prime]').forEach((el) => { el.hidden = !dino.primeElder; });
 
+  // Hunger/thirst under 20% get a red, pulsing treatment everywhere they're
+  // shown (main card, the mini-strip under the map, and the plain-numbers
+  // sidebar) — all three share these same data-dino-bar/data-dino-value
+  // attributes, so one querySelectorAll pass covers every location.
+  const CRITICAL_STAT_THRESHOLD = 20;
   ['growth', 'health', 'stamina', 'hunger', 'thirst'].forEach((stat) => {
     const percent = Math.round((dino[stat] || 0) * 100);
     const clamped = Math.min(100, Math.max(0, percent));
-    document.querySelectorAll(`[data-dino-bar="${stat}"]`).forEach((bar) => { bar.style.width = `${clamped}%`; });
-    document.querySelectorAll(`[data-dino-value="${stat}"]`).forEach((value) => { value.textContent = `${clamped}%`; });
+    const isCritical = (stat === 'hunger' || stat === 'thirst') && clamped < CRITICAL_STAT_THRESHOLD;
+    document.querySelectorAll(`[data-dino-bar="${stat}"]`).forEach((bar) => {
+      bar.style.width = `${clamped}%`;
+      bar.classList.toggle('stat-critical', isCritical);
+    });
+    document.querySelectorAll(`[data-dino-value="${stat}"]`).forEach((value) => {
+      value.textContent = `${clamped}%`;
+      value.classList.toggle('stat-critical', isCritical);
+    });
   });
 
   const location = dino.location || {};
@@ -1395,6 +1407,53 @@ const buildParkedCard = (entry) => {
   // site already uses (/api/live-dino, the old inventory API), not a new gap.
   const viewerSteamId = getSteamProfile()?.steamId;
   if (entry.steam && viewerSteamId && entry.steam === viewerSteamId) {
+    const renameRow = document.createElement('div');
+    renameRow.className = 'parked-rename-row';
+    renameRow.addEventListener('click', (event) => event.stopPropagation());
+
+    const renameInput = document.createElement('input');
+    renameInput.type = 'text';
+    renameInput.maxLength = 24;
+    renameInput.placeholder = 'Name this dino...';
+    renameInput.value = entry.name || '';
+    renameInput.className = 'parked-rename-input';
+
+    const renameButton = document.createElement('button');
+    renameButton.type = 'button';
+    renameButton.className = 'action-button small';
+    renameButton.textContent = 'Save name';
+    renameButton.addEventListener('click', async () => {
+      const newName = renameInput.value.trim();
+      renameButton.disabled = true;
+      try {
+        const response = await fetch('/api/rename-parked-dino', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            steamId: entry.steam,
+            requesterSteamId: viewerSteamId,
+            snapshotId: entry.capturedAt,
+            name: newName,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          showToast(data.error || 'Could not rename that dino.');
+        } else {
+          entry.name = newName;
+          name.textContent = newName || entry.species;
+          showToast('Name updated.');
+        }
+      } catch (error) {
+        console.debug('Rename failed:', error);
+        showToast('Could not reach the server right now.');
+      } finally {
+        renameButton.disabled = false;
+      }
+    });
+    renameRow.append(renameInput, renameButton);
+    details.appendChild(renameRow);
+
     const redeemButton = document.createElement('button');
     redeemButton.type = 'button';
     redeemButton.className = 'action-button small parked-redeem-button';
@@ -1404,6 +1463,44 @@ const buildParkedCard = (entry) => {
       requestRedeem(entry, redeemButton);
     });
     details.appendChild(redeemButton);
+
+    const releaseButton = document.createElement('button');
+    releaseButton.type = 'button';
+    releaseButton.className = 'action-button small parked-release-button';
+    releaseButton.textContent = 'Release to the wild';
+    releaseButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const confirmLabel = entry.name ? `${entry.species} ("${entry.name}")` : entry.species;
+      if (!window.confirm(`Release this ${confirmLabel}? This can't be undone.`)) return;
+      releaseButton.disabled = true;
+      try {
+        const response = await fetch('/api/release-parked-dino', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            steamId: entry.steam,
+            requesterSteamId: viewerSteamId,
+            snapshotId: entry.capturedAt,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          showToast(data.error || 'Could not release that dino.');
+          releaseButton.disabled = false;
+          return;
+        }
+        showToast('Dino released.');
+        parkedEntries = parkedEntries.filter(
+          (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
+        );
+        renderParkedGrid();
+      } catch (error) {
+        console.debug('Release failed:', error);
+        showToast('Could not reach the server right now.');
+        releaseButton.disabled = false;
+      }
+    });
+    details.appendChild(releaseButton);
   }
 
   card.append(badges, image, species, titleRow, growthBar, stats, details);

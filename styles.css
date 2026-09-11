@@ -674,6 +674,23 @@ h6,
 .stat-hunger { background: #f0a860; }
 .stat-thirst { background: #6cc6f0; }
 
+/* Hunger/thirst under 20% — a visible, animated warning wherever a dino's
+   stats are shown (live card, map mini-strip, map numbers sidebar). */
+@keyframes stat-critical-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.stat-bar-fill.stat-critical {
+  background: #ff3b3b;
+  animation: stat-critical-pulse 0.85s ease-in-out infinite;
+}
+
+strong.stat-critical {
+  color: #ff3b3b;
+  animation: stat-critical-pulse 0.85s ease-in-out infinite;
+}
+
 /* Inventory gallery — server-wide grid of currently-parked dinos */
 
 .gallery-toolbar {
@@ -863,6 +880,28 @@ h6,
 
 .parked-redeem-button {
   width: 100%;
+}
+
+.parked-rename-row {
+  display: flex;
+  gap: 8px;
+}
+
+.parked-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.parked-release-button {
+  width: 100%;
+  background: rgba(209, 61, 77, 0.14);
+  border: 1px solid rgba(209, 61, 77, 0.4);
+  color: #ff8a8a;
+  box-shadow: none;
+}
+
+.parked-release-button:hover {
+  background: rgba(209, 61, 77, 0.22);
 }
 
 .dino-park-note {
