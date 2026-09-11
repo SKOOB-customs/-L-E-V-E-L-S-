@@ -409,27 +409,37 @@ const getAdminTier = async (env, steamId) => {
 // panel feature has to be built from data this server already produces:
 // TheIsle.log's own LogTheIsleJoinData lines, e.g.
 //   LogTheIsleJoinData: [2026.09.11-11.54.57] AyoSidhu (Ubbe) [76561198274950397] Joined The Server.
-// Synced on the same 1-minute cron as the other syncs, merging newly-seen
-// name/steamId pairs into a single KV index rather than tracking a
-// seq/offset into the log (unlike the admin audit log): the log FILE
-// itself rotates to a TheIsle-backup-*.log on every server restart and a
-// fresh, empty TheIsle.log starts in its place, so an offset wouldn't
-// survive that — re-scanning the current live file each tick and merging
-// is naturally idempotent and self-healing across restarts, and a
-// player's directory entry persists in KV forever once seen even after
-// their join line rotates out of the live log.
-const GAME_LOG_PATH = '/TheIsle/Saved/Logs/TheIsle.log';
+// (Isle's own logging truncates long Steam-name+character-name combos —
+// confirmed live, e.g. "Ayo Sidhu Paaji (Ubb" with no closing paren — this
+// is the game engine's own log formatting, not a parsing bug here.)
+//
+// Merges newly-seen name/steamId pairs into a single KV index rather than
+// tracking a seq/offset into the log (unlike the admin audit log): the log
+// FILE itself rotates to a TheIsle-backup-*.log on every server restart
+// and a fresh, empty TheIsle.log starts in its place, so an offset
+// wouldn't survive that. Every tick re-scans the current live file (cheap,
+// self-healing) plus any backup file this hasn't scanned yet (tracked in
+// its own small "already scanned" KV list, so each immutable backup is
+// only ever fetched once — this also one-time-backfills every player who
+// joined before this feature existed, not just future joins). A player's
+// directory entry persists in KV forever once seen, even after their join
+// line rotates out of the live log or their backup file eventually ages
+// out.
+const GAME_LOGS_DIR = '/TheIsle/Saved/Logs';
+const GAME_LOG_PATH = `${GAME_LOGS_DIR}/TheIsle.log`;
 const JOIN_LINE_RE = /LogTheIsleJoinData: \[[^\]]+\] (.+?) \[(\d{17})\] Joined The Server/g;
 
-const syncPlayerDirectory = async (env) => {
-  let raw;
-  try {
-    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(GAME_LOG_PATH)}`);
-    raw = await response.text();
-  } catch {
-    return { synced: 0 }; // no one has joined since the last restart yet
+const mergeJoinLines = (raw, players) => {
+  let match;
+  JOIN_LINE_RE.lastIndex = 0;
+  while ((match = JOIN_LINE_RE.exec(raw)) !== null) {
+    const name = match[1].trim();
+    const steamId = match[2];
+    if (name) players[steamId] = { name, lastSeen: Date.now() };
   }
+};
 
+const syncPlayerDirectory = async (env) => {
   const existingRaw = await env.PARKED_KV.get('player_directory:index');
   let players = {};
   if (existingRaw) {
@@ -440,12 +450,44 @@ const syncPlayerDirectory = async (env) => {
     }
   }
 
-  let match;
-  JOIN_LINE_RE.lastIndex = 0;
-  while ((match = JOIN_LINE_RE.exec(raw)) !== null) {
-    const name = match[1].trim();
-    const steamId = match[2];
-    if (name) players[steamId] = { name, lastSeen: Date.now() };
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(GAME_LOG_PATH)}`);
+    mergeJoinLines(await response.text(), players);
+  } catch {
+    // no one has joined since the last restart yet — fine, backup catch-up below still runs
+  }
+
+  let scannedBackups = [];
+  const scannedRaw = await env.PARKED_KV.get('player_directory:scanned_backups');
+  if (scannedRaw) {
+    try {
+      scannedBackups = JSON.parse(scannedRaw);
+    } catch {
+      scannedBackups = [];
+    }
+  }
+  try {
+    const listResponse = await pterodactylFetch(env, `/files/list?directory=${encodeURIComponent(GAME_LOGS_DIR)}`);
+    const listBody = await listResponse.json();
+    const backupNames = (listBody.data || [])
+      .map((entry) => entry.attributes)
+      .filter((attrs) => attrs?.is_file && /^TheIsle-backup-.*\.log$/.test(attrs.name))
+      .map((attrs) => attrs.name);
+    const newBackups = backupNames.filter((name) => !scannedBackups.includes(name));
+    for (const name of newBackups) {
+      try {
+        const backupResponse = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(`${GAME_LOGS_DIR}/${name}`)}`);
+        mergeJoinLines(await backupResponse.text(), players);
+        scannedBackups.push(name);
+      } catch {
+        // failed to fetch this one this tick — not marked scanned, so it's retried next tick
+      }
+    }
+    if (newBackups.length > 0) {
+      await env.PARKED_KV.put('player_directory:scanned_backups', JSON.stringify(scannedBackups));
+    }
+  } catch {
+    // directory listing failed this tick — live-file merge above still ran
   }
 
   await env.PARKED_KV.put('player_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));

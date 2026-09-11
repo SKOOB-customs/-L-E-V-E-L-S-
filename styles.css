@@ -1610,6 +1610,47 @@ strong.stat-critical {
   margin-top: 0;
 }
 
+.player-search {
+  position: relative;
+}
+
+.player-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.player-suggestion {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9em;
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+
+.player-suggestion:last-child {
+  border-bottom: none;
+}
+
+.player-suggestion:hover,
+.player-suggestion.is-active {
+  background: var(--panel-soft);
+}
+
+.player-suggestion small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
 .skin-color-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }

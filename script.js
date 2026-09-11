@@ -1775,36 +1775,84 @@ if (compSpeciesSelect) {
     .join('');
 }
 
-// Name-search autocomplete for the 3 target-steamId fields below. Backed by
-// a <datalist> populated from the game server's own join logs (there's no
-// Steam API for searching by name) — each option's value is "Name —
-// steamId" so the browser's native datalist filtering matches on the name,
-// and extractSteamId() below pulls the trailing 17-digit id back out
-// whichever way the field got filled in (typed manually or picked from the
-// dropdown).
+// Name-search autocomplete for the 3 target-steamId fields below. Backed
+// by a plain array fetched from the game server's own join logs (there's
+// no Steam API for searching by name) and rendered as a custom dropdown
+// rather than a native <datalist> — datalist's substring-matching behavior
+// is inconsistent across browsers (several only match from the start of
+// the name), and it offers no way to auto-fill the input with something
+// other than the option's own display text. This version matches on any
+// substring (e.g. "pook" finds "AyoPooks") and fills the input with the
+// actual steamId the moment a suggestion is picked.
+let playerDirectory = [];
+
 const loadPlayerDirectory = async () => {
   const profile = getSteamProfile();
   if (!profile?.steamId) return;
-  const datalist = document.getElementById('known-players-list');
-  if (!datalist) return;
   try {
     const response = await fetch(`/api/player-directory?requesterSteamId=${encodeURIComponent(profile.steamId)}`);
     const data = await response.json();
-    if (!response.ok || !Array.isArray(data.players)) return;
-    datalist.innerHTML = data.players
-      .map((p) => `<option value="${String(p.name).replace(/"/g, '&quot;')} — ${p.steamId}"></option>`)
-      .join('');
+    if (response.ok && Array.isArray(data.players)) playerDirectory = data.players;
   } catch (error) {
     console.debug('Player directory load failed:', error);
   }
 };
 
-const extractSteamId = (rawValue) => {
-  const trimmed = (rawValue || '').trim();
-  if (/^\d{17}$/.test(trimmed)) return trimmed;
-  const match = trimmed.match(/(\d{17})\s*$/);
-  return match ? match[1] : trimmed;
+const extractSteamId = (rawValue) => (rawValue || '').trim();
+
+const attachPlayerAutocomplete = (inputEl) => {
+  if (!inputEl) return;
+  const suggestionsEl = inputEl.closest('.player-search')?.querySelector('[data-player-suggestions]');
+  if (!suggestionsEl) return;
+
+  const hideSuggestions = () => {
+    suggestionsEl.hidden = true;
+    suggestionsEl.innerHTML = '';
+  };
+
+  const renderSuggestions = () => {
+    const query = inputEl.value.trim().toLowerCase();
+    if (!query || /^\d+$/.test(query)) {
+      hideSuggestions();
+      return;
+    }
+    const matches = playerDirectory
+      .filter((p) => String(p.name || '').toLowerCase().includes(query))
+      .slice(0, 8);
+    if (matches.length === 0) {
+      hideSuggestions();
+      return;
+    }
+    suggestionsEl.innerHTML = matches.map((p) => `
+      <div class="player-suggestion" data-steam-id="${p.steamId}">
+        ${String(p.name).replace(/</g, '&lt;')}
+        <small>${p.steamId}</small>
+      </div>
+    `).join('');
+    suggestionsEl.hidden = false;
+  };
+
+  inputEl.addEventListener('input', renderSuggestions);
+  inputEl.addEventListener('focus', renderSuggestions);
+  // mousedown (not click) fires before the input's blur, and preventDefault
+  // here stops that blur from happening at all — so hideSuggestions() below
+  // is the only thing that closes the dropdown, rather than a race between
+  // blur-hides-it and click-tries-to-read-it-first.
+  suggestionsEl.addEventListener('mousedown', (event) => {
+    const row = event.target.closest('[data-steam-id]');
+    if (!row) return;
+    event.preventDefault();
+    inputEl.value = row.dataset.steamId;
+    hideSuggestions();
+  });
+  inputEl.addEventListener('blur', () => {
+    setTimeout(hideSuggestions, 150);
+  });
 };
+
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]'].forEach((selector) => {
+  attachPlayerAutocomplete(document.querySelector(selector));
+});
 
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
