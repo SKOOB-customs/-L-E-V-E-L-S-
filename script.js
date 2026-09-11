@@ -1863,7 +1863,7 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
     showToast('Enter a skin name.');
     return;
   }
-  const chargeCount = Number(document.querySelector('[data-skin-count]')?.value) || 0;
+  const chargeCount = Number(document.querySelector('[data-skin-charge-count]')?.value) || 0;
   if (chargeCount < 1) {
     showToast('Charges must be at least 1.');
     return;
