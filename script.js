@@ -996,12 +996,111 @@ const startLiveDinoPolling = () => {
 
 startLiveDinoPolling();
 
-// Inventory gallery — server-wide view of every currently-parked dino,
-// synced from the game server by workers/bridge-worker.js's scheduled sync
-// (see functions/api/parked-list.js). Parking always happens in-game
-// (!park/!redeem/!parkstatus, see index.html); redeeming a SPECIFIC parked
-// dino (rather than the most-recent same-species one !redeem picks) can also
-// be done from a card here via functions/api/redeem.js — see requestRedeem.
+const ACTION_POLL_INTERVAL_MS = 2000;
+const ACTION_POLL_TIMEOUT_MS = 20000;
+
+// Shared by the Park button (Live Dino tab) and the per-card Redeem button
+// (Inventory tab): POST to a bridge endpoint to queue an in-game action,
+// then poll GET on the same endpoint for the mod's real result. Can't be
+// instant — the mod only checks for a pending request every few seconds,
+// and only while the player is online (which they must be to have clicked
+// this at all). endpoint's GET variant is expected to take the same
+// steamId/requestId query params every one of these bridge endpoints uses.
+const requestActionAndPoll = async ({ endpoint, body, buttonEl, idleLabel, waitingLabel, onSuccess }) => {
+  buttonEl.disabled = true;
+  buttonEl.textContent = 'Requesting…';
+
+  let requestId;
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.requestId) {
+      showToast(data.error || 'Could not request that right now.');
+      buttonEl.disabled = false;
+      buttonEl.textContent = idleLabel;
+      return;
+    }
+    requestId = data.requestId;
+  } catch (error) {
+    console.debug('Action request failed:', error);
+    showToast('Could not request that right now.');
+    buttonEl.disabled = false;
+    buttonEl.textContent = idleLabel;
+    return;
+  }
+
+  buttonEl.textContent = waitingLabel;
+  const startedAt = Date.now();
+
+  const poll = async () => {
+    if (Date.now() - startedAt > ACTION_POLL_TIMEOUT_MS) {
+      showToast("Didn't hear back — check in-game.");
+      buttonEl.disabled = false;
+      buttonEl.textContent = idleLabel;
+      return;
+    }
+    try {
+      const pollResponse = await fetch(
+        `${endpoint}?steamId=${encodeURIComponent(body.steamId)}&requestId=${encodeURIComponent(requestId)}`,
+      );
+      const pollData = await pollResponse.json();
+      if (pollData.ok === true) {
+        showToast(pollData.message || 'Done!');
+        onSuccess?.();
+        buttonEl.disabled = false;
+        buttonEl.textContent = idleLabel;
+        return;
+      }
+      if (pollData.ok === false) {
+        showToast(pollData.message || 'Failed.');
+        buttonEl.disabled = false;
+        buttonEl.textContent = idleLabel;
+        return;
+      }
+    } catch (error) {
+      console.debug('Action result poll failed:', error);
+    }
+    setTimeout(poll, ACTION_POLL_INTERVAL_MS);
+  };
+  setTimeout(poll, ACTION_POLL_INTERVAL_MS);
+};
+
+// Live Dino tab's Park button — same real in-game action as typing !park
+// in chat (see functions/api/park.js -> the bridge Worker -> a
+// park_request_<steamid>.json the mod's poll loop picks up).
+document.querySelector('[data-park-dino]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const nameInput = document.querySelector('[data-park-name-input]');
+  const name = nameInput?.value.trim() || '';
+  requestActionAndPoll({
+    endpoint: '/api/park',
+    body: { steamId: profile.steamId, name },
+    buttonEl: event.currentTarget,
+    idleLabel: 'Park Dino',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      if (nameInput) nameInput.value = '';
+      pollLiveDino(); // the dino just despawned; refresh so the tab reflects that
+    },
+  });
+});
+
+// Inventory gallery — the signed-in player's own currently-parked dinos
+// (scoped server-side by functions/api/parked-list.js, never anyone else's),
+// synced from the game server by workers/bridge-worker.js's scheduled sync.
+// Parking can happen in-game (!park, or the Live Dino tab's Park button
+// above) or on this page; redeeming a SPECIFIC parked dino (rather than the
+// most-recent same-species one !redeem picks) is done from a card here via
+// functions/api/redeem.js — see requestRedeem, which now just calls the
+// shared requestActionAndPoll helper defined above.
 const parkedCountEl = document.querySelector('[data-parked-count]');
 const parkedSearchEl = document.querySelector('[data-parked-search]');
 const parkedSortEl = document.querySelector('[data-parked-sort]');
@@ -1178,78 +1277,24 @@ const buildParkedCard = (entry) => {
   return card;
 };
 
-const REDEEM_POLL_INTERVAL_MS = 2000;
-const REDEEM_POLL_TIMEOUT_MS = 20000;
-
 // Asks the mod (via functions/api/redeem.js -> the bridge Worker -> a
 // redeem_request_<steamid>.json the mod's poll loop picks up) to redeem this
-// exact snapshot, then polls for the mod's real result — see the plan notes
-// on why this can't be instant (the mod only checks every few seconds, and
-// the check only happens once, since the player is presumably online right
-// now to have clicked this at all).
-const requestRedeem = async (entry, buttonEl) => {
-  buttonEl.disabled = true;
-  buttonEl.textContent = 'Requesting…';
-
-  let requestId;
-  try {
-    const response = await fetch('/api/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steamId: entry.steam, snapshotId: entry.capturedAt }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.requestId) {
-      showToast(data.error || 'Could not request redeem right now.');
-      buttonEl.disabled = false;
-      buttonEl.textContent = 'Redeem';
-      return;
-    }
-    requestId = data.requestId;
-  } catch (error) {
-    console.debug('Redeem request failed:', error);
-    showToast('Could not request redeem right now.');
-    buttonEl.disabled = false;
-    buttonEl.textContent = 'Redeem';
-    return;
-  }
-
-  buttonEl.textContent = 'Waiting for in-game…';
-  const startedAt = Date.now();
-
-  const poll = async () => {
-    if (Date.now() - startedAt > REDEEM_POLL_TIMEOUT_MS) {
-      showToast("Didn't hear back — check in-game.");
-      buttonEl.disabled = false;
-      buttonEl.textContent = 'Redeem';
-      return;
-    }
-    try {
-      const pollResponse = await fetch(
-        `/api/redeem?steamId=${encodeURIComponent(entry.steam)}&requestId=${encodeURIComponent(requestId)}`,
-      );
-      const pollData = await pollResponse.json();
-      if (pollData.ok === true) {
-        showToast(pollData.message || 'Redeemed!');
-        parkedEntries = parkedEntries.filter(
-          (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
-        );
-        renderParkedGrid();
-        return;
-      }
-      if (pollData.ok === false) {
-        showToast(pollData.message || 'Redeem failed.');
-        buttonEl.disabled = false;
-        buttonEl.textContent = 'Redeem';
-        return;
-      }
-    } catch (error) {
-      console.debug('Redeem result poll failed:', error);
-    }
-    setTimeout(poll, REDEEM_POLL_INTERVAL_MS);
-  };
-  setTimeout(poll, REDEEM_POLL_INTERVAL_MS);
-};
+// exact snapshot, then polls for the mod's real result via the shared
+// requestActionAndPoll helper (defined up in the Live Dino section, which
+// uses it too for the Park button).
+const requestRedeem = (entry, buttonEl) => requestActionAndPoll({
+  endpoint: '/api/redeem',
+  body: { steamId: entry.steam, snapshotId: entry.capturedAt },
+  buttonEl,
+  idleLabel: 'Redeem',
+  waitingLabel: 'Waiting for in-game…',
+  onSuccess: () => {
+    parkedEntries = parkedEntries.filter(
+      (e) => !(e.steam === entry.steam && e.capturedAt === entry.capturedAt),
+    );
+    renderParkedGrid();
+  },
+});
 
 const renderParkedGrid = () => {
   const query = (parkedSearchEl?.value || '').trim().toLowerCase();
