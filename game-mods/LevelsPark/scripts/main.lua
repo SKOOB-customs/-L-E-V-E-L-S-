@@ -1,32 +1,45 @@
--- LevelsPark: real in-game park/unpark for The Isle EVRIMA.
+-- LevelsPark: real in-game park/redeem for The Isle EVRIMA.
 --
 -- !park [name]  captures growth/health/stamina/hunger/thirst (plus the
 --         display-only extras below) for the sender's live dino, saves it to
 --         disk, then kills the dino (SetHealth(0)). The player naturally
 --         lands on the respawn/species-select screen. The optional name
 --         (e.g. "!park Rex") is our own metadata for the website gallery —
---         the game has no such field, so it's just stored as-is.
--- !unpark applies the saved stats onto the sender's current live pawn, IF the
---         species matches what was parked and the pawn is a fresh spawn
---         (growth below FRESH_SPAWN_GROWTH_CEILING). Consumes (deletes) the
---         saved snapshot on success, matching the website's "one active
---         parked dino at a time" rule.
--- !parkstatus reports what's currently parked for the sender, if anything.
+--         the game has no such field, so it's just stored as-is. Players can
+--         have any number of dinos parked at once (no "one at a time" limit).
+-- !redeem applies the saved stats for the sender's most recently parked dino
+--         of the SAME SPECIES as their current live pawn, IF that pawn is a
+--         fresh spawn (growth below FRESH_SPAWN_GROWTH_CEILING). Consumes
+--         (deletes) that one snapshot on success; any other parked dinos are
+--         untouched. To redeem a SPECIFIC (not-most-recent) parked dino, use
+--         the website's per-card Redeem button instead — see the
+--         website-redeem-request section below.
+-- !parkstatus reports everything currently parked for the sender.
 --
 -- Architecture notes (see EVRIMA_State_Restore_Cookbook.md / DinoStorage
 -- Architecture for the full recipe this is a trimmed-down version of):
 --   - Transform-in-place only. RequestRespawn is unreachable from Lua
 --     (crashes on the FCustomizerDataBase by-value param), so this never
 --     calls any respawn API. !park kills the pawn and lets the player
---     respawn through the normal game UI; !unpark mutates the resulting
+--     respawn through the normal game UI; !redeem mutates the resulting
 --     fresh juvenile in-place via scalar setters.
 --   - No mutations/nutrients/skin restore. Deliberately out of scope; this
 --     mod only round-trips growth + the four core vitals. PRIME status and
 --     body color ARE captured, but display-only (for the website gallery,
---     not applied on !unpark).
+--     not applied on !redeem).
 --   - Heavy actions (kill, restore) are deferred a few seconds off the chat
 --     hook and re-resolve the pawn fresh at fire time (hook parameter
 --     wrappers and cached pawns are unsafe across ticks).
+--   - Website-triggered redeem: the mod can't list directory contents from
+--     Lua at all, so it can't discover a request file for an arbitrary
+--     player. Instead a poll loop walks GameState.PlayerArray (the safe,
+--     verified way to enumerate online players — see
+--     EVRIMA_Lua_Safety_Rules.md Rule 3; FindAllOf("TIPlayerController") is
+--     NOT safe, it crashes on stale post-disconnect entries) and checks each
+--     currently-online player's own fixed-name request file. This means a
+--     website redeem can only ever be processed while that player is
+--     actually connected — which is required anyway, since applying stats
+--     needs a live pawn.
 
 local MOD_NAME = "LevelsPark"
 -- Confirmed live: a relative path ("Mods/LevelsPark/Saved/...") fails with
@@ -195,48 +208,89 @@ local function parkedFilePath(steam)
     return PARKED_DIR .. "/parked_" .. steam .. ".json"
 end
 
-local function loadParkedState(steam)
-    local path = parkedFilePath(steam)
-    if not fileExists(path) then return nil end
-    local body = readAll(path)
-    if body == nil or body == "" then return nil end
-    return {
-        name = jsonReadString(body, "name"),
-        classPath = jsonReadString(body, "classPath"),
-        growth = jsonReadNumber(body, "growth"),
-        health = jsonReadNumber(body, "health"),
-        maxHealth = jsonReadNumber(body, "maxHealth"),
-        stamina = jsonReadNumber(body, "stamina"),
-        hunger = jsonReadNumber(body, "hunger"),
-        thirst = jsonReadNumber(body, "thirst"),
-        maxHunger = jsonReadNumber(body, "maxHunger"),
-        maxThirst = jsonReadNumber(body, "maxThirst"),
-        maxStamina = jsonReadNumber(body, "maxStamina"),
-        primeElder = jsonReadBool(body, "primeElder"),
-        bodyColorR = jsonReadNumber(body, "bodyColorR"),
-        bodyColorG = jsonReadNumber(body, "bodyColorG"),
-        bodyColorB = jsonReadNumber(body, "bodyColorB"),
-        capturedAt = jsonReadNumber(body, "capturedAt"),
-    }
-end
-
-local function saveParkedState(steam, state)
-    local json = string.format(
-        '{"version":1,"steam":"%s","name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
+-- Each player's file is now {"version":2,"steam":"...","dinos":[{...},{...}]}
+-- — any number of parked dinos, not just one. The tiny jsonRead* helpers work
+-- by regex-scanning a whole string for a field, so they'd cross-contaminate
+-- across array elements if run on the full file body; %b{} (Lua's balanced-
+-- match pattern) splits the "dinos" array into individual flat-object
+-- substrings first, and each field is read from just its own object.
+local function dinoToJson(state)
+    return string.format(
+        '{"name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
         '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
         '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
         '"capturedAt":%d}',
-        jsonEscape(steam), jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
+        jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
         state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
         state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
         state.primeElder and "true" or "false", state.bodyColorR or 0, state.bodyColorG or 0,
         state.bodyColorB or 0, state.capturedAt
     )
+end
+
+local function writeParkedDinos(steam, dinos)
+    if #dinos == 0 then
+        os.remove(parkedFilePath(steam))
+        return true
+    end
+    local parts = {}
+    for _, d in ipairs(dinos) do table.insert(parts, dinoToJson(d)) end
+    local json = string.format('{"version":2,"steam":"%s","dinos":[%s]}',
+        jsonEscape(steam), table.concat(parts, ","))
     return writeAll(parkedFilePath(steam), json)
 end
 
-local function deleteParkedState(steam)
-    os.remove(parkedFilePath(steam))
+-- Returns an array (possibly empty) of every dino currently parked for this
+-- player. An old (pre-multi-park) single-object file, or no file at all,
+-- both just come back as an empty array — this is a breaking schema change,
+-- accepted deliberately rather than writing migration code for a handful of
+-- live records (see plan notes).
+local function loadParkedDinos(steam)
+    local path = parkedFilePath(steam)
+    if not fileExists(path) then return {} end
+    local body = readAll(path)
+    if body == nil or body == "" then return {} end
+    local dinosSection = body:match('"dinos"%s*:%s*(%b[])') or "[]"
+    local dinos = {}
+    for objStr in dinosSection:gmatch("%b{}") do
+        table.insert(dinos, {
+            name = jsonReadString(objStr, "name"),
+            classPath = jsonReadString(objStr, "classPath"),
+            growth = jsonReadNumber(objStr, "growth"),
+            health = jsonReadNumber(objStr, "health"),
+            maxHealth = jsonReadNumber(objStr, "maxHealth"),
+            stamina = jsonReadNumber(objStr, "stamina"),
+            hunger = jsonReadNumber(objStr, "hunger"),
+            thirst = jsonReadNumber(objStr, "thirst"),
+            maxHunger = jsonReadNumber(objStr, "maxHunger"),
+            maxThirst = jsonReadNumber(objStr, "maxThirst"),
+            maxStamina = jsonReadNumber(objStr, "maxStamina"),
+            primeElder = jsonReadBool(objStr, "primeElder"),
+            bodyColorR = jsonReadNumber(objStr, "bodyColorR"),
+            bodyColorG = jsonReadNumber(objStr, "bodyColorG"),
+            bodyColorB = jsonReadNumber(objStr, "bodyColorB"),
+            capturedAt = jsonReadNumber(objStr, "capturedAt"),
+        })
+    end
+    return dinos
+end
+
+local function saveParkedState(steam, state)
+    local dinos = loadParkedDinos(steam)
+    table.insert(dinos, state)
+    return writeParkedDinos(steam, dinos)
+end
+
+-- Removes exactly one parked dino (identified by its capturedAt, which
+-- doubles as its id — a player can't !park twice in the same second) and
+-- rewrites the file, or removes the file entirely if that was the last one.
+local function deleteParkedSnapshot(steam, capturedAt)
+    local dinos = loadParkedDinos(steam)
+    local remaining = {}
+    for _, d in ipairs(dinos) do
+        if d.capturedAt ~= capturedAt then table.insert(remaining, d) end
+    end
+    return writeParkedDinos(steam, remaining)
 end
 
 -- ── Capture / apply ──
@@ -332,57 +386,83 @@ local function processPark(steam, name)
     log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth)
         .. (state.name ~= "" and (", name=" .. state.name) or "") .. ")")
     safeNotify(steam, "Dino parked" .. (state.name ~= "" and (" as \"" .. state.name .. "\"") or "")
-        .. ". Respawn as the same species, then type !unpark to restore it.")
+        .. ". Respawn as the same species, then type !redeem to restore it.")
 end
 
-local function processUnpark(steam)
-    local state = loadParkedState(steam)
-    if state == nil then
-        safeNotify(steam, "Nothing parked for you right now.")
-        return
-    end
-
+-- Core redeem logic shared by the in-game !redeem command and website-
+-- triggered redeem requests. With snapshotId == nil, picks the most recent
+-- parked dino matching the player's current live species (the !redeem
+-- shortcut). With a specific snapshotId, only that exact snapshot qualifies
+-- (the website's per-card Redeem button) — still gated by the same
+-- species-match and fresh-spawn safety checks either way.
+-- Returns ok (bool), message (string).
+local function tryRedeem(steam, snapshotId)
     local gm = findGameMode()
-    if gm == nil then return end
+    if gm == nil then return false, "Redeem failed: internal error." end
     local ctrl
     pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
     local pawn = livePawnFromCtrl(ctrl)
     if pawn == nil then
-        safeNotify(steam, "Unpark failed: spawn in first, then type !unpark.")
-        return
+        return false, "Redeem failed: spawn in first, then try again."
     end
 
     local liveClassPath
     pcall(function() liveClassPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
-    if liveClassPath == nil or liveClassPath ~= state.classPath then
-        safeNotify(steam, "Unpark failed: spawn as the same species you parked, then try again.")
-        return
+    if liveClassPath == nil then
+        return false, "Redeem failed: could not read your current species."
     end
 
     local liveGrowth
     pcall(function() liveGrowth = pawn:GetGrowth() end)
     if liveGrowth == nil or liveGrowth > FRESH_SPAWN_GROWTH_CEILING then
-        safeNotify(steam, "Unpark only works on a freshly-spawned juvenile.")
-        return
+        return false, "Redeem only works on a freshly-spawned juvenile."
     end
 
-    applyStateToPawn(pawn, state)
-    deleteParkedState(steam)
-    log("Unparked " .. steam .. " (" .. tostring(state.classPath) .. ")")
-    safeNotify(steam, "Dino restored from your parked snapshot.")
+    local dinos = loadParkedDinos(steam)
+    local target = nil
+    for _, d in ipairs(dinos) do
+        if d.classPath == liveClassPath then
+            if snapshotId == nil then
+                if target == nil or (d.capturedAt or 0) > (target.capturedAt or 0) then target = d end
+            elseif d.capturedAt == snapshotId then
+                target = d
+            end
+        end
+    end
+
+    if target == nil then
+        if snapshotId ~= nil then
+            return false, "Redeem failed: that snapshot wasn't found, or its species doesn't match what you're playing."
+        end
+        return false, "Redeem failed: spawn as a species you have parked, then try again."
+    end
+
+    applyStateToPawn(pawn, target)
+    deleteParkedSnapshot(steam, target.capturedAt)
+    local label = (target.name and target.name ~= "") and (" (" .. target.name .. ")") or ""
+    return true, "Dino restored from your parked snapshot" .. label .. "."
+end
+
+local function processRedeem(steam)
+    local ok, message = tryRedeem(steam, nil)
+    safeNotify(steam, message)
+    if ok then log("Redeemed for " .. steam) end
 end
 
 local function processParkStatus(steam)
-    local state = loadParkedState(steam)
-    if state == nil then
+    local dinos = loadParkedDinos(steam)
+    if #dinos == 0 then
         safeNotify(steam, "You have nothing parked.")
         return
     end
-    local ageMin = math.floor((os.time() - (state.capturedAt or os.time())) / 60)
-    local label = (state.name and state.name ~= "") and (state.name .. " (" .. tostring(state.classPath) .. ")")
-        or tostring(state.classPath)
-    safeNotify(steam, string.format("Parked: %s, growth %.0f%%, parked %d min ago.",
-        label, (state.growth or 0) * 100, ageMin))
+    local parts = {}
+    for _, d in ipairs(dinos) do
+        local ageMin = math.floor((os.time() - (d.capturedAt or os.time())) / 60)
+        local label = (d.name and d.name ~= "") and (d.name .. " (" .. tostring(d.classPath) .. ")")
+            or tostring(d.classPath)
+        table.insert(parts, string.format("%s %.0f%% (%dm ago)", label, (d.growth or 0) * 100, ageMin))
+    end
+    safeNotify(steam, "Parked: " .. table.concat(parts, "; "))
 end
 
 -- TEMPORARY diagnostic: checks whether os.execute + curl.exe are usable from
@@ -418,12 +498,82 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     for _, action in ipairs(drain) do
         local ok, err = pcall(function()
             if action.kind == "park" then processPark(action.steam, action.extra)
-            elseif action.kind == "unpark" then processUnpark(action.steam)
+            elseif action.kind == "redeem" then processRedeem(action.steam)
             elseif action.kind == "status" then processParkStatus(action.steam)
             elseif action.kind == "testcurl" then processTestCurl(action.steam)
             end
         end)
         if not ok then log("Action " .. tostring(action.kind) .. " failed: " .. tostring(err)) end
+    end
+end)
+
+-- ── Website-triggered redeem (mod ↔ website bridge, write direction) ──
+--
+-- The website writes redeem_request_<steamid>.json (via Bropanel's
+-- Pterodactyl API — see workers/bridge-worker.js) when a player clicks
+-- Redeem on a specific parked-dino card. This mod has no way to list
+-- directory contents, so it can't discover that file for an arbitrary
+-- player; instead this loop walks the currently-online players (the safe
+-- GameState.PlayerArray pattern, not FindAllOf — see the header notes) and
+-- checks each one's own fixed-name request file.
+local REDEEM_REQUEST_POLL_MS = 3000
+
+local function redeemRequestFilePath(steam)
+    return SAVED_DIR .. "/redeem_request_" .. steam .. ".json"
+end
+
+local function redeemResultFilePath(steam)
+    return SAVED_DIR .. "/redeem_result_" .. steam .. ".json"
+end
+
+local function checkWebsiteRedeemRequest(steam)
+    local path = redeemRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local snapshotId = jsonReadNumber(body, "snapshotId")
+    if requestId == nil then return end
+
+    local ok, message = tryRedeem(steam, snapshotId)
+    safeNotify(steam, message)
+    log("Website redeem request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+
+    local resultJson = string.format(
+        '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
+        jsonEscape(requestId), ok and "true" or "false", jsonEscape(message), os.time()
+    )
+    writeAll(redeemResultFilePath(steam), resultJson)
+end
+
+local function findGameState()
+    local gs
+    pcall(function() gs = FindFirstOf("TIGameStateBase") end)
+    return gs
+end
+
+LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
+    local gameState = findGameState()
+    if gameState == nil then return end
+    local playerArray
+    pcall(function() playerArray = gameState.PlayerArray end)
+    if playerArray == nil then return end
+
+    local count = 0
+    pcall(function() count = #playerArray end)
+    for i = 1, count do
+        local ok, err = pcall(function()
+            local ps = playerArray[i]
+            if ps == nil then return end
+            local ctrl
+            pcall(function() ctrl = ps:GetOwningController() end)
+            local steam = getControllerSteamId(ctrl)
+            if steam ~= "" then checkWebsiteRedeemRequest(steam) end
+        end)
+        if not ok then log("Redeem-request poll failed for index " .. i .. ": " .. tostring(err)) end
     end
 end)
 
@@ -468,8 +618,8 @@ local function registerChatHook()
                 if lower == "!park" or lower:match("^!park%s") then
                     command = "!park"
                     nameArg = trimmed:match("^%S+%s*(.-)%s*$") or ""
-                elseif lower == "!unpark" then
-                    command = "!unpark"
+                elseif lower == "!redeem" then
+                    command = "!redeem"
                 elseif lower == "!parkstatus" then
                     command = "!parkstatus"
                 elseif lower == "!testcurl" then
@@ -487,7 +637,7 @@ local function registerChatHook()
 
                 log("dispatching command: " .. command)
                 if command == "!park" then queueAction("park", steam, nameArg)
-                elseif command == "!unpark" then queueAction("unpark", steam)
+                elseif command == "!redeem" then queueAction("redeem", steam)
                 elseif command == "!parkstatus" then queueAction("status", steam)
                 else queueAction("testcurl", steam) end
             end)

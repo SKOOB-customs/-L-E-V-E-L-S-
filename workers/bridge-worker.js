@@ -159,10 +159,28 @@ const readParkedFile = async (env, filename) => {
   return response.text();
 };
 
-// Syncs every parked_<steamid>.json currently on disk into KV as one
-// aggregated document, keyed by steam ID. Deleting a file (via !unpark)
-// naturally drops it from the next sync since we rebuild the whole map
-// each run rather than merging.
+const pterodactylWriteFile = async (env, path, body) => {
+  const url = `${env.PTERODACTYL_BASE_URL}/api/client/servers/${env.PTERODACTYL_SERVER_ID}/files/write?file=${encodeURIComponent(path)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PTERODACTYL_API_KEY}`,
+      'Content-Type': 'text/plain',
+    },
+    body,
+  });
+  if (!response.ok) {
+    throw new Error(`Pterodactyl write ${path} failed: ${response.status} ${await response.text()}`);
+  }
+};
+
+// Each parked_<steamid>.json now holds {version:2, steam, dinos:[...]} — a
+// player can have any number of parked dinos, not just one. Syncs every
+// file currently on disk into KV as one flattened aggregated document, one
+// entry per snapshot (not per player), keyed by `${steam}_${capturedAt}`
+// (capturedAt doubles as a snapshot id — see main.lua). Deleting a snapshot
+// (via !redeem or a website redeem) naturally drops it from the next sync
+// since we rebuild the whole map each run rather than merging.
 const syncParkedDinos = async (env) => {
   const files = await listParkedFiles(env);
   const parked = {};
@@ -174,10 +192,50 @@ const syncParkedDinos = async (env) => {
     } catch {
       continue; // skip partially-written or corrupt files rather than failing the whole sync
     }
-    if (data?.steam) parked[data.steam] = data;
+    if (!data?.steam || !Array.isArray(data.dinos)) continue;
+    for (const dino of data.dinos) {
+      if (!dino?.capturedAt) continue;
+      parked[`${data.steam}_${dino.capturedAt}`] = { ...dino, steam: data.steam };
+    }
   }
   await env.PARKED_KV.put('parked:index', JSON.stringify({ updatedAt: Date.now(), parked }));
   return parked;
+};
+
+const REDEEM_SAVED_DIR = PARKED_SAVED_DIR;
+
+const redeemRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/redeem_request_${steamId}.json`;
+const redeemResultPath = (steamId) => `${REDEEM_SAVED_DIR}/redeem_result_${steamId}.json`;
+
+// Writes a redeem request the mod's poll loop will pick up (see main.lua's
+// GameState.PlayerArray-based poller — it can only discover this file while
+// steamId is actually online, which is required anyway since applying
+// stats needs a live pawn).
+const requestRedeem = async (env, steamId, snapshotId) => {
+  const requestId = crypto.randomUUID();
+  const body = JSON.stringify({ snapshotId, requestId, requestedAt: Date.now() });
+  await pterodactylWriteFile(env, redeemRequestPath(steamId), body);
+  return requestId;
+};
+
+// Reads back the mod's result file, if any. Returns null if nothing has
+// been written yet or if it belongs to a different (older) request.
+const readRedeemResult = async (env, steamId, requestId) => {
+  let raw;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(redeemResultPath(steamId))}`);
+    raw = await response.text();
+  } catch {
+    return null; // no result file yet
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (data?.requestId !== requestId) return null; // stale result from an earlier request
+  return data;
 };
 
 export default {
@@ -207,6 +265,58 @@ export default {
         return json({ ok: true, count: Object.keys(parked).length, parked });
       } catch (error) {
         return json({ error: error.message || 'Sync failed' }, 502);
+      }
+    }
+
+    // Website → mod write direction: a player clicked Redeem on a specific
+    // parked-dino card. Called by functions/api/redeem.js, not directly by
+    // the browser (same indirection as the read-path bridge).
+    if (url.pathname === '/redeem-request' && request.method === 'POST') {
+      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Pterodactyl bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, snapshotId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof snapshotId !== 'number') {
+        return json({ error: 'Missing or invalid snapshotId' }, 400);
+      }
+      try {
+        const requestId = await requestRedeem(env, steamId, snapshotId);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Redeem request failed' }, 502);
+      }
+    }
+
+    // Polled by the website after a redeem request to find out whether the
+    // mod actually processed it (and whether it succeeded).
+    if (url.pathname === '/redeem-result' && request.method === 'GET') {
+      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readRedeemResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Redeem result lookup failed' }, 502);
       }
     }
 
