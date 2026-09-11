@@ -354,6 +354,16 @@ const teleportExecuteRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/teleport_ex
 const requestTeleportExecute = (env, moverSteamId, referenceSteamId) =>
   writeRequest(env, teleportExecuteRequestPath, moverSteamId, { referenceSteamId });
 
+const growthPauseRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/growth_pause_request_${steamId}.json`;
+const growthPauseResultPath = (steamId) => `${REDEEM_SAVED_DIR}/growth_pause_result_${steamId}.json`;
+// Written by main.lua's poll loop every tick for whichever players are
+// online+spawned (see the mod's growthStatusFilePath comment) — not a
+// request/result pair, just a status snapshot this Worker reads as-is.
+const growthStatusPath = (steamId) => `${REDEEM_SAVED_DIR}/growth_status_${steamId}.json`;
+
+const requestGrowthPause = (env, steamId, action) => writeRequest(env, growthPauseRequestPath, steamId, { action });
+const readGrowthPauseResult = (env, steamId, requestId) => readResult(env, growthPauseResultPath, steamId, requestId);
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -1002,6 +1012,72 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Skin use result lookup failed' }, 502);
+      }
+    }
+
+    // Live Dino tab: pause/resume growth on the caller's own live dino.
+    // main.lua's tryGrowthPauseToggle is the actual authority on the
+    // 50%-99% range check (it reads the live pawn's real Growth value) —
+    // this route just queues the request the same way skin-use does.
+    if (url.pathname === '/growth-pause-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, action } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (action !== 'pause' && action !== 'resume') {
+        return json({ error: 'action must be "pause" or "resume"' }, 400);
+      }
+      try {
+        const requestId = await requestGrowthPause(env, steamId, action);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Growth pause request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/growth-pause-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readGrowthPauseResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Growth pause result lookup failed' }, 502);
+      }
+    }
+
+    // Live Dino tab: current paused/growth snapshot, refreshed every poll
+    // tick by main.lua for online+spawned players. Not found yet (no file
+    // written since the last restart, or the player has never been
+    // spawned) just reads back as "not paused" rather than an error.
+    if (url.pathname === '/growth-status' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(growthStatusPath(steamId))}`);
+        const data = JSON.parse(await response.text());
+        return json({
+          ok: true,
+          paused: Boolean(data.paused),
+          growth: typeof data.growth === 'number' ? data.growth : null,
+          updatedAt: data.updatedAt || null,
+        });
+      } catch {
+        return json({ ok: true, paused: false, growth: null, updatedAt: null });
       }
     }
 

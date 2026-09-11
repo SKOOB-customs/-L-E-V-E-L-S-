@@ -1067,8 +1067,33 @@ const updateParkButtonForLiveState = (isAlive) => {
   btn.textContent = isAlive ? 'Park Dino' : 'Dino not alive';
 };
 
+// Mirrors the game's own bIsGrowthPaused range: pausable only from 50%
+// through 99% growth (never at 100%, and never before 50%).
+const GROWTH_PAUSE_MIN = 0.5;
+const GROWTH_PAUSE_MAX = 0.99;
+const GROWTH_PAUSE_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
+
+const updateGrowthPauseButtonForLiveState = (isAlive, growth, paused) => {
+  const btn = document.querySelector('[data-growth-pause]');
+  if (!btn || GROWTH_PAUSE_BUSY_LABELS.has(btn.textContent)) return;
+  btn.dataset.pausedState = paused ? 'true' : 'false';
+  if (!isAlive) {
+    btn.disabled = true;
+    btn.textContent = paused ? 'Resume Growth' : 'Pause Growth';
+    return;
+  }
+  if (paused) {
+    btn.disabled = false;
+    btn.textContent = 'Resume Growth';
+    return;
+  }
+  btn.disabled = !(growth >= GROWTH_PAUSE_MIN && growth <= GROWTH_PAUSE_MAX);
+  btn.textContent = 'Pause Growth';
+};
+
 const renderLiveDino = (dino) => {
   updateParkButtonForLiveState((dino.health || 0) > 0);
+  updateGrowthPauseButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.growthPaused));
 
   // querySelectorAll, not querySelector — the same stat/name/prime markup
   // is duplicated in the compact strip under the map (see index.html's
@@ -1123,6 +1148,16 @@ const pollLiveDino = async () => {
     const data = await response.json();
 
     if (data.found) {
+      // RCON's PlayerData command is a fixed protocol we don't control and
+      // doesn't carry the growth-paused flag — main.lua writes it to its
+      // own status file every poll tick instead (see growth-status.js).
+      try {
+        const statusResponse = await fetch(`/api/growth-status?steamId=${encodeURIComponent(profile.steamId)}`);
+        const statusData = await statusResponse.json();
+        data.growthPaused = Boolean(statusData.paused);
+      } catch (error) {
+        console.debug('Growth status poll failed:', error);
+      }
       renderLiveDino(data);
     } else if (response.status === 404) {
       setDinoView('empty');
@@ -1238,6 +1273,31 @@ document.querySelector('[data-park-dino]')?.addEventListener('click', (event) =>
     onSuccess: () => {
       if (nameInput) nameInput.value = '';
       pollLiveDino(); // the dino just despawned; refresh so the tab reflects that
+    },
+  });
+});
+
+// Live Dino tab's Pause/Resume Growth button — toggles main.lua's
+// bIsGrowthPaused write on the caller's own live dino (see
+// functions/api/growth-pause.js). Whether to pause or resume is read off
+// the button's own current label/state rather than tracked separately,
+// since renderLiveDino already keeps that in sync every poll tick.
+document.querySelector('[data-growth-pause]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  const action = btn.dataset.pausedState === 'true' ? 'resume' : 'pause';
+  requestActionAndPoll({
+    endpoint: '/api/growth-pause',
+    body: { steamId: profile.steamId, action },
+    buttonEl: btn,
+    idleLabel: action === 'pause' ? 'Pause Growth' : 'Resume Growth',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino(); // refresh so the button reflects the new paused state
     },
   });
 });

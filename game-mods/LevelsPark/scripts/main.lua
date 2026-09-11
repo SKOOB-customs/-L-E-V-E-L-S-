@@ -734,6 +734,23 @@ local function teleportExecuteResultFilePath(steam)
     return SAVED_DIR .. "/teleport_execute_result_" .. steam .. ".json"
 end
 
+local function growthPauseRequestFilePath(steam)
+    return SAVED_DIR .. "/growth_pause_request_" .. steam .. ".json"
+end
+
+local function growthPauseResultFilePath(steam)
+    return SAVED_DIR .. "/growth_pause_result_" .. steam .. ".json"
+end
+
+-- Written opportunistically every poll tick (see the per-controller loop
+-- below) for whichever players are currently online+spawned, so the
+-- website has somewhere to read live bIsGrowthPaused state from — RCON's
+-- PlayerData command is a fixed protocol we don't control and doesn't
+-- carry this flag, so the site can't get it any other way.
+local function growthStatusFilePath(steam)
+    return SAVED_DIR .. "/growth_status_" .. steam .. ".json"
+end
+
 local function writeRequestResult(resultPath, requestId, ok, message)
     local resultJson = string.format(
         '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
@@ -996,6 +1013,100 @@ local function checkWebsiteTeleportRequest(steam)
     writeRequestResult(teleportExecuteResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Website-triggered growth pause/resume (Live Dino tab) ──
+--
+-- ATIDinosaurBase carries its own uint8 bIsGrowthPaused flag plus an
+-- IsGrowthPaused()/GetGrowthRate() getter pair — confirmed via a live
+-- GenerateSDK dump of TheIsle.hpp, sitting directly alongside the other
+-- growth-timing fields (NextGrowthTick, HatchlingGrowthTimeMinutes, etc.),
+-- which is why this writes that flag directly rather than repeatedly
+-- re-asserting Growth via SetGrowth — the community docs' own safety
+-- rules warn SetGrowth recomputes and refills every vital's max each call,
+-- which a polling re-assert would thrash badly. This flag isn't documented
+-- anywhere in the community knowledge base (new ground, like the
+-- ForEachFunction crash earlier this mod's history) — genuinely unverified
+-- until watched live for a few real minutes to confirm Growth actually
+-- stops advancing once set, not just decoratively flagged.
+local GROWTH_PAUSE_MIN = 0.50
+local GROWTH_PAUSE_MAX = 0.99
+
+local function tryGrowthPauseToggle(steam, action)
+    local gm = findGameMode()
+    if gm == nil then return false, "Failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Failed: spawn in first, then try again."
+    end
+
+    if action == "pause" then
+        local growth
+        pcall(function() growth = pawn.Growth end)
+        if growth == nil then
+            return false, "Failed: could not read growth."
+        end
+        if growth < GROWTH_PAUSE_MIN or growth > GROWTH_PAUSE_MAX then
+            return false, string.format(
+                "Growth pause only allowed between 50%% and 99%% growth (currently %.0f%%).",
+                growth * 100
+            )
+        end
+        local ok, err = pcall(function()
+            pawn.bIsGrowthPaused = true
+            pawn:ForceNetUpdate()
+        end)
+        if not ok then
+            log("Growth pause: write failed: " .. tostring(err))
+            return false, "Failed: could not pause growth."
+        end
+        return true, "Growth paused."
+    elseif action == "resume" then
+        local ok, err = pcall(function()
+            pawn.bIsGrowthPaused = false
+            pawn:ForceNetUpdate()
+        end)
+        if not ok then
+            log("Growth resume: write failed: " .. tostring(err))
+            return false, "Failed: could not resume growth."
+        end
+        return true, "Growth resumed."
+    end
+    return false, "Failed: unknown action."
+end
+
+local function checkWebsiteGrowthPauseRequest(steam)
+    local path = growthPauseRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local action = jsonReadString(body, "action")
+    if requestId == nil then return end
+
+    local ok, message = tryGrowthPauseToggle(steam, action)
+    safeNotify(steam, message)
+    log("Website growth-pause request " .. requestId .. " for " .. steam .. ": action=" .. tostring(action)
+        .. " ok=" .. tostring(ok) .. " message=" .. tostring(message))
+    writeRequestResult(growthPauseResultFilePath(steam), requestId, ok, message)
+end
+
+-- Opportunistic status write, not request-driven — see growthStatusFilePath
+-- above for why the website needs this at all.
+local function writeGrowthStatus(steam, pawn)
+    local paused = false
+    pcall(function() paused = pawn.bIsGrowthPaused and true or false end)
+    local growth = 0
+    pcall(function() growth = pawn.Growth or 0 end)
+    local body = string.format(
+        '{"paused":%s,"growth":%f,"updatedAt":%d}',
+        paused and "true" or "false", growth, os.time() * 1000
+    )
+    writeAll(growthStatusFilePath(steam), body)
+end
+
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
 -- too often to log unconditionally) so a silent failure here is actually
 -- visible instead of just never doing anything. Gated ONCE per tick (not per
@@ -1041,6 +1152,9 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteRedeemRequest(steam)
                     checkWebsiteSkinUseRequest(steam)
                     checkWebsiteTeleportRequest(steam)
+                    checkWebsiteGrowthPauseRequest(steam)
+                    local pawn = livePawnFromCtrl(unwrapped)
+                    if pawn ~= nil then writeGrowthStatus(steam, pawn) end
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end
