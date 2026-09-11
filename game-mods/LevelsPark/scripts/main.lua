@@ -677,6 +677,128 @@ local function checkWebsiteRedeemRequest(steam)
     writeRequestResult(redeemResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Website-triggered glitch skins (admin panel, write direction) ──
+--
+-- The website's admin panel writes skin_<steamid>.json directly (no
+-- request/response file pair needed, unlike park/redeem — nothing here
+-- needs a live pawn at write time). This mod applies it whenever the
+-- player is next online, via the same per-controller poll loop below.
+--
+-- Recipe per EVRIMA_Customizer_Field_Map.md (post-0.21.720 skin-system
+-- overhaul): the old GetCustomizerData()/SetCustomizerData() round-trip
+-- silently no-ops server-side now (no error, no crash — the color just
+-- never renders). The working recipe is a direct write on the live
+-- pawn.CustomizerData property (never the GetCustomizerData() wrapper —
+-- same reasoning capturePawnState above already uses for reads) followed
+-- by pawn:ForceNetUpdate() to push replication. Deliberately does NOT
+-- touch PatternIndex or SkinVariation — PatternIndex is strictly
+-- per-species range-validated and an out-of-range value silently drops
+-- the ENTIRE apply (every color field too), and we don't have each
+-- species' valid pattern-count table. Every other customizer field is an
+-- unvalidated POD write, which this mod's own safety notes already prove
+-- safe for BodyColor specifically (writing all seven original color
+-- fields, verified live, server stable for hours afterward) — this just
+-- extends that same proven pattern to the three new 0.21.720 regions
+-- (Teeth/Mouth/Claws) and adds the ForceNetUpdate the overhaul now
+-- requires for it to actually be visible.
+--
+-- Skins don't survive relog/respawn by design (the engine rebuilds from
+-- its own stored SkinCode on every new pawn) so this mod owns persistence
+-- and re-applies on every fresh pawn. Since the WEBSITE (not an in-game
+-- command) sets skins, an admin can also update an already-online
+-- player's palette without their pawn changing at all — so the
+-- auto-restore check below gates on pawn-address change OR the skin
+-- file's own _updatedAt marker changing, not pawn address alone.
+local SKIN_COLOR_FIELDS = {
+    "BodyColor", "MarkingsColor", "FlankColor", "UnderbellyColor",
+    "Detail1Color", "EyesColor", "MaleDisplayColor",
+    "TeethColor", "MouthColor", "ClawsColor",
+}
+
+local function skinFilePath(steam)
+    return SAVED_DIR .. "/skin_" .. steam .. ".json"
+end
+
+local function jsonReadColorField(body, fieldName)
+    local sub = body:match('"' .. fieldName .. '"%s*:%s*(%b{})')
+    if sub == nil then return nil end
+    local r = jsonReadNumber(sub, "r")
+    local g = jsonReadNumber(sub, "g")
+    local b = jsonReadNumber(sub, "b")
+    if r == nil or g == nil or b == nil then return nil end
+    return { R = r, G = g, B = b, A = jsonReadNumber(sub, "a") or 1.0 }
+end
+
+local function loadSkin(steam)
+    local path = skinFilePath(steam)
+    if not fileExists(path) then return nil end
+    local body = readAll(path)
+    if body == nil or body == "" then return nil end
+    local skin = { updatedAt = jsonReadNumber(body, "_updatedAt") or 0 }
+    local any = false
+    for _, field in ipairs(SKIN_COLOR_FIELDS) do
+        local color = jsonReadColorField(body, field)
+        if color ~= nil then
+            skin[field] = color
+            any = true
+        end
+    end
+    if not any then return nil end
+    return skin
+end
+
+local function applyCustomizer(pawn, skin)
+    if pawn == nil or skin == nil then return false end
+    local okCd, cd = pcall(function() return pawn.CustomizerData end)
+    if not okCd or cd == nil then return false end
+
+    for _, field in ipairs(SKIN_COLOR_FIELDS) do
+        local color = skin[field]
+        if color ~= nil then
+            local ok, err = pcall(function()
+                cd[field].R = color.R
+                cd[field].G = color.G
+                cd[field].B = color.B
+                cd[field].A = color.A or 1.0
+            end)
+            if not ok then log("Skin apply: " .. field .. " write failed: " .. tostring(err)) end
+        end
+    end
+
+    pcall(function() pawn:ForceNetUpdate() end)
+    return true
+end
+
+-- steam -> last-applied pawn address / skin file version, keyed together so
+-- a re-apply fires on EITHER changing (fresh pawn, or an admin updated the
+-- palette on the same pawn) — mirrors the community SkinMod's
+-- pawn-address-only gating, extended with the version half this mod needs
+-- since it isn't the one setting skins live via a chat command.
+local lastSkinPawnAddr = {}
+local lastSkinVersion = {}
+
+local function checkSkinAutoRestore(steam, ctrl)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then return end
+    local skin = loadSkin(steam)
+    if skin == nil then return end
+
+    local addr
+    pcall(function() addr = pawn:GetAddress() end)
+    local addrKey = tostring(addr or 0)
+    local versionKey = tostring(skin.updatedAt or 0)
+
+    if lastSkinPawnAddr[steam] == addrKey and lastSkinVersion[steam] == versionKey then
+        return
+    end
+
+    if applyCustomizer(pawn, skin) then
+        lastSkinPawnAddr[steam] = addrKey
+        lastSkinVersion[steam] = versionKey
+        log("Skin auto-restore applied for " .. steam)
+    end
+end
+
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
 -- too often to log unconditionally) so a silent failure here is actually
 -- visible instead of just never doing anything. Gated ONCE per tick (not per
@@ -715,10 +837,12 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
     pcall(function()
         controllers:ForEach(function(ctrl)
             local ok, err = pcall(function()
-                local steam = getControllerSteamId(unwrapIfNeeded(ctrl))
+                local unwrapped = unwrapIfNeeded(ctrl)
+                local steam = getControllerSteamId(unwrapped)
                 if steam ~= "" then
                     checkWebsiteParkRequest(steam)
                     checkWebsiteRedeemRequest(steam)
+                    checkSkinAutoRestore(steam, unwrapped)
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end

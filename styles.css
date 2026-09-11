@@ -1536,6 +1536,40 @@ strong.stat-critical {
   margin-top: 0;
 }
 
+.skin-color-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.skin-color-grid input[type="color"] {
+  height: 42px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.skin-advanced {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.skin-advanced summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.skin-advanced .field-row {
+  margin-top: 12px;
+}
+
+.skin-advanced label {
+  font-size: 0.82rem;
+}
+
+.skin-advanced code {
+  font-size: 0.75rem;
+}
+
 .strike-entry {
   padding: 14px 16px;
   border-radius: 10px;
@@ -1639,6 +1673,10 @@ textarea {
   }
 
   .five-up {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .skin-color-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

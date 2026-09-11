@@ -1697,6 +1697,62 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
   }
 });
 
+document.querySelector('[data-skin-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetSteamId = document.querySelector('[data-skin-target]')?.value.trim() || '';
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+
+  // The Advanced JSON textarea overrides the color pickers entirely when
+  // filled in — the Worker accepts either hex strings or {r,g,b,a} objects
+  // per field, mixed freely, so this doesn't need to normalize anything
+  // client-side beyond parsing the JSON itself.
+  let colors;
+  const jsonText = document.querySelector('[data-skin-json]')?.value.trim() || '';
+  if (jsonText) {
+    try {
+      colors = JSON.parse(jsonText);
+    } catch (error) {
+      showToast('Advanced JSON is not valid JSON.');
+      return;
+    }
+  } else {
+    colors = {};
+    document.querySelectorAll('[data-skin-color]').forEach((input) => {
+      colors[input.dataset.skinColor] = input.value;
+    });
+  }
+
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/skin-grant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ granterSteamId: profile.steamId, targetSteamId, colors }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not apply that skin.');
+    } else {
+      showToast(`Skin applied to ${targetSteamId} — takes effect within a few seconds while they're online.`);
+      document.querySelector('[data-skin-target]').value = '';
+    }
+  } catch (error) {
+    console.debug('Skin grant failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
 const renderStrikeList = (strikes) => {
   const listEl = document.querySelector('[data-strike-list]');
   const emptyEl = document.querySelector('[data-strike-empty]');

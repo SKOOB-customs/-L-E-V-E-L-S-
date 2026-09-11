@@ -395,6 +395,56 @@ const KNOWN_SPECIES = [
 const classPathForSpecies = (species) =>
   `/Game/TheIsle/Core/Characters/Dinosaurs/${species}/BP_${species}.BP_${species}_C`;
 
+// Glitch skins: the 10 FCustomizerDataBase color fields (0.21.720+), same
+// set main.lua's applyCustomizer knows about. PatternIndex/SkinVariation are
+// deliberately not exposed here at all — see the admin-panel plan doc and
+// main.lua's own comment for why (PatternIndex is per-species range-gated
+// and a bad value silently drops the whole apply, colors included).
+const SKIN_COLOR_FIELDS = [
+  'BodyColor', 'MarkingsColor', 'FlankColor', 'UnderbellyColor',
+  'Detail1Color', 'EyesColor', 'MaleDisplayColor',
+  'TeethColor', 'MouthColor', 'ClawsColor',
+];
+
+const SKIN_SAVED_PATH = (steamId) => `${PARKED_SAVED_DIR}/skin_${steamId}.json`;
+
+const hexToLinearColor = (hex) => {
+  const match = /^#?([0-9a-fA-F]{6})$/.exec(hex || '');
+  if (!match) return null;
+  const n = Number.parseInt(match[1], 16);
+  return {
+    r: ((n >> 16) & 255) / 255,
+    g: ((n >> 8) & 255) / 255,
+    b: (n & 255) / 255,
+    a: 1,
+  };
+};
+
+const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
+
+// Accepts either a hex string ("#RRGGBB", from the picker UI) or a
+// pre-built {r,g,b,a} object (from the Advanced JSON path) per field, and
+// normalizes everything to clamped {r,g,b,a} floats — the same shape
+// regardless of which input path the admin used, so the persisted file
+// format never varies by UI path.
+const normalizeSkinColors = (colors) => {
+  const normalized = {};
+  for (const field of SKIN_COLOR_FIELDS) {
+    const value = colors?.[field];
+    if (value == null) continue;
+    if (typeof value === 'string') {
+      const rgb = hexToLinearColor(value);
+      if (rgb) normalized[field] = rgb;
+    } else if (typeof value === 'object') {
+      const { r, g, b, a } = value;
+      if (r != null && g != null && b != null) {
+        normalized[field] = { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: a != null ? clamp01(a) : 1 };
+      }
+    }
+  }
+  return normalized;
+};
+
 // Reused by both the compensation grant and (indirectly) syncParkedDinos'
 // own file format — mirrors main.lua's writeParkedDinos envelope exactly,
 // so !redeem / the website's Redeem button need zero changes to handle a
@@ -671,6 +721,49 @@ export default {
         return json({ ok: true, dino });
       } catch (error) {
         return json({ error: error.message || 'Compensation grant failed' }, 502);
+      }
+    }
+
+    // Glitch skins: writes skin_<steamid>.json directly — no request/result
+    // round trip needed (unlike park/redeem), since nothing here needs a
+    // live pawn at write time. main.lua's poll loop applies it next time
+    // that player is online (see checkSkinAutoRestore), gated on pawn
+    // address OR this write's _updatedAt changing, whichever fires first.
+    if (url.pathname === '/skin-grant' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, targetSteamId, colors } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (!colors || typeof colors !== 'object') {
+        return json({ error: 'Missing or invalid colors' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      const normalized = normalizeSkinColors(colors);
+      if (Object.keys(normalized).length === 0) {
+        return json({ error: 'No valid color fields provided' }, 400);
+      }
+      try {
+        await pterodactylWriteFile(env, SKIN_SAVED_PATH(targetSteamId), JSON.stringify({
+          _updatedAt: Date.now(),
+          ...normalized,
+        }));
+        return json({ ok: true, colors: normalized });
+      } catch (error) {
+        return json({ error: error.message || 'Skin grant failed' }, 502);
       }
     }
 

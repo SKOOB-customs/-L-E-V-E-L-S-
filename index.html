@@ -574,7 +574,7 @@
         <section class="tab-panel" id="admin-panel" data-tab="admin-panel" hidden>
           <div class="section-header">
             <p class="eyebrow">ADMIN PANEL</p>
-            <h2>Compensation &amp; strikes</h2>
+            <h2>Compensation, strikes &amp; glitch skins</h2>
           </div>
 
           <section class="panel content-box">
@@ -656,6 +656,65 @@
               </div>
               <div class="submit-actions">
                 <button class="action-button" type="submit">Issue strike</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Glitch Skins</div>
+            <p class="dino-park-note">Applies a custom color palette to a player's dino. Takes effect within a few seconds while they're online (in-game now, or next time they connect).</p>
+            <form class="submit-form" data-skin-form>
+              <div class="field-row">
+                <label>
+                  Target Steam ID
+                  <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-skin-target required />
+                </label>
+              </div>
+              <div class="field-row skin-color-grid">
+                <label>
+                  Body
+                  <input type="color" value="#808080" data-skin-color="BodyColor" />
+                </label>
+                <label>
+                  Pattern / Markings
+                  <input type="color" value="#808080" data-skin-color="MarkingsColor" />
+                </label>
+                <label>
+                  Flank / Sides
+                  <input type="color" value="#808080" data-skin-color="FlankColor" />
+                </label>
+                <label>
+                  Belly
+                  <input type="color" value="#808080" data-skin-color="UnderbellyColor" />
+                </label>
+                <label>
+                  Detail
+                  <input type="color" value="#808080" data-skin-color="Detail1Color" />
+                </label>
+                <label>
+                  Eyes
+                  <input type="color" value="#808080" data-skin-color="EyesColor" />
+                </label>
+                <label>
+                  Breed / Male display
+                  <input type="color" value="#808080" data-skin-color="MaleDisplayColor" />
+                </label>
+              </div>
+
+              <details class="skin-advanced">
+                <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
+                <div class="field-row">
+                  <label>
+                    Overrides the color pickers above if filled in. One field per color, e.g.
+                    <code>{"BodyColor": {"r":0.9,"g":0.1,"b":0.5,"a":1}, "TeethColor": "#ff00ff"}</code>
+                    — hex strings and <code>{r,g,b,a}</code> objects both work, mixed freely.
+                    <textarea rows="4" placeholder="Leave empty to use the color pickers above" data-skin-json></textarea>
+                  </label>
+                </div>
+              </details>
+
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Apply skin</button>
               </div>
             </form>
           </section>
