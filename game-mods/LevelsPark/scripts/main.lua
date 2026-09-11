@@ -162,6 +162,15 @@ local function stripClassPrefix(s)
     return string.match(s, "^%S+%s+(.+)$") or s
 end
 
+-- Friendly species name for display (e.g. "Allosaurus") out of a stored
+-- classPath like ".../Dinosaurs/Allosaurus/BP_Allosaurus.BP_Allosaurus_C" —
+-- mirrors script.js's speciesFromClassPath so !parkstatus reads the same
+-- way the website does.
+local function speciesFromClassPath(classPath)
+    if classPath == nil then return "Unknown" end
+    return classPath:match("/Dinosaurs/([^/]+)/") or "Unknown"
+end
+
 -- ── Tiny JSON helpers (no require, no library — see Helpers_Reference) ──
 
 local function jsonReadString(body, fieldName)
@@ -481,20 +490,46 @@ local function processRedeem(steam, name)
     if ok then log("Redeemed for " .. steam) end
 end
 
+-- Only shows parked dinos matching the species the player is CURRENTLY
+-- spawned as — not their whole inventory — since that's the one relevant
+-- set right before a !redeem. Requires being spawned in (there's no "which
+-- species did they mean" otherwise).
 local function processParkStatus(steam)
     local dinos = loadParkedDinos(steam)
     if #dinos == 0 then
         safeNotify(steam, "You have nothing parked.")
         return
     end
-    local parts = {}
-    for _, d in ipairs(dinos) do
-        local ageMin = math.floor((os.time() - (d.capturedAt or os.time())) / 60)
-        local label = (d.name and d.name ~= "") and (d.name .. " (" .. tostring(d.classPath) .. ")")
-            or tostring(d.classPath)
-        table.insert(parts, string.format("%s %.0f%% (%dm ago)", label, (d.growth or 0) * 100, ageMin))
+
+    local gm = findGameMode()
+    local ctrl
+    if gm ~= nil then pcall(function() ctrl = gm:GetControllerBySteamId(steam) end) end
+    local pawn = livePawnFromCtrl(ctrl)
+    local liveClassPath
+    if pawn ~= nil then pcall(function() liveClassPath = stripClassPrefix(pawn:GetClass():GetFullName()) end) end
+    if liveClassPath == nil then
+        safeNotify(steam, "Spawn in first to see what's parked for that species.")
+        return
     end
-    safeNotify(steam, "Parked: " .. table.concat(parts, "; "))
+
+    local matching = {}
+    for _, d in ipairs(dinos) do
+        if d.classPath == liveClassPath then table.insert(matching, d) end
+    end
+    if #matching == 0 then
+        safeNotify(steam, "Nothing parked for " .. speciesFromClassPath(liveClassPath) .. ".")
+        return
+    end
+    table.sort(matching, function(a, b) return (a.capturedAt or 0) > (b.capturedAt or 0) end)
+
+    local parts = {}
+    for _, d in ipairs(matching) do
+        local ageMin = math.floor((os.time() - (d.capturedAt or os.time())) / 60)
+        local namePrefix = (d.name and d.name ~= "") and (d.name .. ", ") or ""
+        table.insert(parts, string.format("%sgrowth %.0f%% (%dm ago)", namePrefix, (d.growth or 0) * 100, ageMin))
+    end
+    safeNotify(steam, string.format("%d %s parked: %s", #matching, speciesFromClassPath(liveClassPath),
+        table.concat(parts, "; ")))
 end
 
 -- TEMPORARY diagnostic: checks whether os.execute + curl.exe are usable from
