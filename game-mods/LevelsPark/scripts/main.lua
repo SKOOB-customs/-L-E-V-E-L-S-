@@ -803,3 +803,24 @@ else
     log("boot check: [" .. SAVED_DIR .. "] is NOT writable — !park will fail until this exists")
 end
 registerChatHook()
+
+-- TEMPORARY (admin-tiers discovery, remove once real UFunction names for
+-- Ban/Timeout/SetWeather/AllowedClasses are confirmed): calls UE4SS's own
+-- official GenerateSDK() global once, 15s after boot (giving the world time
+-- to finish loading classes). This writes real C++ header files for every
+-- currently-loaded class to Binaries/Win64/UE4SS_SDK/ — a core, documented
+-- UE4SS feature (what the wider community uses to build C++ side mods),
+-- NOT the same code path as UClass:ForEachFunction, which is confirmed to
+-- hard-crash this build (see the removed !admindump note above). No chat
+-- command needed — this runs automatically once, with no player
+-- interaction, so nobody else can trigger it.
+LoopInGameThreadWithDelay(15000, function()
+    log("Calling GenerateSDK()...")
+    local ok, err = pcall(function() GenerateSDK() end)
+    if ok then
+        writeAll(SAVED_DIR .. "/_gensdk_done.txt", "ok " .. os.time())
+        log("GenerateSDK() completed without a Lua-level error")
+    else
+        log("GenerateSDK() failed: " .. tostring(err))
+    end
+end)
