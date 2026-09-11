@@ -1012,7 +1012,7 @@ let liveDinoPollingInterval = null;
 const startLiveDinoPolling = () => {
   if (liveDinoPollingInterval) clearInterval(liveDinoPollingInterval);
   pollLiveDino();
-  liveDinoPollingInterval = setInterval(pollLiveDino, 15000);
+  liveDinoPollingInterval = setInterval(pollLiveDino, 5000);
 };
 
 startLiveDinoPolling();

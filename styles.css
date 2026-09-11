@@ -1013,7 +1013,7 @@ h6,
 
 .map-mount {
   position: relative;
-  max-width: 780px;
+  width: 100%;
   margin: 0 auto;
   border: 1px solid var(--line);
   border-radius: 8px;
