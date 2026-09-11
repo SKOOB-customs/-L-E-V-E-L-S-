@@ -1943,14 +1943,25 @@ checkAdminPanelAccess();
 // it only ever gets used inside the admin-only form anyway.
 let mutationCatalog = [];
 let mutationSlotTiers = [];
+let mutationSpeciesDiet = {};
 const MUTATION_TIER_LABELS = ['Base', 'Parent', 'Elder A', 'Elder B'];
+
+// Generic mutations are always eligible; an omnivore species (or a species
+// this map doesn't recognize) is treated as eligible for either pool since
+// there's no third diet bucket to restrict it to.
+const mutationAllowedForSpecies = (mutationDiet, species) => {
+  const speciesDiet = mutationSpeciesDiet[species] || 'omnivore';
+  return mutationDiet === 'generic' || speciesDiet === 'omnivore' || mutationDiet === speciesDiet;
+};
 
 const renderMutationSlots = () => {
   const container = document.querySelector('[data-comp-mutation-slots]');
   const entombmentsSelect = document.querySelector('[data-comp-entombments]');
+  const species = document.querySelector('[data-comp-species]')?.value;
   if (!container || !entombmentsSelect) return;
   const level = Number(entombmentsSelect.value) || 0;
   const optionsHtml = mutationCatalog
+    .filter((m) => mutationAllowedForSpecies(m.diet, species))
     .map((m) => `<option value="${String(m.name).replace(/"/g, '&quot;')}">${m.name}</option>`)
     .join('');
   container.innerHTML = mutationSlotTiers.slice(0, level + 1).map((fields, tierIndex) => `
@@ -1975,6 +1986,7 @@ const loadMutationCatalog = async () => {
     const data = await response.json();
     if (response.ok && Array.isArray(data.mutations)) mutationCatalog = data.mutations;
     if (response.ok && Array.isArray(data.tiers)) mutationSlotTiers = data.tiers;
+    if (response.ok && data.speciesDiet && typeof data.speciesDiet === 'object') mutationSpeciesDiet = data.speciesDiet;
   } catch (error) {
     console.debug('Mutation catalog load failed:', error);
   }
@@ -1982,6 +1994,7 @@ const loadMutationCatalog = async () => {
 };
 
 document.querySelector('[data-comp-entombments]')?.addEventListener('change', renderMutationSlots);
+document.querySelector('[data-comp-species]')?.addEventListener('change', renderMutationSlots);
 loadMutationCatalog();
 
 document.querySelector('[data-compensation-form]')?.addEventListener('submit', async (event) => {

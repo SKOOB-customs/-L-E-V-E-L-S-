@@ -409,6 +409,11 @@ local function loadParkedDinos(steam)
             skin = skin,
             entombments = jsonReadNumber(objStr, "entombments") or 0,
             mutations = mutations,
+            -- Set only by /compensation-grant (bridge-worker.js) — see
+            -- applyStateToPawn for why this matters: it stores
+            -- health/stamina/hunger/thirst as 0-1 fractions, not the
+            -- absolute point values a real !park capture stores.
+            statsArePercentages = jsonReadBool(objStr, "statsArePercentages") or false,
         })
     end
     return dinos
@@ -506,6 +511,33 @@ end
 -- then current vitals.
 local function applyStateToPawn(pawn, state)
     pcall(function() pawn:SetGrowth(state.growth) end)
+
+    if state.statsArePercentages then
+        -- Compensation-granted dinos (website admin panel) store
+        -- health/stamina/hunger/thirst as 0-1 FRACTIONS — the admin form
+        -- only ever offers a percentage, and the Worker has no way to know
+        -- a species' actual max-stat curve to convert that into a real
+        -- point value up front. A real !park capture, by contrast, always
+        -- stores the exact absolute point values GetHealth()/etc. returned
+        -- (e.g. 125, 61.5) — those two are NOT the same scale, and calling
+        -- SetHealth() with a raw 0-1 fraction here used to leave a redeemed
+        -- comp dino at ~1 hp (real bug, fixed 2026-09-11). Growth is set
+        -- first above specifically so GAS's auto-refill-to-new-max already
+        -- ran, then this reads the freshly-computed native max back out
+        -- and scales by the stored fraction, rather than trusting any
+        -- stored max value (there isn't one — comp grants never set one).
+        local maxHealth, maxStamina, maxHunger, maxThirst = 1, 1, 1, 1
+        pcall(function() maxHealth = pawn:GetMaxHealth() or 1 end)
+        pcall(function() maxStamina = pawn:GetMaxStamina() or 1 end)
+        pcall(function() maxHunger = pawn:GetMaxHunger() or 1 end)
+        pcall(function() maxThirst = pawn:GetMaxThirst() or 1 end)
+        pcall(function() pawn:SetHealth(maxHealth * (state.health or 1)) end)
+        pcall(function() pawn:SetStamina(maxStamina * (state.stamina or 1)) end)
+        pcall(function() pawn:SetHunger(maxHunger * (state.hunger or 1)) end)
+        pcall(function() pawn:SetThirst(maxThirst * (state.thirst or 1)) end)
+        return
+    end
+
     if state.maxHunger then pcall(function() pawn:SetMaxHunger(state.maxHunger) end) end
     if state.maxThirst then pcall(function() pawn:SetMaxThirst(state.maxThirst) end) end
     if state.maxStamina then pcall(function() pawn:SetMaxStamina(state.maxStamina) end) end

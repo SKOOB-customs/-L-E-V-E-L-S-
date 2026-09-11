@@ -198,7 +198,26 @@ const syncParkedDinos = async (env) => {
       parked[`${data.steam}_${dino.capturedAt}`] = { ...dino, steam: data.steam };
     }
   }
-  await env.PARKED_KV.put('parked:index', JSON.stringify({ updatedAt: Date.now(), parked }));
+  // KV writes are capped at 1,000/day on Cloudflare's free plan, and this
+  // sync runs every minute — writing unconditionally burned the whole
+  // daily quota in under a day (confirmed live: "KV put() limit exceeded
+  // for the day" started blocking every sync, including the on-demand one
+  // /api/parked-list triggers right after a grant/park/redeem — the
+  // actual root cause of a just-granted compensation dino not showing up
+  // in Inventory). Only write when the parked data actually differs from
+  // what's already stored.
+  const existingRaw = await env.PARKED_KV.get('parked:index');
+  let existingParked = null;
+  if (existingRaw) {
+    try {
+      existingParked = JSON.parse(existingRaw).parked || {};
+    } catch {
+      existingParked = null;
+    }
+  }
+  if (JSON.stringify(existingParked) !== JSON.stringify(parked)) {
+    await env.PARKED_KV.put('parked:index', JSON.stringify({ updatedAt: Date.now(), parked }));
+  }
   return parked;
 };
 
@@ -387,12 +406,27 @@ const syncAdminTiers = async (env) => {
   } catch {
     return { synced: false };
   }
-  await env.PARKED_KV.put('admin_tiers:index', JSON.stringify({
+  const next = {
     owner: Array.isArray(tiers.owner) ? tiers.owner : [],
     senior: Array.isArray(tiers.senior) ? tiers.senior : [],
     admin: Array.isArray(tiers.admin) ? tiers.admin : [],
-    updatedAt: Date.now(),
-  }));
+  };
+  // See syncParkedDinos for why this comparison exists: an unconditional
+  // write every tick (this sync runs every minute) blew through
+  // Cloudflare's 1,000-writes/day free KV quota on its own.
+  const existingRaw = await env.PARKED_KV.get('admin_tiers:index');
+  let existing = null;
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw);
+      existing = { owner: parsed.owner || [], senior: parsed.senior || [], admin: parsed.admin || [] };
+    } catch {
+      existing = null;
+    }
+  }
+  if (JSON.stringify(existing) !== JSON.stringify(next)) {
+    await env.PARKED_KV.put('admin_tiers:index', JSON.stringify({ ...next, updatedAt: Date.now() }));
+  }
   return { synced: true };
 };
 
@@ -459,6 +493,7 @@ const syncPlayerDirectory = async (env) => {
       players = {};
     }
   }
+  const existingPlayersSnapshot = JSON.parse(JSON.stringify(players));
 
   try {
     const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(GAME_LOG_PATH)}`);
@@ -500,7 +535,19 @@ const syncPlayerDirectory = async (env) => {
     // directory listing failed this tick — live-file merge above still ran
   }
 
-  await env.PARKED_KV.put('player_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));
+  // KV writes are capped at 1,000/day on Cloudflare's free plan, and this
+  // sync runs every minute — an unconditional write here (plus the same in
+  // syncParkedDinos/syncAdminTiers) burned the whole daily quota in under a
+  // day (confirmed live: "KV put() limit exceeded for the day" started
+  // blocking every sync, including the on-demand one /api/parked-list
+  // triggers right after a grant/park/redeem — the actual root cause of a
+  // just-granted compensation dino not showing up in Inventory). Only
+  // write when a join was actually merged in above, by comparing against
+  // the SAME parsed snapshot this function already loaded into `players`
+  // before merging (existingPlayersSnapshot, captured right after load).
+  if (JSON.stringify(existingPlayersSnapshot) !== JSON.stringify(players)) {
+    await env.PARKED_KV.put('player_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));
+  }
   return { synced: Object.keys(players).length };
 };
 
@@ -517,6 +564,43 @@ const KNOWN_SPECIES = [
 
 const classPathForSpecies = (species) =>
   `/Game/TheIsle/Core/Characters/Dinosaurs/${species}/BP_${species}.BP_${species}_C`;
+
+// Best-effort diet classification per species, matching ETIMutationTypes'
+// Carnivore/Herbivore split — NOT yet confirmed against the game's own
+// data (same caveat as KNOWN_MUTATIONS below). Gallimimus is the one
+// genuine omnivore among these 22; omnivores are treated as eligible for
+// BOTH carnivore and herbivore mutations (a permissive guess, not a
+// confirmed rule) since there's no third ETIMutationTypes bucket for them.
+const SPECIES_DIET = {
+  Allosaurus: 'carnivore',
+  Austroraptor: 'carnivore',
+  Beipiaosaurus: 'herbivore',
+  Carnotaurus: 'carnivore',
+  Ceratosaurus: 'carnivore',
+  Deinosuchus: 'carnivore',
+  Diabloceratops: 'herbivore',
+  Dilophosaurus: 'carnivore',
+  Dryosaurus: 'herbivore',
+  Gallimimus: 'omnivore',
+  Herrerasaurus: 'carnivore',
+  Hypsilophodon: 'herbivore',
+  Kentrosaurus: 'herbivore',
+  Maiasaura: 'herbivore',
+  Omniraptor: 'carnivore',
+  Pachycephalosaurus: 'herbivore',
+  Pteranodon: 'carnivore',
+  Stegosaurus: 'herbivore',
+  Tenontosaurus: 'herbivore',
+  Triceratops: 'herbivore',
+  Troodon: 'carnivore',
+  Tyrannosaurus: 'carnivore',
+};
+
+// True if a mutation with this diet tag is eligible for a species with
+// this diet — generic mutations are always eligible, an omnivore species
+// is eligible for either pool, and otherwise the diets must match exactly.
+const mutationDietAllowed = (mutationDiet, speciesDiet) =>
+  mutationDiet === 'generic' || speciesDiet === 'omnivore' || mutationDiet === speciesDiet;
 
 // Mirrors main.lua's MUTATION_SLOT_FIELDS (JSON keys are lowerCamelCase of
 // the PascalCase struct field names Lua uses) — 4 base + 4 "parent" + 8
@@ -559,7 +643,7 @@ const KNOWN_MUTATIONS = [
   { name: 'Cannibalistic', diet: 'carnivore' },
   { name: 'Truculency', diet: 'carnivore' },
   { name: 'Hypermetabolic Inanition', diet: 'carnivore' },
-  { name: 'Tactile Endurance', diet: 'carnivore' },
+  { name: 'Tactile Endurance', diet: 'herbivore' },
   { name: 'Barometric Sensitivity', diet: 'herbivore' },
   { name: 'Hypervigilance', diet: 'herbivore' },
   { name: 'Photosynthetic Regeneration', diet: 'herbivore' },
@@ -577,6 +661,7 @@ const KNOWN_MUTATIONS = [
   { name: 'Heightened Ghrelin', diet: 'generic' },
 ];
 const KNOWN_MUTATION_NAMES = new Set(KNOWN_MUTATIONS.map((m) => m.name));
+const KNOWN_MUTATION_DIET = new Map(KNOWN_MUTATIONS.map((m) => [m.name, m.diet]));
 
 // Glitch skins: the 10 FCustomizerDataBase color fields (0.21.720+), same
 // set main.lua's applyCustomizer knows about. PatternIndex/SkinVariation are
@@ -903,7 +988,7 @@ export default {
     // transparency posture as /admin-roster-public: this is read-only,
     // sourced from public wikis, and grants nothing by itself.
     if (url.pathname === '/mutations-catalog' && request.method === 'GET') {
-      return json({ ok: true, mutations: KNOWN_MUTATIONS, tiers: MUTATION_SLOT_TIERS });
+      return json({ ok: true, mutations: KNOWN_MUTATIONS, tiers: MUTATION_SLOT_TIERS, speciesDiet: SPECIES_DIET });
     }
 
     // Compensation: an admin grants a player a redeemable dino snapshot
@@ -955,6 +1040,10 @@ export default {
           if (typeof value !== 'string' || !KNOWN_MUTATION_NAMES.has(value)) {
             return json({ error: `Unknown mutation name: ${value}` }, 400);
           }
+          const speciesDiet = SPECIES_DIET[species] || 'omnivore';
+          if (!mutationDietAllowed(KNOWN_MUTATION_DIET.get(value), speciesDiet)) {
+            return json({ error: `${value} isn't available to a ${speciesDiet} species like ${species}` }, 400);
+          }
           mutations[field] = value;
         }
       }
@@ -980,6 +1069,12 @@ export default {
         capturedAt: Math.floor(Date.now() / 1000),
         compCode: generateCompCode(),
         entombments,
+        // health/stamina/hunger/thirst above are 0-1 fractions (this route
+        // only ever gets a percentage, never a species' real max-stat
+        // curve) — main.lua's applyStateToPawn needs this flag to scale by
+        // the pawn's own freshly-computed max at redeem time instead of
+        // treating them as absolute point values like a real !park capture.
+        statsArePercentages: true,
         ...mutations,
       };
       try {
