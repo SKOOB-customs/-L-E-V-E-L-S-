@@ -489,7 +489,7 @@
           <section class="panel content-box map-panel">
             <div id="mapViewport" class="map-viewport" data-map-viewport>
               <div id="mapMount" class="map-mount" data-map-mount aria-live="polite">
-                <img class="map-image" src="assets/Map/gateway.png" alt="LeveLs Gateway map" />
+                <img class="map-image" src="assets/Map/gateway.png" alt="LeveLs Gateway map" draggable="false" />
                 <div class="map-marker" data-map-marker hidden>
                   <span class="map-marker__pulse"></span>
                   <span class="map-marker__arrow" data-map-marker-arrow>
@@ -506,6 +506,36 @@
               </div>
             </div>
             <p class="map-hint">Scroll or use the buttons to zoom, then drag to pan around.</p>
+          </section>
+
+          <section class="panel content-box map-dino-strip" data-map-dino-strip hidden>
+            <div class="dino-stats">
+              <div class="stat-bar-row">
+                <span>Growth</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-growth" data-dino-bar="growth"></div></div>
+                <strong data-dino-value="growth">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Health</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-health" data-dino-bar="health"></div></div>
+                <strong data-dino-value="health">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Stamina</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-stamina" data-dino-bar="stamina"></div></div>
+                <strong data-dino-value="stamina">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Hunger</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-hunger" data-dino-bar="hunger"></div></div>
+                <strong data-dino-value="hunger">0%</strong>
+              </div>
+              <div class="stat-bar-row">
+                <span>Thirst</span>
+                <div class="stat-bar-track"><div class="stat-bar-fill stat-thirst" data-dino-bar="thirst"></div></div>
+                <strong data-dino-value="thirst">0%</strong>
+              </div>
+            </div>
           </section>
         </section>
 

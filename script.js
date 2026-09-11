@@ -870,6 +870,7 @@ const dinoEmpty = document.querySelector('[data-dino-empty]');
 const dinoErrorBox = document.querySelector('[data-dino-error]');
 const dinoErrorMessage = document.querySelector('[data-dino-error-message]');
 const dinoLiveCard = document.querySelector('[data-dino-live]');
+const mapDinoStrip = document.querySelector('[data-map-dino-strip]');
 const mapMarker = document.querySelector('[data-map-marker]');
 const mapMarkerArrow = document.querySelector('[data-map-marker-arrow]');
 
@@ -878,6 +879,7 @@ const setDinoView = (view, message) => {
   if (dinoEmpty) dinoEmpty.hidden = view !== 'empty';
   if (dinoErrorBox) dinoErrorBox.hidden = view !== 'error';
   if (dinoLiveCard) dinoLiveCard.hidden = view !== 'live';
+  if (mapDinoStrip) mapDinoStrip.hidden = view !== 'live';
   if (mapMarker) mapMarker.hidden = view !== 'live';
   if (view === 'error' && dinoErrorMessage && message) {
     dinoErrorMessage.textContent = message;
@@ -992,33 +994,45 @@ const updateMapMarker = (location) => {
       setScale(scale >= MAX_SCALE ? MIN_SCALE : scale + 1.5, event.clientX - rect.left, event.clientY - rect.top);
     });
 
-    mapViewport.addEventListener('pointerdown', (event) => {
-      if (scale <= MIN_SCALE) return;
-      dragging = true;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      mapViewport.classList.add('is-dragging');
-      mapViewport.setPointerCapture(event.pointerId);
-    });
+    // Move/up listeners live on window, not mapViewport — a fast drag can
+    // easily carry the pointer outside the map's small bounds mid-gesture,
+    // and tracking only stops when this pointerId lets go, wherever that
+    // happens to be. No scale gate either: a drag attempt at 1x is a
+    // harmless no-op (clampPan pins tx/ty to 0 since there's nothing to
+    // pan yet), so it never needs to silently do nothing on pointerdown.
+    let activePointerId = null;
 
-    mapViewport.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
+    const onPointerMove = (event) => {
+      if (!dragging || event.pointerId !== activePointerId) return;
       tx += event.clientX - lastX;
       ty += event.clientY - lastY;
       lastX = event.clientX;
       lastY = event.clientY;
       clampPan();
       applyTransform();
-    });
+    };
 
     const endDrag = (event) => {
-      if (!dragging) return;
+      if (!dragging || event.pointerId !== activePointerId) return;
       dragging = false;
+      activePointerId = null;
       mapViewport.classList.remove('is-dragging');
-      try { mapViewport.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', endDrag);
+      window.removeEventListener('pointercancel', endDrag);
     };
-    mapViewport.addEventListener('pointerup', endDrag);
-    mapViewport.addEventListener('pointercancel', endDrag);
+
+    mapViewport.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      dragging = true;
+      activePointerId = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      mapViewport.classList.add('is-dragging');
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', endDrag);
+      window.addEventListener('pointercancel', endDrag);
+    });
 
     document.querySelector('[data-map-zoom-in]')?.addEventListener('click', () => setScale(scale + 0.5));
     document.querySelector('[data-map-zoom-out]')?.addEventListener('click', () => setScale(scale - 0.5));
@@ -1048,21 +1062,20 @@ const updateParkButtonForLiveState = (isAlive) => {
 const renderLiveDino = (dino) => {
   updateParkButtonForLiveState((dino.health || 0) > 0);
 
-  const classEl = document.querySelector('[data-dino-class]');
-  const nameEl = document.querySelector('[data-dino-name]');
-  if (classEl) classEl.textContent = dino.class || 'Unknown';
-  if (nameEl) nameEl.textContent = dino.name || 'Unnamed';
-
-  const primeBadge = document.querySelector('[data-dino-prime]');
-  if (primeBadge) primeBadge.hidden = !dino.primeElder;
+  // querySelectorAll, not querySelector — the same stat/name/prime markup
+  // is duplicated in the compact strip under the map (see index.html's
+  // map-dino-strip), so every matching element (main card + map strip)
+  // stays in sync from one poll instead of only updating whichever one
+  // querySelector happened to find first.
+  document.querySelectorAll('[data-dino-class]').forEach((el) => { el.textContent = dino.class || 'Unknown'; });
+  document.querySelectorAll('[data-dino-name]').forEach((el) => { el.textContent = dino.name || 'Unnamed'; });
+  document.querySelectorAll('[data-dino-prime]').forEach((el) => { el.hidden = !dino.primeElder; });
 
   ['growth', 'health', 'stamina', 'hunger', 'thirst'].forEach((stat) => {
     const percent = Math.round((dino[stat] || 0) * 100);
     const clamped = Math.min(100, Math.max(0, percent));
-    const bar = document.querySelector(`[data-dino-bar="${stat}"]`);
-    const value = document.querySelector(`[data-dino-value="${stat}"]`);
-    if (bar) bar.style.width = `${clamped}%`;
-    if (value) value.textContent = `${clamped}%`;
+    document.querySelectorAll(`[data-dino-bar="${stat}"]`).forEach((bar) => { bar.style.width = `${clamped}%`; });
+    document.querySelectorAll(`[data-dino-value="${stat}"]`).forEach((value) => { value.textContent = `${clamped}%`; });
   });
 
   const location = dino.location || {};
@@ -1107,7 +1120,7 @@ let liveDinoPollingInterval = null;
 const startLiveDinoPolling = () => {
   if (liveDinoPollingInterval) clearInterval(liveDinoPollingInterval);
   pollLiveDino();
-  liveDinoPollingInterval = setInterval(pollLiveDino, 5000);
+  liveDinoPollingInterval = setInterval(pollLiveDino, 2000);
 };
 
 startLiveDinoPolling();
