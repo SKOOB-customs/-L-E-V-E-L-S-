@@ -910,6 +910,46 @@ strong.stat-critical {
   background: rgba(209, 61, 77, 0.22);
 }
 
+.skins-section-header {
+  margin-top: 8px;
+}
+
+.skin-card {
+  gap: 12px;
+}
+
+.skin-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skin-card-name {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.skin-card-charges {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.skin-card-charges strong {
+  color: var(--text);
+}
+
+.skin-attach-row {
+  display: flex;
+  gap: 8px;
+}
+
+.skin-attach-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .dino-park-note {
   margin: -8px 0 0;
   font-size: 0.78rem;

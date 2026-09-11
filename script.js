@@ -1401,6 +1401,7 @@ const buildParkedCard = (entry) => {
   addDetail('Thirst', `${Math.round(entry.thirst || 0)} / ${Math.round(entry.maxThirst || 0)}`);
   addDetail('Parked', entry.capturedAt ? new Date(entry.capturedAt * 1000).toLocaleString() : 'Unknown');
   if (entry.compCode) addDetail('Reference #', entry.compCode);
+  if (entry.skin) addDetail('Skin', entry.skin.name || 'Attached');
   details.appendChild(detailStats);
 
   // Redeeming someone else's dino makes no sense, so the button is only
@@ -1603,6 +1604,154 @@ parkedSortEl?.addEventListener('change', renderParkedGrid);
 document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadParkedList);
 loadParkedList();
 
+// ── Inventory: skin charges ──
+//
+// A separate grid from parked dinos, same rectangle-card look
+// (.parked-card reused directly — "rectangles like inventory cards" is
+// the whole point). Each card offers both ways to spend a charge: apply
+// to the player's current live dino (reuses requestActionAndPoll, same
+// shared request+poll UX Park/Redeem already use), or attach to one
+// specific parked dino from a dropdown built off parkedEntries (already
+// scoped to just this viewer, loaded by loadParkedList above).
+const skinsGridEl = document.querySelector('[data-skins-grid]');
+const skinsSignedOutEl = document.querySelector('[data-skins-signed-out]');
+const skinsEmptyEl = document.querySelector('[data-skins-empty]');
+
+let skinEntries = [];
+
+const buildSkinCard = (skin) => {
+  const card = document.createElement('article');
+  card.className = 'parked-card skin-card';
+
+  const header = document.createElement('div');
+  header.className = 'skin-card-header';
+  const name = document.createElement('h3');
+  name.className = 'skin-card-name';
+  name.textContent = skin.name || 'Unnamed skin';
+  const charges = document.createElement('span');
+  charges.className = 'skin-card-charges';
+  const chargesStrong = document.createElement('strong');
+  chargesStrong.textContent = String(skin.charges || 0);
+  charges.append(chargesStrong, ` charge${(skin.charges || 0) === 1 ? '' : 's'}`);
+  header.append(name, charges);
+
+  const applyButton = document.createElement('button');
+  applyButton.type = 'button';
+  applyButton.className = 'action-button small';
+  applyButton.textContent = 'Apply to live dino';
+  applyButton.addEventListener('click', () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    requestActionAndPoll({
+      endpoint: '/api/skin-use',
+      body: { steamId, skinCode: skin.code },
+      buttonEl: applyButton,
+      idleLabel: 'Apply to live dino',
+      waitingLabel: 'Waiting for in-game…',
+      onSuccess: () => loadSkinCharges(),
+    });
+  });
+
+  const attachRow = document.createElement('div');
+  attachRow.className = 'skin-attach-row';
+  const select = document.createElement('select');
+  const viewerSteamId = getSteamProfile()?.steamId;
+  const ownDinos = parkedEntries.filter((entry) => entry.steam === viewerSteamId);
+  if (ownDinos.length === 0) {
+    const option = document.createElement('option');
+    option.textContent = 'No parked dinos to attach to';
+    option.disabled = true;
+    select.appendChild(option);
+  } else {
+    ownDinos.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = String(entry.capturedAt);
+      const label = entry.name ? `${entry.name} (${entry.species})` : entry.species;
+      option.textContent = entry.skin ? `${label} — already skinned` : label;
+      select.appendChild(option);
+    });
+  }
+  const attachButton = document.createElement('button');
+  attachButton.type = 'button';
+  attachButton.className = 'action-button small';
+  attachButton.textContent = 'Attach';
+  attachButton.disabled = ownDinos.length === 0;
+  attachButton.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    const snapshotId = Number(select.value);
+    if (!snapshotId) return;
+    attachButton.disabled = true;
+    try {
+      const response = await fetch('/api/skin-attach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, snapshotId, skinCode: skin.code }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not attach that skin.');
+        attachButton.disabled = false;
+        return;
+      }
+      showToast('Skin attached — applies next time that dino is redeemed.');
+      await loadParkedList();
+      await loadSkinCharges();
+    } catch (error) {
+      console.debug('Skin attach failed:', error);
+      showToast('Could not reach the server right now.');
+      attachButton.disabled = false;
+    }
+  });
+  attachRow.append(select, attachButton);
+
+  card.append(header, applyButton, attachRow);
+  return card;
+};
+
+const renderSkinsGrid = () => {
+  if (skinsEmptyEl) skinsEmptyEl.hidden = skinEntries.length !== 0;
+  if (skinsGridEl) {
+    skinsGridEl.innerHTML = '';
+    skinEntries.forEach((skin) => skinsGridEl.appendChild(buildSkinCard(skin)));
+  }
+};
+
+const loadSkinCharges = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    if (skinsSignedOutEl) skinsSignedOutEl.hidden = false;
+    if (skinsEmptyEl) skinsEmptyEl.hidden = true;
+    if (skinsGridEl) skinsGridEl.innerHTML = '';
+    skinEntries = [];
+    return;
+  }
+  if (skinsSignedOutEl) skinsSignedOutEl.hidden = true;
+
+  try {
+    const response = await fetch(`/api/skin-charges?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      skinEntries = [];
+      renderSkinsGrid();
+      return;
+    }
+    skinEntries = data.skins || [];
+    renderSkinsGrid();
+  } catch (error) {
+    console.debug('Skin charges load failed:', error);
+  }
+};
+
+document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadSkinCharges);
+loadSkinCharges();
+
 // ── Admin Panel: compensation + strikes ──
 //
 // Gated to whoever's in admin_tiers.json (any tier — owner/senior/admin),
@@ -1709,6 +1858,16 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
     showToast('Enter a valid 17-digit Steam ID.');
     return;
   }
+  const skinName = document.querySelector('[data-skin-name]')?.value.trim() || '';
+  if (!skinName) {
+    showToast('Enter a skin name.');
+    return;
+  }
+  const chargeCount = Number(document.querySelector('[data-skin-count]')?.value) || 0;
+  if (chargeCount < 1) {
+    showToast('Charges must be at least 1.');
+    return;
+  }
 
   // The Advanced JSON textarea overrides the color pickers entirely when
   // filled in — the Worker accepts either hex strings or {r,g,b,a} objects
@@ -1736,14 +1895,21 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
     const response = await fetch('/api/skin-grant', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ granterSteamId: profile.steamId, targetSteamId, colors }),
+      body: JSON.stringify({
+        granterSteamId: profile.steamId,
+        targetSteamId,
+        name: skinName,
+        count: chargeCount,
+        colors,
+      }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      showToast(data.error || 'Could not apply that skin.');
+      showToast(data.error || 'Could not grant that skin.');
     } else {
-      showToast(`Skin applied to ${targetSteamId} — takes effect within a few seconds while they're online.`);
+      showToast(`Granted ${chargeCount} charge(s) of "${skinName}" to ${targetSteamId}.`);
       document.querySelector('[data-skin-target]').value = '';
+      document.querySelector('[data-skin-name]').value = '';
     }
   } catch (error) {
     console.debug('Skin grant failed:', error);

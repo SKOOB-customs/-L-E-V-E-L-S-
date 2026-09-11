@@ -662,12 +662,22 @@
 
           <section class="panel content-box">
             <div class="mini-heading">Glitch Skins</div>
-            <p class="dino-park-note">Applies a custom color palette to a player's dino. Takes effect within a few seconds while they're online (in-game now, or next time they connect).</p>
+            <p class="dino-park-note">Grants charges of a named skin to a player's Inventory — they spend a charge themselves, either on their live dino or attached to one specific parked dino.</p>
             <form class="submit-form" data-skin-form>
-              <div class="field-row">
+              <div class="field-row two-up">
                 <label>
                   Target Steam ID
                   <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-skin-target required />
+                </label>
+                <label>
+                  Skin name
+                  <input type="text" maxlength="40" placeholder="Neon Glitch" data-skin-name required />
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Charges to grant
+                  <input type="number" min="1" value="1" data-skin-count />
                 </label>
               </div>
               <div class="field-row skin-color-grid">
@@ -787,6 +797,33 @@
           </div>
 
           <div class="parked-grid" data-parked-grid></div>
+
+          <div class="section-header skins-section-header">
+            <p class="eyebrow">SKINS</p>
+            <h2>Your skin charges</h2>
+          </div>
+
+          <div class="panel content-box" data-skins-signed-out hidden>
+            <div class="mini-heading">Sign in required</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span>Connect with Steam to see your skin charges.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-skins-empty hidden>
+            <div class="mini-heading">No skin charges yet</div>
+            <div class="info-list">
+              <div>
+                <strong>—</strong>
+                <span>An admin can grant you charges of a custom skin from the Admin Panel.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="parked-grid" data-skins-grid></div>
         </section>
 
         <section class="tab-panel" id="live-dino" data-tab="live-dino">

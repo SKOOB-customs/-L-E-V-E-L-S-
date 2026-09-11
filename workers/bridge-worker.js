@@ -334,6 +334,15 @@ const readParkResult = (env, steamId, requestId) => readResult(env, parkResultPa
 const requestRedeem = (env, steamId, snapshotId) => writeRequest(env, redeemRequestPath, steamId, { snapshotId });
 const readRedeemResult = (env, steamId, requestId) => readResult(env, redeemResultPath, steamId, requestId);
 
+const skinUseRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_use_request_${steamId}.json`;
+const skinUseResultPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_use_result_${steamId}.json`;
+// Deliberately does NOT touch the charge ledger here — main.lua only
+// decrements a charge after a confirmed successful apply (see
+// trySkinUse), so a failed live-use (no live pawn, unknown code) never
+// burns one. This just queues the request the same way park/redeem do.
+const requestSkinUse = (env, steamId, skinCode) => writeRequest(env, skinUseRequestPath, steamId, { skinCode });
+const readSkinUseResult = (env, steamId, requestId) => readResult(env, skinUseResultPath, steamId, requestId);
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -405,8 +414,6 @@ const SKIN_COLOR_FIELDS = [
   'Detail1Color', 'EyesColor', 'MaleDisplayColor',
   'TeethColor', 'MouthColor', 'ClawsColor',
 ];
-
-const SKIN_SAVED_PATH = (steamId) => `${PARKED_SAVED_DIR}/skin_${steamId}.json`;
 
 const hexToLinearColor = (hex) => {
   const match = /^#?([0-9a-fA-F]{6})$/.exec(hex || '');
@@ -499,24 +506,49 @@ const grantCompensationDino = async (env, targetSteamId, dino) => {
   await writeParkedDinosArray(env, targetSteamId, dinos);
 };
 
+// Skin charge ledger — same read-modify-write shape as the parked-dino
+// helpers above. main.lua's own reader/writer (loadSkinCharges/
+// writeSkinCharges) uses this exact envelope, so either side can touch the
+// file without the other needing to change.
+const skinChargesFilePathFor = (steamId) => `${PARKED_SAVED_DIR}/skin_charges_${steamId}.json`;
+
+const readSkinCharges = async (env, steamId) => {
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(skinChargesFilePathFor(steamId))}`);
+    const raw = await response.text();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.skins) ? parsed.skins : [];
+  } catch {
+    return []; // no existing file for this player yet
+  }
+};
+
+const writeSkinCharges = async (env, steamId, skins) => {
+  const body = JSON.stringify({ skins });
+  await pterodactylWriteFile(env, skinChargesFilePathFor(steamId), body);
+};
+
 const pctToFraction = (value) => Math.min(100, Math.max(0, Number(value) || 0)) / 100;
 
-// Player/admin-facing reference code for a compensation grant — deliberately
-// NOT capturedAt (that stays a plain Unix-timestamp number always; main.lua's
-// own JSON reader parses it with a digits-only regex for !redeem's recency
-// sorting and the "parked Xm ago" age display, so it has to stay numeric).
-// This is a purely additive field main.lua doesn't know about and never
-// reads — its per-field parser silently ignores anything it doesn't
-// recognize, so this is safe to add without touching the mod at all.
-// Excludes 0/O/1/I to avoid on-screen ambiguity.
-const COMP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const generateCompCode = () => {
+// Player/admin-facing reference code generator — used for both compensation
+// grants (COMP-XXXX) and skin charges (SKIN-XXXX). Deliberately NOT
+// capturedAt for compensation dinos (that stays a plain Unix-timestamp
+// number always; main.lua's own JSON reader parses it with a digits-only
+// regex for !redeem's recency sorting and the "parked Xm ago" age display,
+// so it has to stay numeric) — these codes are purely additive fields
+// main.lua either never reads (compCode) or reads by exact string match
+// only (a skin's code), never parsed as a number either way. Excludes
+// 0/O/1/I to avoid on-screen ambiguity.
+const REFERENCE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateReferenceCode = (prefix) => {
   let code = '';
   for (let i = 0; i < 6; i += 1) {
-    code += COMP_CODE_CHARS[Math.floor(Math.random() * COMP_CODE_CHARS.length)];
+    code += REFERENCE_CODE_CHARS[Math.floor(Math.random() * REFERENCE_CODE_CHARS.length)];
   }
-  return `COMP-${code}`;
+  return `${prefix}-${code}`;
 };
+const generateCompCode = () => generateReferenceCode('COMP');
+const generateSkinCode = () => generateReferenceCode('SKIN');
 
 export default {
   async fetch(request, env) {
@@ -746,12 +778,14 @@ export default {
       }
     }
 
-    // Glitch skins: writes skin_<steamid>.json directly — no request/result
-    // round trip needed (unlike park/redeem), since nothing here needs a
-    // live pawn at write time. main.lua's poll loop applies it next time
-    // that player is online (see checkSkinAutoRestore), gated on pawn
-    // address OR this write's _updatedAt changing, whichever fires first.
-    if (url.pathname === '/skin-grant' && request.method === 'POST') {
+    // Glitch skins v2: admins grant CHARGES of a named skin, not a direct
+    // apply — an earlier version wrote skin_<steamid>.json directly and
+    // auto-restored it to whatever pawn a player currently had, which
+    // leaked the skin onto every dino they later redeemed. Now nothing
+    // touches a live pawn at grant time; a player spends a charge later
+    // via /skin-use-live (this pawn only, one-shot) or /skin-attach-parked
+    // (baked into one specific snapshot, applied at redeem time).
+    if (url.pathname === '/skin-grant-charges' && request.method === 'POST') {
       if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
         return json({ error: 'Bridge is not configured' }, 503);
       }
@@ -761,12 +795,19 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { granterSteamId, targetSteamId, colors } = body || {};
+      const { granterSteamId, targetSteamId, name, count, colors } = body || {};
       if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
         return json({ error: 'Missing or invalid granterSteamId' }, 400);
       }
       if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
         return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json({ error: 'Skin name is required' }, 400);
+      }
+      const chargeCount = Math.floor(Number(count));
+      if (!Number.isFinite(chargeCount) || chargeCount < 1) {
+        return json({ error: 'Charge count must be at least 1' }, 400);
       }
       if (!colors || typeof colors !== 'object') {
         return json({ error: 'Missing or invalid colors' }, 400);
@@ -779,13 +820,134 @@ export default {
         return json({ error: 'No valid color fields provided' }, 400);
       }
       try {
-        await pterodactylWriteFile(env, SKIN_SAVED_PATH(targetSteamId), JSON.stringify({
-          _updatedAt: Date.now(),
-          ...normalized,
-        }));
-        return json({ ok: true, colors: normalized });
+        const skins = await readSkinCharges(env, targetSteamId);
+        const trimmedName = name.trim().slice(0, 40);
+        const existing = skins.find((entry) => entry.name === trimmedName);
+        let granted;
+        if (existing) {
+          existing.charges = (existing.charges || 0) + chargeCount;
+          existing.colors = normalized;
+          existing.code = generateSkinCode();
+          granted = existing;
+        } else {
+          granted = { name: trimmedName, code: generateSkinCode(), colors: normalized, charges: chargeCount };
+          skins.push(granted);
+        }
+        await writeSkinCharges(env, targetSteamId, skins);
+        return json({ ok: true, skin: granted });
       } catch (error) {
         return json({ error: error.message || 'Skin grant failed' }, 502);
+      }
+    }
+
+    // Inventory: a player's own skin-charge ledger. Same trust model as
+    // /api/parked-list — client-supplied steamId, no separate requester
+    // check (read-only, their own data, not a new gap on this site).
+    if (url.pathname === '/skin-charges' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const skins = await readSkinCharges(env, steamId);
+        return json({ ok: true, skins });
+      } catch (error) {
+        return json({ error: error.message || 'Skin charges lookup failed' }, 502);
+      }
+    }
+
+    // Inventory: spend one charge on the player's CURRENT live dino —
+    // one-shot, does not persist past this pawn's life (no auto-restore
+    // exists for this path by design). Self-service, not admin-gated.
+    if (url.pathname === '/skin-use-live' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, skinCode } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Not the owner of these charges' }, 403);
+      }
+      if (typeof skinCode !== 'string' || skinCode === '') {
+        return json({ error: 'Missing or invalid skinCode' }, 400);
+      }
+      try {
+        const requestId = await requestSkinUse(env, steamId, skinCode);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Skin use request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-use-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readSkinUseResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Skin use result lookup failed' }, 502);
+      }
+    }
+
+    // Inventory: attach one charge of a skin to ONE specific parked dino.
+    // Pure file read-modify-write (no live pawn needed) — the skin bakes
+    // into that snapshot's own data and applies once, at redeem time (see
+    // tryRedeem in main.lua). This is what actually scopes a skin to a
+    // single dino instead of leaking across every dino a player redeems.
+    if (url.pathname === '/skin-attach-parked' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, snapshotId, skinCode } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Not the owner of this dino' }, 403);
+      }
+      if (typeof snapshotId !== 'number') {
+        return json({ error: 'Missing or invalid snapshotId' }, 400);
+      }
+      if (typeof skinCode !== 'string' || skinCode === '') {
+        return json({ error: 'Missing or invalid skinCode' }, 400);
+      }
+      try {
+        const skins = await readSkinCharges(env, steamId);
+        const skinEntry = skins.find((entry) => entry.code === skinCode);
+        if (!skinEntry || (skinEntry.charges || 0) < 1) {
+          return json({ error: 'No charges remaining for that skin' }, 400);
+        }
+        const dinos = await readParkedDinosArray(env, steamId);
+        const dino = dinos.find((d) => d.capturedAt === snapshotId);
+        if (!dino) return json({ error: 'Snapshot not found' }, 404);
+
+        skinEntry.charges -= 1;
+        const remainingSkins = skinEntry.charges > 0 ? skins : skins.filter((entry) => entry.code !== skinCode);
+        dino.skin = { name: skinEntry.name, code: skinEntry.code, colors: skinEntry.colors };
+
+        await writeSkinCharges(env, steamId, remainingSkins);
+        await writeParkedDinosArray(env, steamId, dinos);
+        return json({ ok: true, dino });
+      } catch (error) {
+        return json({ error: error.message || 'Skin attach failed' }, 502);
       }
     }
 

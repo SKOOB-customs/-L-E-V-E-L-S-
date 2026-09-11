@@ -193,6 +193,66 @@ local function jsonEscape(s)
     return s
 end
 
+-- The 10 FCustomizerDataBase color fields (0.21.720+) glitch skins can set —
+-- declared up here (not down in the glitch-skins section below) because
+-- loadParkedDinos needs it too, to pick up an optional skin attached to a
+-- specific parked dino, and Lua locals must be declared before use.
+local SKIN_COLOR_FIELDS = {
+    "BodyColor", "MarkingsColor", "FlankColor", "UnderbellyColor",
+    "Detail1Color", "EyesColor", "MaleDisplayColor",
+    "TeethColor", "MouthColor", "ClawsColor",
+}
+
+local function jsonReadColorField(body, fieldName)
+    local sub = body:match('"' .. fieldName .. '"%s*:%s*(%b{})')
+    if sub == nil then return nil end
+    local r = jsonReadNumber(sub, "r")
+    local g = jsonReadNumber(sub, "g")
+    local b = jsonReadNumber(sub, "b")
+    if r == nil or g == nil or b == nil then return nil end
+    return { R = r, G = g, B = b, A = jsonReadNumber(sub, "a") or 1.0 }
+end
+
+-- Recipe per EVRIMA_Customizer_Field_Map.md (post-0.21.720 skin-system
+-- overhaul): the old GetCustomizerData()/SetCustomizerData() round-trip
+-- silently no-ops server-side now (no error, no crash — the color just
+-- never renders). The working recipe is a direct write on the live
+-- pawn.CustomizerData property (never the GetCustomizerData() wrapper —
+-- same reasoning capturePawnState below uses for reads) followed by
+-- pawn:ForceNetUpdate() to push replication. Deliberately does NOT touch
+-- PatternIndex or SkinVariation — PatternIndex is strictly per-species
+-- range-validated and an out-of-range value silently drops the ENTIRE
+-- apply (every color field too), and we don't have each species' valid
+-- pattern-count table. Every other customizer field is an unvalidated POD
+-- write, which this mod's own safety notes already prove safe for
+-- BodyColor specifically (writing all seven original color fields,
+-- verified live, server stable for hours afterward) — this just extends
+-- that same proven pattern to the three new 0.21.720 regions (Teeth/
+-- Mouth/Claws) and adds the ForceNetUpdate the overhaul now requires for
+-- it to actually be visible. Declared up here (not in the glitch-skins
+-- section further down) because tryRedeem needs it and comes first.
+local function applyCustomizer(pawn, colors)
+    if pawn == nil or colors == nil then return false end
+    local okCd, cd = pcall(function() return pawn.CustomizerData end)
+    if not okCd or cd == nil then return false end
+
+    for _, field in ipairs(SKIN_COLOR_FIELDS) do
+        local color = colors[field]
+        if color ~= nil then
+            local ok, err = pcall(function()
+                cd[field].R = color.R
+                cd[field].G = color.G
+                cd[field].B = color.B
+                cd[field].A = color.A or 1.0
+            end)
+            if not ok then log("Skin apply: " .. field .. " write failed: " .. tostring(err)) end
+        end
+    end
+
+    pcall(function() pawn:ForceNetUpdate() end)
+    return true
+end
+
 -- ── File I/O ──
 
 local function fileExists(path)
@@ -270,6 +330,22 @@ local function loadParkedDinos(steam)
     local dinosSection = body:match('"dinos"%s*:%s*(%b[])') or "[]"
     local dinos = {}
     for objStr in dinosSection:gmatch("%b{}") do
+        -- Optional skin attached by the website's /skin-attach-parked (an
+        -- admin-granted charge spent on this specific snapshot) — absent
+        -- on ordinary parked dinos. Read once here, applied once at
+        -- redeem time in tryRedeem; never written back by this mod (the
+        -- snapshot is deleted right after a successful redeem anyway).
+        local skinSection = objStr:match('"skin"%s*:%s*(%b{})')
+        local skin = nil
+        if skinSection ~= nil then
+            local colorsSection = skinSection:match('"colors"%s*:%s*(%b{})') or "{}"
+            local colors = {}
+            for _, field in ipairs(SKIN_COLOR_FIELDS) do
+                local color = jsonReadColorField(colorsSection, field)
+                if color ~= nil then colors[field] = color end
+            end
+            skin = { name = jsonReadString(skinSection, "name"), colors = colors }
+        end
         table.insert(dinos, {
             name = jsonReadString(objStr, "name"),
             classPath = jsonReadString(objStr, "classPath"),
@@ -287,6 +363,7 @@ local function loadParkedDinos(steam)
             bodyColorG = jsonReadNumber(objStr, "bodyColorG"),
             bodyColorB = jsonReadNumber(objStr, "bodyColorB"),
             capturedAt = jsonReadNumber(objStr, "capturedAt"),
+            skin = skin,
         })
     end
     return dinos
@@ -500,6 +577,14 @@ local function tryRedeem(steam, snapshotId, name)
     end
 
     applyStateToPawn(pawn, target)
+    -- A skin attached to this specific snapshot (via the website's
+    -- Attach action, spending a charge) travels with it — applied once,
+    -- right here, never via a continuous per-player poll. This is what
+    -- actually keeps skins scoped to the dino they were attached to
+    -- instead of leaking onto whatever a player redeems next.
+    if target.skin ~= nil then
+        applyCustomizer(pawn, target.skin.colors)
+    end
     deleteParkedSnapshot(steam, target.capturedAt)
     local label = (target.name and target.name ~= "") and (" (" .. target.name .. ")") or ""
     return true, "Dino restored from your parked snapshot" .. label .. "."
@@ -633,6 +718,14 @@ local function redeemResultFilePath(steam)
     return SAVED_DIR .. "/redeem_result_" .. steam .. ".json"
 end
 
+local function skinUseRequestFilePath(steam)
+    return SAVED_DIR .. "/skin_use_request_" .. steam .. ".json"
+end
+
+local function skinUseResultFilePath(steam)
+    return SAVED_DIR .. "/skin_use_result_" .. steam .. ".json"
+end
+
 local function writeRequestResult(resultPath, requestId, ok, message)
     local resultJson = string.format(
         '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
@@ -679,124 +772,138 @@ end
 
 -- ── Website-triggered glitch skins (admin panel, write direction) ──
 --
--- The website's admin panel writes skin_<steamid>.json directly (no
--- request/response file pair needed, unlike park/redeem — nothing here
--- needs a live pawn at write time). This mod applies it whenever the
--- player is next online, via the same per-controller poll loop below.
---
--- Recipe per EVRIMA_Customizer_Field_Map.md (post-0.21.720 skin-system
--- overhaul): the old GetCustomizerData()/SetCustomizerData() round-trip
--- silently no-ops server-side now (no error, no crash — the color just
--- never renders). The working recipe is a direct write on the live
--- pawn.CustomizerData property (never the GetCustomizerData() wrapper —
--- same reasoning capturePawnState above already uses for reads) followed
--- by pawn:ForceNetUpdate() to push replication. Deliberately does NOT
--- touch PatternIndex or SkinVariation — PatternIndex is strictly
--- per-species range-validated and an out-of-range value silently drops
--- the ENTIRE apply (every color field too), and we don't have each
--- species' valid pattern-count table. Every other customizer field is an
--- unvalidated POD write, which this mod's own safety notes already prove
--- safe for BodyColor specifically (writing all seven original color
--- fields, verified live, server stable for hours afterward) — this just
--- extends that same proven pattern to the three new 0.21.720 regions
--- (Teeth/Mouth/Claws) and adds the ForceNetUpdate the overhaul now
--- requires for it to actually be visible.
---
--- Skins don't survive relog/respawn by design (the engine rebuilds from
--- its own stored SkinCode on every new pawn) so this mod owns persistence
--- and re-applies on every fresh pawn. Since the WEBSITE (not an in-game
--- command) sets skins, an admin can also update an already-online
--- player's palette without their pawn changing at all — so the
--- auto-restore check below gates on pawn-address change OR the skin
--- file's own _updatedAt marker changing, not pawn address alone.
-local SKIN_COLOR_FIELDS = {
-    "BodyColor", "MarkingsColor", "FlankColor", "UnderbellyColor",
-    "Detail1Color", "EyesColor", "MaleDisplayColor",
-    "TeethColor", "MouthColor", "ClawsColor",
-}
+-- Skins are a charge-based inventory item, NOT an always-on per-player
+-- override (an earlier version of this feature auto-restored one skin to
+-- "whatever pawn this player currently has," which meant parking one dino
+-- and redeeming a different one still carried the old skin over — wrong,
+-- confirmed live). A skin only ever applies at one of two well-defined
+-- moments now: a website-triggered live-use request (below), or a redeem
+-- of a parked dino that has a skin attached to it specifically (see
+-- tryRedeem above) — never a continuous poll re-applying "the last used
+-- skin." applyCustomizer itself (the actual color-write recipe) lives up
+-- near jsonReadColorField, not here — tryRedeem needs it and comes before
+-- this section in the file.
 
-local function skinFilePath(steam)
-    return SAVED_DIR .. "/skin_" .. steam .. ".json"
+-- Charge ledger: {"skins":[{"name":...,"code":"SKIN-XXXX","colors":{...},"charges":N}]}
+-- Written by the Worker's /skin-grant-charges (admin grants) and
+-- /skin-attach-parked (decrements on attach); read and decremented here on
+-- a live-use request. code is the stable id requests key off, not name
+-- (names can collide or get retyped).
+local function skinChargesFilePath(steam)
+    return SAVED_DIR .. "/skin_charges_" .. steam .. ".json"
 end
 
-local function jsonReadColorField(body, fieldName)
-    local sub = body:match('"' .. fieldName .. '"%s*:%s*(%b{})')
-    if sub == nil then return nil end
-    local r = jsonReadNumber(sub, "r")
-    local g = jsonReadNumber(sub, "g")
-    local b = jsonReadNumber(sub, "b")
-    if r == nil or g == nil or b == nil then return nil end
-    return { R = r, G = g, B = b, A = jsonReadNumber(sub, "a") or 1.0 }
-end
-
-local function loadSkin(steam)
-    local path = skinFilePath(steam)
-    if not fileExists(path) then return nil end
+local function loadSkinCharges(steam)
+    local path = skinChargesFilePath(steam)
+    if not fileExists(path) then return {} end
     local body = readAll(path)
-    if body == nil or body == "" then return nil end
-    local skin = { updatedAt = jsonReadNumber(body, "_updatedAt") or 0 }
-    local any = false
-    for _, field in ipairs(SKIN_COLOR_FIELDS) do
-        local color = jsonReadColorField(body, field)
-        if color ~= nil then
-            skin[field] = color
-            any = true
+    if body == nil or body == "" then return {} end
+    local section = body:match('"skins"%s*:%s*(%b[])') or "[]"
+    local skins = {}
+    for objStr in section:gmatch("%b{}") do
+        local colorsSection = objStr:match('"colors"%s*:%s*(%b{})') or "{}"
+        local colors = {}
+        for _, field in ipairs(SKIN_COLOR_FIELDS) do
+            local color = jsonReadColorField(colorsSection, field)
+            if color ~= nil then colors[field] = color end
         end
+        table.insert(skins, {
+            name = jsonReadString(objStr, "name"),
+            code = jsonReadString(objStr, "code"),
+            charges = jsonReadNumber(objStr, "charges") or 0,
+            colors = colors,
+        })
     end
-    if not any then return nil end
-    return skin
+    return skins
 end
 
-local function applyCustomizer(pawn, skin)
-    if pawn == nil or skin == nil then return false end
-    local okCd, cd = pcall(function() return pawn.CustomizerData end)
-    if not okCd or cd == nil then return false end
-
+local function skinChargeEntryToJson(entry)
+    local colorParts = {}
     for _, field in ipairs(SKIN_COLOR_FIELDS) do
-        local color = skin[field]
-        if color ~= nil then
-            local ok, err = pcall(function()
-                cd[field].R = color.R
-                cd[field].G = color.G
-                cd[field].B = color.B
-                cd[field].A = color.A or 1.0
-            end)
-            if not ok then log("Skin apply: " .. field .. " write failed: " .. tostring(err)) end
+        local c = entry.colors[field]
+        if c ~= nil then
+            table.insert(colorParts, string.format('"%s":{"r":%f,"g":%f,"b":%f,"a":%f}',
+                field, c.R, c.G, c.B, c.A or 1.0))
         end
     end
-
-    pcall(function() pawn:ForceNetUpdate() end)
-    return true
+    return string.format('{"name":"%s","code":"%s","colors":{%s},"charges":%d}',
+        jsonEscape(entry.name or ""), jsonEscape(entry.code or ""),
+        table.concat(colorParts, ","), entry.charges or 0)
 end
 
--- steam -> last-applied pawn address / skin file version, keyed together so
--- a re-apply fires on EITHER changing (fresh pawn, or an admin updated the
--- palette on the same pawn) — mirrors the community SkinMod's
--- pawn-address-only gating, extended with the version half this mod needs
--- since it isn't the one setting skins live via a chat command.
-local lastSkinPawnAddr = {}
-local lastSkinVersion = {}
+local function writeSkinCharges(steam, skins)
+    if #skins == 0 then
+        os.remove(skinChargesFilePath(steam))
+        return true
+    end
+    local parts = {}
+    for _, entry in ipairs(skins) do table.insert(parts, skinChargeEntryToJson(entry)) end
+    local json = string.format('{"skins":[%s]}', table.concat(parts, ","))
+    return writeAll(skinChargesFilePath(steam), json)
+end
 
-local function checkSkinAutoRestore(steam, ctrl)
+-- Core live-use logic: spend one charge of skinCode on the sender's
+-- CURRENT live pawn. Deliberately does not touch the charge count until
+-- AFTER a confirmed successful apply, so a failed attempt (no live pawn,
+-- unknown code) never burns a charge. One-shot — does not persist past
+-- this pawn's life; relogging or redeeming a different dino will not
+-- carry it over (no auto-restore exists for this path, by design).
+local function trySkinUse(steam, skinCode)
+    if skinCode == nil or skinCode == "" then
+        return false, "Skin use failed: missing skin code."
+    end
+    local gm = findGameMode()
+    if gm == nil then return false, "Skin use failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
     local pawn = livePawnFromCtrl(ctrl)
-    if pawn == nil then return end
-    local skin = loadSkin(steam)
-    if skin == nil then return end
-
-    local addr
-    pcall(function() addr = pawn:GetAddress() end)
-    local addrKey = tostring(addr or 0)
-    local versionKey = tostring(skin.updatedAt or 0)
-
-    if lastSkinPawnAddr[steam] == addrKey and lastSkinVersion[steam] == versionKey then
-        return
+    if pawn == nil then
+        return false, "Skin use failed: spawn in first, then try again."
     end
 
-    if applyCustomizer(pawn, skin) then
-        lastSkinPawnAddr[steam] = addrKey
-        lastSkinVersion[steam] = versionKey
-        log("Skin auto-restore applied for " .. steam)
+    local skins = loadSkinCharges(steam)
+    local target, targetIndex
+    for i, entry in ipairs(skins) do
+        if entry.code == skinCode then
+            target = entry
+            targetIndex = i
+            break
+        end
     end
+    if target == nil or (target.charges or 0) <= 0 then
+        return false, "Skin use failed: no charges remaining."
+    end
+
+    if not applyCustomizer(pawn, target.colors) then
+        return false, "Skin use failed: could not apply."
+    end
+
+    target.charges = target.charges - 1
+    if target.charges <= 0 then
+        table.remove(skins, targetIndex)
+    end
+    writeSkinCharges(steam, skins)
+
+    local label = (target.name and target.name ~= "") and (" \"" .. target.name .. "\"") or ""
+    return true, "Skin" .. label .. " applied."
+end
+
+local function checkWebsiteSkinUseRequest(steam)
+    local path = skinUseRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local skinCode = jsonReadString(body, "skinCode")
+    if requestId == nil then return end
+
+    local ok, message = trySkinUse(steam, skinCode)
+    safeNotify(steam, message)
+    log("Website skin-use request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(skinUseResultFilePath(steam), requestId, ok, message)
 end
 
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
@@ -842,7 +949,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                 if steam ~= "" then
                     checkWebsiteParkRequest(steam)
                     checkWebsiteRedeemRequest(steam)
-                    checkSkinAutoRestore(steam, unwrapped)
+                    checkWebsiteSkinUseRequest(steam)
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end

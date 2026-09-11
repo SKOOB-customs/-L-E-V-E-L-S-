@@ -1,11 +1,15 @@
 /**
- * Admin-panel glitch skin grant (website -> Worker -> skin_<steamid>.json).
+ * Admin-panel glitch skin grant — grants CHARGES of a named skin, not a
+ * direct apply (v2: skins are a charge-based inventory item a player
+ * spends themselves, either on their live dino or attached to one
+ * specific parked dino — see functions/api/skin-use.js and skin-attach.js).
  *
- * POST { granterSteamId, targetSteamId, colors } -> proxied to the bridge
- * Worker's /skin-grant route, which re-validates admin tier server-side.
- * `colors` is a map of the 10 FCustomizerDataBase color field names to
- * either a "#RRGGBB" hex string (the picker UI) or a {r,g,b,a} object (the
- * Advanced JSON path) — the Worker normalizes either shape the same way.
+ * POST { granterSteamId, targetSteamId, name, count, colors } -> proxied
+ * to the bridge Worker's /skin-grant-charges route, which re-validates
+ * admin tier server-side. `colors` is a map of the 10 FCustomizerDataBase
+ * color field names to either a "#RRGGBB" hex string (the picker UI) or a
+ * {r,g,b,a}/{R,G,B,A} object (the Advanced JSON path) — the Worker
+ * normalizes either shape the same way.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -35,7 +39,7 @@ export async function onRequestPost(context) {
   }
 
   try {
-    const response = await fetch(`${origin}/skin-grant`, {
+    const response = await fetch(`${origin}/skin-grant-charges`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
