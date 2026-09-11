@@ -804,10 +804,250 @@ else
 end
 registerChatHook()
 
--- REMOVED: a one-time GenerateSDK() call used to live here to discover the
--- real native admin UFunction names (Ban/Kick/SetWeather/
--- SetNewAvailableClasses, all on ATIGameModeBase, confirmed live
--- 2026-09-11 via the generated CXXHeaderDump). LoopInGameThreadWithDelay
--- repeats, it does not fire once, so this was re-running GenerateSDK()
--- every 15s pointlessly after serving its purpose — removed once the
--- header dump was pulled.
+-- ── Admin-tier audit log (Ban/Kick/SetWeather/SetNewAvailableClasses) ──
+--
+-- These 4 native ATIGameModeBase functions (confirmed live 2026-09-11 via
+-- UE4SS's GenerateSDK() header dump — see git history for the removed
+-- discovery code) are what the in-game /adminpanel calls for Ban, Kick,
+-- weather changes, and allowed-species changes. "Timeout" is NOT a separate
+-- function — it's Ban(...) with a finite Time instead of a permanent one.
+--
+-- IMPORTANT: this is audit-only, not enforcement. Checked directly against
+-- UE4SS's own docs: RegisterHook's pre-callback has no documented mechanism
+-- to cancel or block the native function it's hooking — it can only observe
+-- parameters and optionally override the *return value*. The real admin
+-- action always executes regardless of what this hook does. What this CAN
+-- do is record, precisely and tamper-evidently, who did what and whether
+-- their tier was supposed to be able to.
+--
+-- Tamper-resistance has two layers:
+--   1. Each line is hash-chained (every entry embeds a hash of the previous
+--      entry plus its own content) so any edit or deletion of a past line
+--      breaks the chain from that point forward — detectable even by
+--      someone with full file access to this server.
+--   2. Every entry also gets pulled off THIS server entirely into Cloudflare
+--      KV by the bridge Worker's existing sync cron (see
+--      workers/bridge-worker.js) — a system only the website owner
+--      controls. That's the real tamper-resistance: the local file's hash
+--      chain only detects tampering after the fact, but the Worker cron
+--      runs every minute, so a same-server tamper attempt has at most a
+--      ~1-minute window before an independent, off-server copy exists.
+-- Neither layer is cryptographically bulletproof (no crypto library is
+-- reachable from this Lua runtime — no `require`, no bit ops assumed), but
+-- together they make quiet, undetected tampering impractical.
+
+local ADMIN_TIERS_PATH = SAVED_DIR .. "/admin_tiers.json"
+local ADMIN_AUDIT_LOG_PATH = SAVED_DIR .. "/admin_audit_log.ndjson"
+
+local function loadAdminTiers()
+    local body = readAll(ADMIN_TIERS_PATH)
+    local tiers = { owner = {}, senior = {}, admin = {} }
+    if body == nil or body == "" then return tiers end
+    for _, tierName in ipairs({ "owner", "senior", "admin" }) do
+        local arrStr = body:match('"' .. tierName .. '"%s*:%s*(%b[])')
+        if arrStr ~= nil then
+            for id in arrStr:gmatch('"(%d+)"') do
+                tiers[tierName][id] = true
+            end
+        end
+    end
+    return tiers
+end
+
+local function tierOf(steam)
+    local tiers = loadAdminTiers()
+    if tiers.owner[steam] then return "owner" end
+    if tiers.senior[steam] then return "senior" end
+    if tiers.admin[steam] then return "admin" end
+    return nil
+end
+
+-- Only the 3 actions with any real restriction need an entry here. Kick
+-- isn't restricted for any tier, so it's always "allowed" (still logged,
+-- for a complete trail, just never flagged as a violation).
+local RESTRICTED_ACTIONS = {
+    ban = { owner = true, senior = false, admin = false },
+    allowedclasses = { owner = true, senior = false, admin = false },
+    weather = { owner = true, senior = true, admin = false },
+}
+
+local function canPerform(tier, action)
+    if tier == nil then return false end
+    local rule = RESTRICTED_ACTIONS[action]
+    if rule == nil then return true end
+    return rule[tier] == true
+end
+
+-- Pure-Lua FNV-1a-style hash using only arithmetic (no bitwise operators,
+-- no external library) so it works regardless of this build's Lua version.
+-- This is a tamper-EVIDENCE checksum, not cryptographic security — its job
+-- is to make a silently-edited or silently-deleted line detectable, not to
+-- resist a determined attacker with time to forge matching hashes by hand.
+local function simpleHash(s)
+    local hash = 2166136261
+    for i = 1, #s do
+        hash = ((hash % 16777216) * 16777619 + s:byte(i)) % 4294967296
+    end
+    return string.format("%08x", hash % 4294967296)
+end
+
+-- Reads the log's last line to continue the hash chain across restarts.
+-- The log is small (admin actions are rare) so reading it whole is fine.
+local function lastAuditChainState()
+    local body = readAll(ADMIN_AUDIT_LOG_PATH)
+    if body == nil or body == "" then return 0, "genesis" end
+    local lastLine = nil
+    for line in body:gmatch("[^\n]+") do lastLine = line end
+    if lastLine == nil then return 0, "genesis" end
+    local seq = jsonReadNumber(lastLine, "seq") or 0
+    local hash = jsonReadString(lastLine, "hash") or "genesis"
+    return seq, hash
+end
+
+local pendingAuditEvents = {}
+
+local function queueAuditEvent(action, adminSteam, extra)
+    pendingAuditEvents[#pendingAuditEvents + 1] = {
+        action = action, adminSteam = adminSteam, extra = extra or {}, at = os.time(),
+    }
+end
+
+local function processAuditEvent(evt)
+    local tier = tierOf(evt.adminSteam)
+    local allowed = canPerform(tier, evt.action)
+    local extraParts = {}
+    for _, k in ipairs({ "targetSteam", "targetName", "reason", "timeHours" }) do
+        if evt.extra[k] ~= nil then
+            table.insert(extraParts, k .. "=" .. tostring(evt.extra[k]))
+        end
+    end
+    local extraStr = table.concat(extraParts, "; ")
+
+    local seq, prevHash = lastAuditChainState()
+    seq = seq + 1
+    -- Canonical (field-order-fixed) body used for the hash so the chain is
+    -- reproducible; hash covers this entry's own fields PLUS the previous
+    -- entry's hash, which is what makes it a chain (breaking any one entry
+    -- invalidates every entry after it, not just that one).
+    local bodyForHash = string.format(
+        '%d|%d|%s|%s|%s|%s|%s',
+        seq, evt.at, evt.action, evt.adminSteam, tostring(tier), tostring(allowed), extraStr
+    )
+    local hash = simpleHash(prevHash .. "|" .. bodyForHash)
+
+    local line = string.format(
+        '{"seq":%d,"ts":%d,"action":"%s","adminSteam":"%s","adminTier":"%s","allowed":%s,"extra":"%s","prevHash":"%s","hash":"%s"}',
+        seq, evt.at, jsonEscape(evt.action), jsonEscape(evt.adminSteam), jsonEscape(tostring(tier)),
+        allowed and "true" or "false", jsonEscape(extraStr), jsonEscape(prevHash), jsonEscape(hash)
+    )
+    local f = io.open(ADMIN_AUDIT_LOG_PATH, "a")
+    if f ~= nil then
+        f:write(line .. "\n")
+        f:close()
+    else
+        log("Admin audit log: FAILED to open " .. ADMIN_AUDIT_LOG_PATH .. " for append")
+    end
+
+    log("Admin audit: seq=" .. seq .. " action=" .. evt.action .. " admin=" .. evt.adminSteam
+        .. " tier=" .. tostring(tier) .. " allowed=" .. tostring(allowed) .. " [" .. extraStr .. "]")
+
+    if not allowed then
+        safeNotify(evt.adminSteam,
+            "Note: this action is outside your admin tier's normal permissions. It still went through, but it's been logged for review.")
+    end
+end
+
+LoopInGameThreadWithDelay(3000, function()
+    if #pendingAuditEvents == 0 then return end
+    local drain = pendingAuditEvents
+    pendingAuditEvents = {}
+    for _, evt in ipairs(drain) do
+        local ok, err = pcall(function() processAuditEvent(evt) end)
+        if not ok then log("Audit event failed: " .. tostring(err)) end
+    end
+end)
+
+-- Every hook below follows the same shape: extract only PRIMITIVE values
+-- (steam ids, names, numbers, bools) from the hook's RemoteUnrealParam
+-- arguments inside the hook itself, then queue those primitives for the
+-- deferred tick above. Never do file I/O or safeNotify from inside a hook
+-- (rule 5 in the safety docs — ClientShowNotification crashes synchronously
+-- from inside a hook callback), and never hold onto the wrapped param
+-- objects themselves past this callback (rule 6 — unstable across ticks).
+local function registerAdminAuditHooks()
+    -- Ban(AdminController, TargetSteamID, TargetName, Reason, Time)
+    local okBan, errBan = pcall(function()
+        RegisterHook("/Script/TheIsle.TIGameModeBase:Ban",
+            function(_self, adminCtrlParam, targetSteamParam, targetNameParam, _reasonParam, timeParam)
+                local ok, err = pcall(function()
+                    local adminSteam = getControllerSteamId(unwrapIfNeeded(adminCtrlParam))
+                    if adminSteam == "" then return end
+                    local timeHours
+                    pcall(function() timeHours = unwrapIfNeeded(timeParam) end)
+                    queueAuditEvent("ban", adminSteam, {
+                        targetSteam = safeString(targetSteamParam),
+                        targetName = safeString(targetNameParam),
+                        timeHours = timeHours,
+                    })
+                end)
+                if not ok then log("Ban audit hook failed: " .. tostring(err)) end
+            end)
+    end)
+    if okBan then log("Admin audit hook registered: Ban")
+    else log("Admin audit hook FAILED (Ban): " .. tostring(errBan)) end
+
+    -- Kick(AdminController, TargetSteamID, TargetName, Reason)
+    local okKick, errKick = pcall(function()
+        RegisterHook("/Script/TheIsle.TIGameModeBase:Kick",
+            function(_self, adminCtrlParam, targetSteamParam, targetNameParam, _reasonParam)
+                local ok, err = pcall(function()
+                    local adminSteam = getControllerSteamId(unwrapIfNeeded(adminCtrlParam))
+                    if adminSteam == "" then return end
+                    queueAuditEvent("kick", adminSteam, {
+                        targetSteam = safeString(targetSteamParam),
+                        targetName = safeString(targetNameParam),
+                    })
+                end)
+                if not ok then log("Kick audit hook failed: " .. tostring(err)) end
+            end)
+    end)
+    if okKick then log("Admin audit hook registered: Kick")
+    else log("Admin audit hook FAILED (Kick): " .. tostring(errKick)) end
+
+    -- SetWeather(AdminController, Weather) — Weather is an opaque UObject*;
+    -- deliberately never touched, only AdminController is read.
+    local okWeather, errWeather = pcall(function()
+        RegisterHook("/Script/TheIsle.TIGameModeBase:SetWeather",
+            function(_self, adminCtrlParam, _weatherParam)
+                local ok, err = pcall(function()
+                    local adminSteam = getControllerSteamId(unwrapIfNeeded(adminCtrlParam))
+                    if adminSteam == "" then return end
+                    queueAuditEvent("weather", adminSteam, {})
+                end)
+                if not ok then log("Weather audit hook failed: " .. tostring(err)) end
+            end)
+    end)
+    if okWeather then log("Admin audit hook registered: SetWeather")
+    else log("Admin audit hook FAILED (SetWeather): " .. tostring(errWeather)) end
+
+    -- SetNewAvailableClasses(NewAvailableClasses, NewCookedClasses,
+    -- AdminController, bIsRcon) — note AdminController is the 3rd param
+    -- here, not the 1st. The two TArray<FTIAvailableClassData> params are
+    -- deliberately never touched (unknown struct shape, not worth the
+    -- risk for an audit log that doesn't need the exact class list).
+    local okClasses, errClasses = pcall(function()
+        RegisterHook("/Script/TheIsle.TIGameModeBase:SetNewAvailableClasses",
+            function(_self, _newClassesParam, _newCookedParam, adminCtrlParam, _bIsRconParam)
+                local ok, err = pcall(function()
+                    local adminSteam = getControllerSteamId(unwrapIfNeeded(adminCtrlParam))
+                    if adminSteam == "" then return end
+                    queueAuditEvent("allowedclasses", adminSteam, {})
+                end)
+                if not ok then log("AllowedClasses audit hook failed: " .. tostring(err)) end
+            end)
+    end)
+    if okClasses then log("Admin audit hook registered: SetNewAvailableClasses")
+    else log("Admin audit hook FAILED (SetNewAvailableClasses): " .. tostring(errClasses)) end
+end
+
+registerAdminAuditHooks()

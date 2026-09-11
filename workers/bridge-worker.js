@@ -202,6 +202,95 @@ const syncParkedDinos = async (env) => {
   return parked;
 };
 
+// ── Admin-tier audit log sync ──
+//
+// main.lua's admin-action hooks (Ban/Kick/SetWeather/SetNewAvailableClasses
+// on ATIGameModeBase) append a hash-chained line per event to
+// admin_audit_log.ndjson on the game server. That local file alone is only
+// tamper-EVIDENT (anyone with file access to the game server, i.e. any
+// tier of admin via Bropanel, could in principle edit or delete lines and
+// the hash chain would just show a break from that point on). The real
+// tamper-RESISTANCE comes from pulling every new line off the game server
+// entirely into this Worker's KV on the existing 1-minute sync cron — a
+// system only the Cloudflare account owner controls, which no admin tier
+// has any access to. Each entry becomes its own immutable KV key
+// (admin_audit:entry:<seq>), never overwritten once written, and the hash
+// chain is independently re-verified here rather than trusted at face
+// value from the file.
+const ADMIN_AUDIT_LOG_PATH = `${PARKED_SAVED_DIR}/admin_audit_log.ndjson`;
+
+// Must exactly mirror main.lua's simpleHash — pure arithmetic (no bitwise
+// ops) so both sides agree regardless of the Lua runtime's numeric type.
+const simpleHash = (s) => {
+  let hash = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    hash = ((hash % 16777216) * 16777619 + s.charCodeAt(i)) % 4294967296;
+  }
+  return (hash % 4294967296).toString(16).padStart(8, '0');
+};
+
+const syncAdminAuditLog = async (env) => {
+  let raw;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(ADMIN_AUDIT_LOG_PATH)}`);
+    raw = await response.text();
+  } catch {
+    return { synced: 0 }; // no admin action has ever happened yet — nothing to sync
+  }
+
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  const lastSeqRaw = await env.PARKED_KV.get('admin_audit:last_seq');
+  let lastSeq = lastSeqRaw ? Number.parseInt(lastSeqRaw, 10) : 0;
+  let chainHeadHash = (await env.PARKED_KV.get('admin_audit:chain_head_hash')) || 'genesis';
+
+  let synced = 0;
+  for (const line of lines) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue; // skip a partially-written line rather than failing the whole sync
+    }
+    if (!entry || typeof entry.seq !== 'number' || entry.seq <= lastSeq) continue;
+
+    // Recomputed independently, not trusted from the file — this is what
+    // makes the chain verification meaningful rather than decorative.
+    const bodyForHash = `${entry.seq}|${entry.ts}|${entry.action}|${entry.adminSteam}|${entry.adminTier}|${entry.allowed}|${entry.extra}`;
+    const expectedHash = simpleHash(`${entry.prevHash}|${bodyForHash}`);
+    const chainOk = entry.prevHash === chainHeadHash && expectedHash === entry.hash;
+
+    await env.PARKED_KV.put(
+      `admin_audit:entry:${entry.seq}`,
+      JSON.stringify({ ...entry, chainVerified: chainOk, syncedAt: Date.now() }),
+    );
+    if (!chainOk) {
+      await env.PARKED_KV.put(
+        `admin_audit:tamper_alert:${Date.now()}_seq${entry.seq}`,
+        JSON.stringify({
+          atSeq: entry.seq,
+          expectedPrevHash: chainHeadHash,
+          actualPrevHash: entry.prevHash,
+          expectedHash,
+          actualHash: entry.hash,
+          detectedAt: Date.now(),
+        }),
+      );
+    }
+
+    lastSeq = entry.seq;
+    // Continue from the file's own hash even on a break, so the same break
+    // isn't re-flagged as a fresh alert on every future sync.
+    chainHeadHash = entry.hash;
+    synced += 1;
+  }
+
+  if (synced > 0) {
+    await env.PARKED_KV.put('admin_audit:last_seq', String(lastSeq));
+    await env.PARKED_KV.put('admin_audit:chain_head_hash', chainHeadHash);
+  }
+  return { synced, lastSeq };
+};
+
 const REDEEM_SAVED_DIR = PARKED_SAVED_DIR;
 
 const parkRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/park_request_${steamId}.json`;
@@ -269,7 +358,8 @@ export default {
       }
       try {
         const parked = await syncParkedDinos(env);
-        return json({ ok: true, count: Object.keys(parked).length, parked });
+        const audit = await syncAdminAuditLog(env).catch((error) => ({ error: error.message }));
+        return json({ ok: true, count: Object.keys(parked).length, parked, audit });
       } catch (error) {
         return json({ error: error.message || 'Sync failed' }, 502);
       }
@@ -449,6 +539,9 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       syncParkedDinos(env).catch((error) => console.error('syncParkedDinos failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncAdminAuditLog(env).catch((error) => console.error('syncAdminAuditLog failed:', error.message)),
     );
   },
 };
