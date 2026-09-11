@@ -79,6 +79,7 @@
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
+        <button class="tab-button" data-tab="friends" type="button">Friends</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
       </div>
@@ -824,6 +825,57 @@
           </div>
 
           <div class="parked-grid" data-skins-grid></div>
+        </section>
+
+        <section class="tab-panel" id="friends" data-tab="friends">
+          <div class="section-header">
+            <p class="eyebrow">FRIENDS</p>
+            <h2>Add friends and meet up</h2>
+          </div>
+
+          <div class="panel content-box" data-friends-signed-out hidden>
+            <div class="mini-heading">Sign in required</div>
+            <div class="info-list">
+              <div>
+                <strong>!</strong>
+                <span>Connect with Steam to add friends.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel content-box" data-friends-signed-in-only>
+            <div class="mini-heading">Add a friend</div>
+            <form class="submit-form" data-friend-request-form>
+              <div class="field-row two-up">
+                <label>
+                  Friend's Steam ID
+                  <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-friend-target required />
+                </label>
+                <div class="submit-actions field-inline-action">
+                  <button class="action-button" type="submit">Send request</button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel content-box" data-friends-signed-in-only>
+            <div class="mini-heading">Friend requests</div>
+            <p class="dino-park-note" data-friend-requests-empty hidden>No pending friend requests.</p>
+            <div class="parked-grid" data-friend-requests-grid></div>
+          </div>
+
+          <div class="panel content-box" data-friends-signed-in-only>
+            <div class="mini-heading">Teleport requests</div>
+            <p class="dino-park-note" data-teleport-requests-empty hidden>No pending teleport requests.</p>
+            <div class="parked-grid" data-teleport-requests-grid></div>
+          </div>
+
+          <div class="section-header friends-section-header" data-friends-signed-in-only>
+            <p class="eyebrow">YOUR FRIENDS</p>
+            <h2>Friends list</h2>
+          </div>
+          <p class="dino-park-note" data-friends-empty hidden>No friends added yet — add one above.</p>
+          <div class="parked-grid" data-friends-grid></div>
         </section>
 
         <section class="tab-panel" id="live-dino" data-tab="live-dino">

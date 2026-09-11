@@ -2059,3 +2059,349 @@ const loadStaffRoster = async () => {
 
 document.querySelector('[data-tab="community"]')?.addEventListener('click', loadStaffRoster);
 loadStaffRoster();
+
+// ── Friends tab: friend requests, friend list, and meet-up teleports ──
+//
+// Pure KV on the Worker side (no game-server file writes) for the social
+// graph itself; teleport-accept is the one action that reaches out to the
+// mod, via the same request-file bridge pattern as park/redeem/skin-use,
+// but with no result polling here (see bridge-worker.js's
+// requestTeleportExecute comment for why) — both friends get an in-game
+// notification from main.lua once the actual move happens.
+const setFriendsSignedInVisibility = (signedIn) => {
+  document.querySelectorAll('[data-friends-signed-in-only]').forEach((el) => { el.hidden = !signedIn; });
+  const signedOutEl = document.querySelector('[data-friends-signed-out]');
+  if (signedOutEl) signedOutEl.hidden = signedIn;
+};
+
+const buildFriendRequestCard = (req) => {
+  const card = document.createElement('article');
+  card.className = 'parked-card request-card';
+
+  const name = document.createElement('h3');
+  name.className = 'request-card-name';
+  name.textContent = req.fromSteamId;
+
+  const meta = document.createElement('p');
+  meta.className = 'request-card-meta';
+  meta.textContent = 'Wants to be friends';
+
+  const actions = document.createElement('div');
+  actions.className = 'request-card-actions';
+
+  const acceptBtn = document.createElement('button');
+  acceptBtn.type = 'button';
+  acceptBtn.className = 'action-button small';
+  acceptBtn.textContent = 'Accept';
+  acceptBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    acceptBtn.disabled = true;
+    try {
+      const response = await fetch('/api/friend-accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, requesterSteamId: req.fromSteamId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not accept that request.');
+        acceptBtn.disabled = false;
+        return;
+      }
+      showToast('Friend added!');
+      loadFriendsTabData();
+    } catch (error) {
+      console.debug('Friend accept failed:', error);
+      showToast('Could not reach the server right now.');
+      acceptBtn.disabled = false;
+    }
+  });
+
+  const declineBtn = document.createElement('button');
+  declineBtn.type = 'button';
+  declineBtn.className = 'action-button small parked-release-button';
+  declineBtn.textContent = 'Decline';
+  declineBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    declineBtn.disabled = true;
+    try {
+      const response = await fetch('/api/friend-decline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, requesterSteamId: req.fromSteamId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not decline that request.');
+        declineBtn.disabled = false;
+        return;
+      }
+      loadFriendsTabData();
+    } catch (error) {
+      console.debug('Friend decline failed:', error);
+      showToast('Could not reach the server right now.');
+      declineBtn.disabled = false;
+    }
+  });
+
+  actions.append(acceptBtn, declineBtn);
+  card.append(name, meta, actions);
+  return card;
+};
+
+const buildFriendCard = (friend) => {
+  const card = document.createElement('article');
+  card.className = 'parked-card friend-card';
+
+  const name = document.createElement('h3');
+  name.className = 'friend-card-name';
+  name.textContent = friend.steamId;
+
+  const meta = document.createElement('p');
+  meta.className = 'friend-card-meta';
+  meta.textContent = friend.since ? `Friends since ${new Date(friend.since).toLocaleDateString()}` : 'Friends';
+
+  const actions = document.createElement('div');
+  actions.className = 'friend-card-actions';
+
+  const sendTeleportRequest = async (direction, button) => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/teleport-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromSteamId: steamId, toSteamId: friend.steamId, direction }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not send that teleport request.');
+      } else {
+        showToast('Teleport request sent — waiting for them to accept.');
+      }
+    } catch (error) {
+      console.debug('Teleport request failed:', error);
+      showToast('Could not reach the server right now.');
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  const toThemBtn = document.createElement('button');
+  toThemBtn.type = 'button';
+  toThemBtn.className = 'action-button small';
+  toThemBtn.textContent = 'Teleport to them';
+  toThemBtn.addEventListener('click', () => sendTeleportRequest('requester_to_friend', toThemBtn));
+
+  const bringBtn = document.createElement('button');
+  bringBtn.type = 'button';
+  bringBtn.className = 'action-button small';
+  bringBtn.textContent = 'Bring them to me';
+  bringBtn.addEventListener('click', () => sendTeleportRequest('friend_to_requester', bringBtn));
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'action-button small parked-release-button';
+  removeBtn.textContent = 'Remove';
+  removeBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    if (!window.confirm(`Remove ${friend.steamId} from your friends?`)) return;
+    removeBtn.disabled = true;
+    try {
+      const response = await fetch('/api/friend-remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, friendSteamId: friend.steamId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not remove that friend.');
+        removeBtn.disabled = false;
+        return;
+      }
+      loadFriendsTabData();
+    } catch (error) {
+      console.debug('Friend remove failed:', error);
+      showToast('Could not reach the server right now.');
+      removeBtn.disabled = false;
+    }
+  });
+
+  actions.append(toThemBtn, bringBtn, removeBtn);
+  card.append(name, meta, actions);
+  return card;
+};
+
+const buildTeleportRequestCard = (req) => {
+  const card = document.createElement('article');
+  card.className = 'parked-card request-card';
+
+  const name = document.createElement('h3');
+  name.className = 'request-card-name';
+  name.textContent = req.fromSteamId;
+
+  const meta = document.createElement('p');
+  meta.className = 'request-card-meta';
+  meta.textContent = req.direction === 'requester_to_friend'
+    ? 'Wants to teleport to you'
+    : 'Wants you to teleport to them';
+
+  const actions = document.createElement('div');
+  actions.className = 'request-card-actions';
+
+  const acceptBtn = document.createElement('button');
+  acceptBtn.type = 'button';
+  acceptBtn.className = 'action-button small';
+  acceptBtn.textContent = 'Accept';
+  acceptBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    acceptBtn.disabled = true;
+    try {
+      const response = await fetch('/api/teleport-accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, requesterSteamId: req.fromSteamId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not accept that teleport request.');
+        acceptBtn.disabled = false;
+        return;
+      }
+      showToast('Accepted — check in-game in a few seconds.');
+      loadFriendsTabData();
+    } catch (error) {
+      console.debug('Teleport accept failed:', error);
+      showToast('Could not reach the server right now.');
+      acceptBtn.disabled = false;
+    }
+  });
+
+  const declineBtn = document.createElement('button');
+  declineBtn.type = 'button';
+  declineBtn.className = 'action-button small parked-release-button';
+  declineBtn.textContent = 'Decline';
+  declineBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) return;
+    declineBtn.disabled = true;
+    try {
+      const response = await fetch('/api/teleport-decline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ steamId, requesterSteamId: req.fromSteamId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not decline that request.');
+        declineBtn.disabled = false;
+        return;
+      }
+      loadFriendsTabData();
+    } catch (error) {
+      console.debug('Teleport decline failed:', error);
+      showToast('Could not reach the server right now.');
+      declineBtn.disabled = false;
+    }
+  });
+
+  actions.append(acceptBtn, declineBtn);
+  card.append(name, meta, actions);
+  return card;
+};
+
+const loadFriendsTabData = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    setFriendsSignedInVisibility(false);
+    return;
+  }
+  setFriendsSignedInVisibility(true);
+  const steamId = profile.steamId;
+
+  try {
+    const [friendsRes, friendReqRes, teleportReqRes] = await Promise.all([
+      fetch(`/api/friends?steamId=${encodeURIComponent(steamId)}`),
+      fetch(`/api/friend-requests?steamId=${encodeURIComponent(steamId)}`),
+      fetch(`/api/teleport-requests?steamId=${encodeURIComponent(steamId)}`),
+    ]);
+    const [friendsData, friendReqData, teleportReqData] = await Promise.all([
+      friendsRes.json(),
+      friendReqRes.json(),
+      teleportReqRes.json(),
+    ]);
+
+    const friendsGrid = document.querySelector('[data-friends-grid]');
+    const friendsEmpty = document.querySelector('[data-friends-empty]');
+    const friends = friendsData.friends || [];
+    if (friendsEmpty) friendsEmpty.hidden = friends.length !== 0;
+    if (friendsGrid) {
+      friendsGrid.innerHTML = '';
+      friends.forEach((friend) => friendsGrid.appendChild(buildFriendCard(friend)));
+    }
+
+    const friendReqGrid = document.querySelector('[data-friend-requests-grid]');
+    const friendReqEmpty = document.querySelector('[data-friend-requests-empty]');
+    const friendRequests = friendReqData.requests || [];
+    if (friendReqEmpty) friendReqEmpty.hidden = friendRequests.length !== 0;
+    if (friendReqGrid) {
+      friendReqGrid.innerHTML = '';
+      friendRequests.forEach((req) => friendReqGrid.appendChild(buildFriendRequestCard(req)));
+    }
+
+    const teleportReqGrid = document.querySelector('[data-teleport-requests-grid]');
+    const teleportReqEmpty = document.querySelector('[data-teleport-requests-empty]');
+    const teleportRequests = teleportReqData.requests || [];
+    if (teleportReqEmpty) teleportReqEmpty.hidden = teleportRequests.length !== 0;
+    if (teleportReqGrid) {
+      teleportReqGrid.innerHTML = '';
+      teleportRequests.forEach((req) => teleportReqGrid.appendChild(buildTeleportRequestCard(req)));
+    }
+  } catch (error) {
+    console.debug('Friends tab load failed:', error);
+  }
+};
+
+document.querySelector('[data-friend-request-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const steamId = getSteamProfile()?.steamId;
+  if (!steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetInput = document.querySelector('[data-friend-target]');
+  const toSteamId = targetInput?.value.trim() || '';
+  if (!/^\d{17}$/.test(toSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/friend-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromSteamId: steamId, toSteamId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not send that friend request.');
+    } else {
+      showToast('Friend request sent.');
+      if (targetInput) targetInput.value = '';
+    }
+  } catch (error) {
+    console.debug('Friend request failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+document.querySelector('[data-tab="friends"]')?.addEventListener('click', loadFriendsTabData);
+loadFriendsTabData();

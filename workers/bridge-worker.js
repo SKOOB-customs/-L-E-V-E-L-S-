@@ -343,6 +343,17 @@ const skinUseResultPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_use_result_${st
 const requestSkinUse = (env, steamId, skinCode) => writeRequest(env, skinUseRequestPath, steamId, { skinCode });
 const readSkinUseResult = (env, steamId, requestId) => readResult(env, skinUseResultPath, steamId, requestId);
 
+const teleportExecuteRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/teleport_execute_request_${steamId}.json`;
+// steamId here is the MOVER (whoever's pawn is about to relocate), not
+// necessarily the person who clicked Accept — see /teleport-accept, which
+// works out which of the two friends that is based on `direction`. No
+// result-polling route for this one (unlike park/redeem/skin-use): the
+// person who accepts isn't always the mover, so "poll for my own result"
+// doesn't fit — both friends instead get an in-game notification from
+// main.lua's checkWebsiteTeleportRequest once it actually happens.
+const requestTeleportExecute = (env, moverSteamId, referenceSteamId) =>
+  writeRequest(env, teleportExecuteRequestPath, moverSteamId, { referenceSteamId });
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -1094,6 +1105,282 @@ export default {
         return json({ ok: true, strikes: cleaned });
       } catch (error) {
         return json({ error: error.message || 'Strike list failed' }, 502);
+      }
+    }
+
+    // ── Friends (pure KV, no Pterodactyl — nothing here touches the game
+    // server, same trust model as strikes: client-supplied steamId,
+    // self-service actions only ever touch the caller's own records) ──
+
+    if (url.pathname === '/friend-request' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { fromSteamId, toSteamId } = body || {};
+      if (typeof fromSteamId !== 'string' || !/^\d{17}$/.test(fromSteamId)) {
+        return json({ error: 'Missing or invalid fromSteamId' }, 400);
+      }
+      if (typeof toSteamId !== 'string' || !/^\d{17}$/.test(toSteamId)) {
+        return json({ error: 'Missing or invalid toSteamId' }, 400);
+      }
+      if (fromSteamId === toSteamId) return json({ error: "You can't friend yourself" }, 400);
+
+      try {
+        const alreadyFriends = await env.PARKED_KV.get(`friends:${fromSteamId}:${toSteamId}`);
+        if (alreadyFriends) return json({ error: 'Already friends' }, 400);
+        const requestedAt = Date.now();
+        await env.PARKED_KV.put(`friend_requests:${toSteamId}:${fromSteamId}`, JSON.stringify({ fromSteamId, toSteamId, requestedAt }));
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Friend request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/friend-accept' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get(`friend_requests:${steamId}:${requesterSteamId}`);
+        if (!raw) return json({ error: 'No pending request from that player' }, 404);
+        await env.PARKED_KV.delete(`friend_requests:${steamId}:${requesterSteamId}`);
+        const since = Date.now();
+        await env.PARKED_KV.put(`friends:${steamId}:${requesterSteamId}`, JSON.stringify({ since }));
+        await env.PARKED_KV.put(`friends:${requesterSteamId}:${steamId}`, JSON.stringify({ since }));
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Friend accept failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/friend-decline' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      try {
+        await env.PARKED_KV.delete(`friend_requests:${steamId}:${requesterSteamId}`);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Friend decline failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/friend-remove' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, friendSteamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof friendSteamId !== 'string' || !/^\d{17}$/.test(friendSteamId)) {
+        return json({ error: 'Missing or invalid friendSteamId' }, 400);
+      }
+      try {
+        await env.PARKED_KV.delete(`friends:${steamId}:${friendSteamId}`);
+        await env.PARKED_KV.delete(`friends:${friendSteamId}:${steamId}`);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Friend remove failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/friends' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, friends: [] });
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const list = await env.PARKED_KV.list({ prefix: `friends:${steamId}:` });
+        const friends = await Promise.all(
+          list.keys.map(async (key) => {
+            const friendSteamId = key.name.slice(`friends:${steamId}:`.length);
+            const raw = await env.PARKED_KV.get(key.name);
+            let since = null;
+            try { since = JSON.parse(raw)?.since ?? null; } catch { /* ignore */ }
+            return { steamId: friendSteamId, since };
+          }),
+        );
+        return json({ ok: true, friends });
+      } catch (error) {
+        return json({ error: error.message || 'Friends lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/friend-requests' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, requests: [] });
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const list = await env.PARKED_KV.list({ prefix: `friend_requests:${steamId}:` });
+        const requests = await Promise.all(
+          list.keys.map(async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        return json({ ok: true, requests: requests.filter(Boolean) });
+      } catch (error) {
+        return json({ error: error.message || 'Friend requests lookup failed' }, 502);
+      }
+    }
+
+    // ── Friend teleport requests ──
+
+    if (url.pathname === '/teleport-request' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { fromSteamId, toSteamId, direction } = body || {};
+      if (typeof fromSteamId !== 'string' || !/^\d{17}$/.test(fromSteamId)) {
+        return json({ error: 'Missing or invalid fromSteamId' }, 400);
+      }
+      if (typeof toSteamId !== 'string' || !/^\d{17}$/.test(toSteamId)) {
+        return json({ error: 'Missing or invalid toSteamId' }, 400);
+      }
+      if (direction !== 'requester_to_friend' && direction !== 'friend_to_requester') {
+        return json({ error: 'Invalid direction' }, 400);
+      }
+      try {
+        const areFriends = await env.PARKED_KV.get(`friends:${fromSteamId}:${toSteamId}`);
+        if (!areFriends) return json({ error: 'Not friends with that player' }, 403);
+
+        const cooldownKey = `teleport_cooldown:${fromSteamId}`;
+        const onCooldown = await env.PARKED_KV.get(cooldownKey);
+        if (onCooldown) return json({ error: 'Wait a bit before sending another teleport request' }, 429);
+
+        await env.PARKED_KV.put(
+          `teleport_requests:${toSteamId}:${fromSteamId}`,
+          JSON.stringify({ fromSteamId, toSteamId, direction, requestedAt: Date.now() }),
+        );
+        // expirationTtl auto-clears the cooldown — no separate cleanup needed.
+        await env.PARKED_KV.put(cooldownKey, '1', { expirationTtl: 60 });
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/teleport-accept' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get(`teleport_requests:${steamId}:${requesterSteamId}`);
+        if (!raw) return json({ error: 'No pending teleport request from that player' }, 404);
+        const pending = JSON.parse(raw);
+        await env.PARKED_KV.delete(`teleport_requests:${steamId}:${requesterSteamId}`);
+
+        // requester_to_friend: the original requester (fromSteamId) moves.
+        // friend_to_requester: the accepter (steamId, == toSteamId) moves.
+        const moverSteamId = pending.direction === 'requester_to_friend' ? pending.fromSteamId : pending.toSteamId;
+        const referenceSteamId = moverSteamId === pending.fromSteamId ? pending.toSteamId : pending.fromSteamId;
+
+        await requestTeleportExecute(env, moverSteamId, referenceSteamId);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Teleport accept failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/teleport-decline' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      try {
+        await env.PARKED_KV.delete(`teleport_requests:${steamId}:${requesterSteamId}`);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Teleport decline failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/teleport-requests' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, requests: [] });
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const list = await env.PARKED_KV.list({ prefix: `teleport_requests:${steamId}:` });
+        const requests = await Promise.all(
+          list.keys.map(async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        return json({ ok: true, requests: requests.filter(Boolean) });
+      } catch (error) {
+        return json({ error: error.message || 'Teleport requests lookup failed' }, 502);
       }
     }
 

@@ -726,6 +726,14 @@ local function skinUseResultFilePath(steam)
     return SAVED_DIR .. "/skin_use_result_" .. steam .. ".json"
 end
 
+local function teleportExecuteRequestFilePath(steam)
+    return SAVED_DIR .. "/teleport_execute_request_" .. steam .. ".json"
+end
+
+local function teleportExecuteResultFilePath(steam)
+    return SAVED_DIR .. "/teleport_execute_result_" .. steam .. ".json"
+end
+
 local function writeRequestResult(resultPath, requestId, ok, message)
     local resultJson = string.format(
         '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
@@ -906,6 +914,88 @@ local function checkWebsiteSkinUseRequest(steam)
     writeRequestResult(skinUseResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Website-triggered friend teleport (Friends tab, write direction) ──
+--
+-- First feature in this mod that moves a pawn's LOCATION rather than its
+-- vitals/growth/cosmetics. K2_GetActorLocation (reading) is already on
+-- this mod's own proven-safe list; K2_SetActorLocation (writing) is the
+-- standard, universal AActor Blueprint counterpart — not an Isle-specific
+-- function, so it's expected to behave the same way here, but genuinely
+-- untested on this build. bTeleport=true tells the engine to skip
+-- velocity-based movement blending, matching what an actual teleport
+-- should do. ForceNetUpdate afterward mirrors the same defensive
+-- replication kick applyCustomizer already uses for the same reason.
+--
+-- Deliberately does NOT use any of the game's own admin teleport
+-- functions (TeleportToTarget/TeleportToMe on ATIGameModeBase,
+-- ServerTeleportToTarget/ServerTeleportToMe on TIPlayerController) —
+-- confirmed via the CXXHeaderDump that all four are part of the admin
+-- system specifically (the GameModeBase pair requires an AdminController
+-- parameter; the PlayerController pair sits in the same function list as
+-- SetAdminCred/ServerUnban/ServerSmite, implying an internal admin check).
+-- Building a player-facing feature on top of an admin-gated function would
+-- either silently fail or risk exploiting a permission boundary we don't
+-- fully understand — moving the pawn directly sidesteps that entirely.
+local function tryTeleportToFriend(moverSteam, referenceSteam)
+    if referenceSteam == nil or referenceSteam == "" then
+        return false, "Teleport failed: missing friend reference."
+    end
+    local gm = findGameMode()
+    if gm == nil then return false, "Teleport failed: internal error." end
+
+    local moverCtrl
+    pcall(function() moverCtrl = gm:GetControllerBySteamId(moverSteam) end)
+    local moverPawn = livePawnFromCtrl(moverCtrl)
+    if moverPawn == nil then
+        return false, "Teleport failed: spawn in first, then try again."
+    end
+
+    local referenceCtrl
+    pcall(function() referenceCtrl = gm:GetControllerBySteamId(referenceSteam) end)
+    local referencePawn = livePawnFromCtrl(referenceCtrl)
+    if referencePawn == nil then
+        return false, "Teleport failed: your friend isn't online and spawned right now."
+    end
+
+    local location
+    pcall(function() location = referencePawn:K2_GetActorLocation() end)
+    if location == nil then
+        return false, "Teleport failed: could not read your friend's location."
+    end
+
+    local ok, err = pcall(function()
+        moverPawn:K2_SetActorLocation(location, false, nil, true)
+    end)
+    if not ok then
+        log("Teleport: K2_SetActorLocation failed: " .. tostring(err))
+        return false, "Teleport failed: could not move you there."
+    end
+    pcall(function() moverPawn:ForceNetUpdate() end)
+
+    return true, "Teleported to your friend."
+end
+
+local function checkWebsiteTeleportRequest(steam)
+    local path = teleportExecuteRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local referenceSteam = jsonReadString(body, "referenceSteamId")
+    if requestId == nil then return end
+
+    local ok, message = tryTeleportToFriend(steam, referenceSteam)
+    safeNotify(steam, message)
+    if ok and referenceSteam ~= nil and referenceSteam ~= "" then
+        safeNotify(referenceSteam, "A friend just teleported to you.")
+    end
+    log("Website teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(teleportExecuteResultFilePath(steam), requestId, ok, message)
+end
+
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
 -- too often to log unconditionally) so a silent failure here is actually
 -- visible instead of just never doing anything. Gated ONCE per tick (not per
@@ -950,6 +1040,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteParkRequest(steam)
                     checkWebsiteRedeemRequest(steam)
                     checkWebsiteSkinUseRequest(steam)
+                    checkWebsiteTeleportRequest(steam)
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end

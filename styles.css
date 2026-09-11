@@ -914,6 +914,40 @@ strong.stat-critical {
   margin-top: 8px;
 }
 
+.friends-section-header {
+  margin-top: 8px;
+}
+
+.friend-card,
+.request-card {
+  gap: 10px;
+}
+
+.friend-card-name,
+.request-card-name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.friend-card-meta,
+.request-card-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.friend-card-actions,
+.request-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.friend-card-actions .action-button,
+.request-card-actions .action-button {
+  flex: 1 1 auto;
+}
+
 .skin-card {
   gap: 12px;
 }
