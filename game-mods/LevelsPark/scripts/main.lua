@@ -471,10 +471,17 @@ local function capturePawnState(pawn)
     -- (0/1/2 = Life 1/2/3, confirmed; higher is untested but clamped to 3
     -- here to match this feature's own 0-3 range), separate from the slot
     -- FNames themselves.
-    pcall(function()
+    local stacksOk, stacksErr = pcall(function()
         local stacks = pawn:GetElderReplicationStacks()
-        if type(stacks) == "number" then state.entombments = math.min(3, math.max(0, stacks)) end
+        if type(stacks) == "number" then
+            state.entombments = math.min(3, math.max(0, stacks))
+        else
+            log("capturePawnState: GetElderReplicationStacks returned non-number: " .. tostring(stacks))
+        end
     end)
+    if not stacksOk then
+        log("capturePawnState: GetElderReplicationStacks call failed: " .. tostring(stacksErr))
+    end
     pcall(function()
         local mutData = pawn.ReplicatedMutationsData
         local mutations = {}
@@ -706,8 +713,17 @@ local function tryPark(steam, name)
 
     lastParkedPawnAddr[steam] = addr
     pcall(function() pawn:SetHealth(0) end)
+    local mutationCount = 0
+    if state.mutations ~= nil then
+        for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+            if state.mutations[field] ~= nil and state.mutations[field] ~= "" then
+                mutationCount = mutationCount + 1
+            end
+        end
+    end
     log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth)
-        .. (state.name ~= "" and (", name=" .. state.name) or "") .. ")")
+        .. (state.name ~= "" and (", name=" .. state.name) or "")
+        .. ", entombments=" .. tostring(state.entombments) .. ", mutations=" .. tostring(mutationCount) .. ")")
     local message = "Dino parked" .. (state.name ~= "" and (" as \"" .. state.name .. "\"") or "")
         .. ". Respawn as the same species, then type !redeem to restore it."
     return true, message

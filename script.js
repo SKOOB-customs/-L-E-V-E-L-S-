@@ -1549,7 +1549,11 @@ const openParkedDinoModal = (entry) => {
   addDetail('Parked', entry.capturedAt ? new Date(entry.capturedAt * 1000).toLocaleString() : 'Unknown');
   if (entry.compCode) addDetail('Reference #', entry.compCode);
   if (entry.skin) addDetail('Skin', entry.skin.name || 'Attached');
-  if (entry.entombments) addDetail('Elder stacks', String(entry.entombments));
+  // Unconditional (unlike the card's Elder badge, which only shows above 0
+  // to avoid grid clutter) — this confirms the tracking is actually active
+  // for players still growing toward their first entomb, rather than
+  // looking like the feature is just missing.
+  addDetail('Elder stacks', String(entry.entombments || 0));
 
   parkedModalContent.append(image, species, titleRow, growthBar, stats, detailStats);
 
