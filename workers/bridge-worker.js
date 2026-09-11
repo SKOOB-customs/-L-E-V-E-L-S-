@@ -420,13 +420,27 @@ const hexToLinearColor = (hex) => {
   };
 };
 
-const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
+// Deliberately NOT clamped to 0-1 — "glitch skins" as a genre relies on
+// extreme/negative FLinearColor values for the HDR/inverted look (the
+// customizer field-map doc confirms values above 1.0 render as stable HDR
+// glow; nothing in that doc or our own testing rules out negative values
+// either). Only guards against genuinely degenerate input (NaN, Infinity,
+// or magnitudes big enough to be a typo rather than a deliberate glitch
+// value) so a bad write can't produce something pathological.
+const GLITCH_COLOR_BOUND = 100000;
+const sanitizeColorNumber = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(GLITCH_COLOR_BOUND, Math.max(-GLITCH_COLOR_BOUND, n));
+};
 
 // Accepts either a hex string ("#RRGGBB", from the picker UI) or a
 // pre-built {r,g,b,a} object (from the Advanced JSON path) per field, and
-// normalizes everything to clamped {r,g,b,a} floats — the same shape
-// regardless of which input path the admin used, so the persisted file
-// format never varies by UI path.
+// normalizes everything to the same {r,g,b,a} shape regardless of which UI
+// path the admin used. The object path accepts R/G/B/A in either case —
+// uppercase matches the actual Unreal struct field names (what an admin
+// pasting real customizer values would naturally write), lowercase matches
+// this project's own persisted-file convention (and the community SkinMod's).
 const normalizeSkinColors = (colors) => {
   const normalized = {};
   for (const field of SKIN_COLOR_FIELDS) {
@@ -436,9 +450,17 @@ const normalizeSkinColors = (colors) => {
       const rgb = hexToLinearColor(value);
       if (rgb) normalized[field] = rgb;
     } else if (typeof value === 'object') {
-      const { r, g, b, a } = value;
+      const r = value.r ?? value.R;
+      const g = value.g ?? value.G;
+      const b = value.b ?? value.B;
+      const a = value.a ?? value.A;
       if (r != null && g != null && b != null) {
-        normalized[field] = { r: clamp01(r), g: clamp01(g), b: clamp01(b), a: a != null ? clamp01(a) : 1 };
+        normalized[field] = {
+          r: sanitizeColorNumber(r),
+          g: sanitizeColorNumber(g),
+          b: sanitizeColorNumber(b),
+          a: a != null ? sanitizeColorNumber(a) : 1,
+        };
       }
     }
   }
