@@ -833,6 +833,12 @@ strong.stat-critical {
   font-size: 1.05rem;
 }
 
+.parked-name.is-placeholder {
+  font-style: italic;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .parked-growth-value {
   font-weight: 700;
   color: var(--chrome-1);

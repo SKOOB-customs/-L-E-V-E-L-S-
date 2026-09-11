@@ -1357,7 +1357,8 @@ const buildParkedCard = (entry) => {
   titleRow.className = 'parked-title-row';
   const name = document.createElement('h3');
   name.className = 'parked-name';
-  name.textContent = entry.name || entry.species;
+  name.textContent = entry.name || 'ayoo gimme a name son';
+  name.classList.toggle('is-placeholder', !entry.name);
   const growthValue = document.createElement('span');
   growthValue.className = 'parked-growth-value';
   const growthPercentLabel = document.createElement('small');
@@ -1399,6 +1400,7 @@ const buildParkedCard = (entry) => {
   addDetail('Hunger', `${Math.round(entry.hunger || 0)} / ${Math.round(entry.maxHunger || 0)}`);
   addDetail('Thirst', `${Math.round(entry.thirst || 0)} / ${Math.round(entry.maxThirst || 0)}`);
   addDetail('Parked', entry.capturedAt ? new Date(entry.capturedAt * 1000).toLocaleString() : 'Unknown');
+  if (entry.compCode) addDetail('Reference #', entry.compCode);
   details.appendChild(detailStats);
 
   // Redeeming someone else's dino makes no sense, so the button is only
@@ -1414,7 +1416,7 @@ const buildParkedCard = (entry) => {
     const renameInput = document.createElement('input');
     renameInput.type = 'text';
     renameInput.maxLength = 24;
-    renameInput.placeholder = 'Name this dino...';
+    renameInput.placeholder = 'ayoo gimme a name son';
     renameInput.value = entry.name || '';
     renameInput.className = 'parked-rename-input';
 
@@ -1441,7 +1443,8 @@ const buildParkedCard = (entry) => {
           showToast(data.error || 'Could not rename that dino.');
         } else {
           entry.name = newName;
-          name.textContent = newName || entry.species;
+          name.textContent = newName || 'ayoo gimme a name son';
+          name.classList.toggle('is-placeholder', !newName);
           showToast('Name updated.');
         }
       } catch (error) {
@@ -1681,7 +1684,8 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     if (!response.ok || !data.ok) {
       showToast(data.error || 'Could not grant that dino.');
     } else {
-      showToast(`Granted a ${body.species} to ${targetSteamId}.`);
+      const codeSuffix = data.dino?.compCode ? ` (ref ${data.dino.compCode})` : '';
+      showToast(`Granted a ${body.species} to ${targetSteamId}.${codeSuffix}`);
       document.querySelector('[data-comp-target]').value = '';
       document.querySelector('[data-comp-name]').value = '';
     }

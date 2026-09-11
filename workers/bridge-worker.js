@@ -429,6 +429,23 @@ const grantCompensationDino = async (env, targetSteamId, dino) => {
 
 const pctToFraction = (value) => Math.min(100, Math.max(0, Number(value) || 0)) / 100;
 
+// Player/admin-facing reference code for a compensation grant — deliberately
+// NOT capturedAt (that stays a plain Unix-timestamp number always; main.lua's
+// own JSON reader parses it with a digits-only regex for !redeem's recency
+// sorting and the "parked Xm ago" age display, so it has to stay numeric).
+// This is a purely additive field main.lua doesn't know about and never
+// reads — its per-field parser silently ignores anything it doesn't
+// recognize, so this is safe to add without touching the mod at all.
+// Excludes 0/O/1/I to avoid on-screen ambiguity.
+const COMP_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateCompCode = () => {
+  let code = '';
+  for (let i = 0; i < 6; i += 1) {
+    code += COMP_CODE_CHARS[Math.floor(Math.random() * COMP_CODE_CHARS.length)];
+  }
+  return `COMP-${code}`;
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -647,6 +664,7 @@ export default {
         bodyColorG: 0,
         bodyColorB: 0,
         capturedAt: Math.floor(Date.now() / 1000),
+        compCode: generateCompCode(),
       };
       try {
         await grantCompensationDino(env, targetSteamId, dino);
