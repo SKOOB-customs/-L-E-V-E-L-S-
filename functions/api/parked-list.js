@@ -1,15 +1,22 @@
 /**
- * View of the aggregated parked-dino data synced from the game server by
+ * A single player's parked dinos, synced from the game server by
  * workers/bridge-worker.js's `scheduled` handler (a Cron Trigger polling
  * Bropanel's Pterodactyl Client API for Mods/LevelsPark/Saved/
- * parked_<steamid>.json files). The cron only runs once a minute (Cloudflare's
- * floor), which is a noticeable "why isn't my dino showing up yet" gap right
- * after !park/!redeem — so every request here first asks the Worker to sync
- * right now (same cross-service call functions/api/redeem.js uses) and only
- * falls back to whatever's already cached in KV if that live sync fails or
- * times out, rather than making the page wait indefinitely.
+ * parked_<steamid>.json files). KV holds every player's data aggregated
+ * together, but this endpoint requires steam_id and only ever returns that
+ * one player's entries — players should only see and be able to redeem
+ * their own parked dinos, never anyone else's (matching the trust model
+ * the rest of this site already uses: steam_id is client-supplied, same as
+ * /api/live-dino and the old inventory API — not a new gap introduced here).
  *
- * GET -> { updatedAt: number | null, parked: { [snapshotKey]: {...} } }
+ * The cron only runs once a minute (Cloudflare's floor), which is a
+ * noticeable "why isn't my dino showing up yet" gap right after
+ * !park/!redeem — so every request here first asks the Worker to sync right
+ * now (same cross-service call functions/api/redeem.js uses) and only falls
+ * back to whatever's already cached in KV if that live sync fails or times
+ * out, rather than making the page wait indefinitely.
+ *
+ * GET ?steam_id=X -> { updatedAt: number | null, parked: { [snapshotKey]: {...} } }
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -26,11 +33,16 @@ const workerOrigin = (env) => {
   }
 };
 
+const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
+
 const SYNC_TIMEOUT_MS = 8000;
 
 export async function onRequestGet(context) {
-  const { env } = context;
+  const { request, env } = context;
   if (!env.PARKED_KV) return json({ error: 'Parked storage is not configured' }, 503);
+
+  const steamId = new URL(request.url).searchParams.get('steam_id');
+  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steam_id' }, 400);
 
   const origin = workerOrigin(env);
   if (origin) {
@@ -52,5 +64,9 @@ export async function onRequestGet(context) {
   }
 
   const index = await env.PARKED_KV.get('parked:index', 'json');
-  return json({ updatedAt: index?.updatedAt || null, parked: index?.parked || {} });
+  const allParked = index?.parked || {};
+  const parked = Object.fromEntries(
+    Object.entries(allParked).filter(([, entry]) => entry.steam === steamId),
+  );
+  return json({ updatedAt: index?.updatedAt || null, parked });
 }

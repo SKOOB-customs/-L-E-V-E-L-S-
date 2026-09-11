@@ -1006,6 +1006,7 @@ const parkedCountEl = document.querySelector('[data-parked-count]');
 const parkedSearchEl = document.querySelector('[data-parked-search]');
 const parkedSortEl = document.querySelector('[data-parked-sort]');
 const parkedGridEl = document.querySelector('[data-parked-grid]');
+const parkedSignedOutEl = document.querySelector('[data-parked-signed-out]');
 const parkedEmptyEl = document.querySelector('[data-parked-empty]');
 const parkedErrorEl = document.querySelector('[data-parked-error]');
 const parkedErrorMessageEl = document.querySelector('[data-parked-error-message]');
@@ -1274,9 +1275,24 @@ const renderParkedGrid = () => {
   }
 };
 
+// Scoped to the signed-in player's own steam_id — the server only ever
+// returns that player's parked dinos (see functions/api/parked-list.js),
+// so nobody sees or can attempt to redeem anyone else's.
 const loadParkedList = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    if (parkedSignedOutEl) parkedSignedOutEl.hidden = false;
+    if (parkedEmptyEl) parkedEmptyEl.hidden = true;
+    if (parkedErrorEl) parkedErrorEl.hidden = true;
+    if (parkedGridEl) parkedGridEl.innerHTML = '';
+    if (parkedCountEl) parkedCountEl.textContent = '0 parked';
+    parkedEntries = [];
+    return;
+  }
+  if (parkedSignedOutEl) parkedSignedOutEl.hidden = true;
+
   try {
-    const response = await fetch('/api/parked-list');
+    const response = await fetch(`/api/parked-list?steam_id=${encodeURIComponent(profile.steamId)}`);
     const data = await response.json();
     if (!response.ok) {
       if (parkedErrorEl) parkedErrorEl.hidden = false;
