@@ -931,7 +931,28 @@ const updateMapMarker = (location) => {
   updateMapMarkerHeading(fx, fy);
 };
 
+// The Park button lives inside the same panel as the live dino's stats, so
+// it's normally hidden along with everything else once the dino is gone —
+// but SetHealth(0) (what parking does server-side) doesn't despawn the pawn
+// instantly, so /api/live-dino can keep reporting `found: true` with
+// health 0 for a window after a dino is already parked, right up until the
+// client actually reaches character select. During that window the panel
+// (and an untouched button) would stay visible and clickable, inviting
+// spam-parks of the same already-parked dino. Disable it once health hits
+// 0 — skipped while a request is already in flight so this never fights
+// requestActionAndPoll's own button-state management mid-click.
+const PARK_BUTTON_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
+
+const updateParkButtonForLiveState = (isAlive) => {
+  const btn = document.querySelector('[data-park-dino]');
+  if (!btn || PARK_BUTTON_BUSY_LABELS.has(btn.textContent)) return;
+  btn.disabled = !isAlive;
+  btn.textContent = isAlive ? 'Park Dino' : 'Dino not alive';
+};
+
 const renderLiveDino = (dino) => {
+  updateParkButtonForLiveState((dino.health || 0) > 0);
+
   const classEl = document.querySelector('[data-dino-class]');
   const nameEl = document.querySelector('[data-dino-name]');
   if (classEl) classEl.textContent = dino.class || 'Unknown';

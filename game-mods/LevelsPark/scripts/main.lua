@@ -376,6 +376,20 @@ local function queueAction(kind, steam, extra)
     pendingActions[#pendingActions + 1] = { kind = kind, steam = steam, extra = extra }
 end
 
+-- Guards against spamming !park / the website's Park button against the
+-- SAME already-parked dino: SetHealth(0) below doesn't despawn the pawn
+-- instantly, so the controller's pawn (and the RCON-sourced /api/live-dino
+-- status the website polls) can keep reporting a "live" dino for a window
+-- after it's already been captured and slain, right up until the client
+-- actually transitions to character select. Without this, repeatedly
+-- clicking Park during that window (or spamming !park in that same window)
+-- captures the identical dino over and over, flooding a player's Inventory
+-- with duplicate cards for a dino that was already parked. Keyed by pawn
+-- address (unique per spawned dino instance) rather than time-based, since
+-- it needs to keep blocking for however long that window actually is, but
+-- stop blocking the instant a genuinely new pawn (a real respawn) appears.
+local lastParkedPawnAddr = {}
+
 -- Core park logic shared by the in-game !park command and website-
 -- triggered park requests (the Live Dino tab's Park button — see the
 -- website-bridge section below). Returns ok (bool), message (string).
@@ -389,6 +403,12 @@ local function tryPark(steam, name)
         return false, "Park failed: no live dino found."
     end
 
+    local addr
+    pcall(function() addr = pawn:GetAddress() end)
+    if addr ~= nil and lastParkedPawnAddr[steam] == addr then
+        return false, "Park failed: this dino is already parked. Spawn in as a new dino first."
+    end
+
     local state = capturePawnState(pawn)
     state.name = sanitizeName(name)
     if state.classPath == nil or state.growth == nil then
@@ -399,6 +419,7 @@ local function tryPark(steam, name)
         return false, "Park failed: could not save state."
     end
 
+    lastParkedPawnAddr[steam] = addr
     pcall(function() pawn:SetHealth(0) end)
     log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth)
         .. (state.name ~= "" and (", name=" .. state.name) or "") .. ")")
