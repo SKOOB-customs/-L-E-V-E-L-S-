@@ -1023,6 +1023,12 @@ const updateMapMarker = (location) => {
     };
 
     mapViewport.addEventListener('pointerdown', (event) => {
+      // The zoom buttons sit inside .map-viewport (top-right overlay), so
+      // pressing them also bubbles a pointerdown up to this handler. Without
+      // this guard, preventDefault() + starting a drag here interferes with
+      // the button's own click firing correctly — that's what made "-"
+      // zoom in instead of out (same fate for the reset button).
+      if (event.target.closest('.map-zoom-controls')) return;
       event.preventDefault();
       dragging = true;
       activePointerId = event.pointerId;
