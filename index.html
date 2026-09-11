@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=c29e0f4" />
+    <link rel="stylesheet" href="styles.css?v=e91a7d3" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -617,6 +617,18 @@
                   <input type="number" min="0" max="100" value="100" data-comp-thirst />
                 </label>
               </div>
+              <div class="field-row two-up">
+                <label>
+                  Entombments
+                  <select data-comp-entombments>
+                    <option value="0">0 — 4 mutation slots</option>
+                    <option value="1">1 — 8 mutation slots</option>
+                    <option value="2">2 — 12 mutation slots</option>
+                    <option value="3">3 — 16 mutation slots</option>
+                  </select>
+                </label>
+              </div>
+              <div data-comp-mutation-slots></div>
               <div class="submit-actions">
                 <button class="action-button" type="submit">Grant dino</button>
               </div>
@@ -1034,6 +1046,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=c29e0f4"></script>
+    <script src="script.js?v=e91a7d3"></script>
   </body>
 </html>

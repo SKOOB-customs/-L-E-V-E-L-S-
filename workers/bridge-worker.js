@@ -518,6 +518,66 @@ const KNOWN_SPECIES = [
 const classPathForSpecies = (species) =>
   `/Game/TheIsle/Core/Characters/Dinosaurs/${species}/BP_${species}.BP_${species}_C`;
 
+// Mirrors main.lua's MUTATION_SLOT_FIELDS (JSON keys are lowerCamelCase of
+// the PascalCase struct field names Lua uses) — 4 base + 4 "parent" + 8
+// "elder" split A/B, confirmed via a live GenerateSDK dump of TheIsle.hpp.
+// Grouped by which entombment level (0-3) unlocks each tier.
+const MUTATION_SLOT_TIERS = [
+  ['mutationSlot1', 'mutationSlot2', 'mutationSlot3', 'mutationSlot4'],
+  ['parentMutationSlot1', 'parentMutationSlot2', 'parentMutationSlot3', 'parentMutationSlot4'],
+  ['elderMutationSlot1A', 'elderMutationSlot2A', 'elderMutationSlot3A', 'elderMutationSlot4A'],
+  ['elderMutationSlot1B', 'elderMutationSlot2B', 'elderMutationSlot3B', 'elderMutationSlot4B'],
+];
+const MUTATION_SLOT_FIELDS = MUTATION_SLOT_TIERS.flat();
+
+// Sourced from two independent community wikis (theisle.info,
+// evrimaquickguide.com) plus exact FNames given verbatim in the
+// diplomatic-tendencies/evrima-dev-knowledge repo for quest-unlockable
+// ones — NOT yet cross-checked against this build's own live mutation
+// catalog (main.lua's tryMutationDumpOnce is queued to log that the next
+// time anyone spawns in; reconcile this list once it fires). Diet tag
+// mirrors ETIMutationTypes (Carnivore/Herbivore/Generic) for the
+// frontend's per-species dropdown filtering; server-side validation stays
+// permissive across diets since that gating isn't confirmed and
+// over-restricting would just block legitimate grants.
+const KNOWN_MUTATIONS = [
+  { name: 'Cellular Regeneration', diet: 'generic' },
+  { name: 'Congenital Hypoalgesia', diet: 'generic' },
+  { name: 'Epidermal Fibrosis', diet: 'generic' },
+  { name: 'Osteosclerosis', diet: 'generic' },
+  { name: 'Photosynthetic Tissue', diet: 'generic' },
+  { name: 'Enlarged Meniscus', diet: 'generic' },
+  { name: 'Efficient Digestion', diet: 'generic' },
+  { name: 'Featherweight', diet: 'generic' },
+  { name: 'Hydrodynamic', diet: 'generic' },
+  { name: 'Reabsorption', diet: 'generic' },
+  { name: 'Advanced Gestation', diet: 'generic' },
+  { name: 'Sustained Hydration', diet: 'generic' },
+  { name: 'Accelerated Prey Drive', diet: 'carnivore' },
+  { name: 'Hematophagy', diet: 'carnivore' },
+  { name: 'Hemomania', diet: 'carnivore' },
+  { name: 'Cannibalistic', diet: 'carnivore' },
+  { name: 'Truculency', diet: 'carnivore' },
+  { name: 'Hypermetabolic Inanition', diet: 'carnivore' },
+  { name: 'Tactile Endurance', diet: 'carnivore' },
+  { name: 'Barometric Sensitivity', diet: 'herbivore' },
+  { name: 'Hypervigilance', diet: 'herbivore' },
+  { name: 'Photosynthetic Regeneration', diet: 'herbivore' },
+  { name: 'Xerocole Adaptation', diet: 'herbivore' },
+  { name: 'Social Behavior', diet: 'herbivore' },
+  { name: 'Wader', diet: 'herbivore' },
+  { name: 'Reniculate Kidneys', diet: 'generic' },
+  { name: 'Reinforced Tendons', diet: 'generic' },
+  { name: 'Multichambered Lungs', diet: 'generic' },
+  { name: 'Osteophagic', diet: 'generic' },
+  { name: 'Augmented Tapetum', diet: 'generic' },
+  { name: 'Parthenogenesis', diet: 'generic' },
+  { name: 'Prolific Reproduction', diet: 'generic' },
+  { name: 'Enhanced Digestion', diet: 'generic' },
+  { name: 'Heightened Ghrelin', diet: 'generic' },
+];
+const KNOWN_MUTATION_NAMES = new Set(KNOWN_MUTATIONS.map((m) => m.name));
+
 // Glitch skins: the 10 FCustomizerDataBase color fields (0.21.720+), same
 // set main.lua's applyCustomizer knows about. PatternIndex/SkinVariation are
 // deliberately not exposed here at all — see the admin-panel plan doc and
@@ -838,6 +898,14 @@ export default {
       }
     }
 
+    // Mutation catalog for the Compensation form's dropdowns — see
+    // KNOWN_MUTATIONS above for sourcing/caveats. No admin gate, same
+    // transparency posture as /admin-roster-public: this is read-only,
+    // sourced from public wikis, and grants nothing by itself.
+    if (url.pathname === '/mutations-catalog' && request.method === 'GET') {
+      return json({ ok: true, mutations: KNOWN_MUTATIONS, tiers: MUTATION_SLOT_TIERS });
+    }
+
     // Compensation: an admin grants a player a redeemable dino snapshot
     // without touching the game server directly. Reuses the exact file
     // format main.lua's !park already produces, so !redeem / the website's
@@ -852,7 +920,7 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct } = body || {};
+      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput } = body || {};
       if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
         return json({ error: 'Missing or invalid granterSteamId' }, 400);
       }
@@ -861,6 +929,34 @@ export default {
       }
       if (typeof species !== 'string' || !KNOWN_SPECIES.includes(species)) {
         return json({ error: 'Invalid species' }, 400);
+      }
+      const entombments = entombmentsRaw == null ? 0 : Number(entombmentsRaw);
+      if (!Number.isInteger(entombments) || entombments < 0 || entombments > 3) {
+        return json({ error: 'entombments must be an integer 0-3' }, 400);
+      }
+      // Only slots within the tiers this entombment level actually unlocks
+      // (see MUTATION_SLOT_TIERS) — rejecting an out-of-tier slot outright
+      // rather than silently dropping it, so a mismatched form submission
+      // surfaces as a clear error instead of a quietly incomplete grant.
+      const allowedMutationFields = new Set(MUTATION_SLOT_TIERS.slice(0, entombments + 1).flat());
+      const mutations = {};
+      if (mutationsInput != null) {
+        if (typeof mutationsInput !== 'object') {
+          return json({ error: 'mutations must be an object' }, 400);
+        }
+        for (const [field, value] of Object.entries(mutationsInput)) {
+          if (value == null || value === '') continue;
+          if (!MUTATION_SLOT_FIELDS.includes(field)) {
+            return json({ error: `Unknown mutation slot: ${field}` }, 400);
+          }
+          if (!allowedMutationFields.has(field)) {
+            return json({ error: `Mutation slot ${field} needs a higher entombment level` }, 400);
+          }
+          if (typeof value !== 'string' || !KNOWN_MUTATION_NAMES.has(value)) {
+            return json({ error: `Unknown mutation name: ${value}` }, 400);
+          }
+          mutations[field] = value;
+        }
       }
       const tier = await getAdminTier(env, granterSteamId);
       if (!tier) return json({ error: 'Not an admin' }, 403);
@@ -883,6 +979,8 @@ export default {
         bodyColorB: 0,
         capturedAt: Math.floor(Date.now() / 1000),
         compCode: generateCompCode(),
+        entombments,
+        ...mutations,
       };
       try {
         await grantCompensationDino(env, targetSteamId, dino);

@@ -26,10 +26,11 @@
 --     calls any respawn API. !park kills the pawn and lets the player
 --     respawn through the normal game UI; !redeem mutates the resulting
 --     fresh juvenile in-place via scalar setters.
---   - No mutations/nutrients/skin restore. Deliberately out of scope; this
---     mod only round-trips growth + the four core vitals. PRIME status and
+--   - No nutrients restore. Deliberately out of scope. PRIME status and
 --     body color ARE captured, but display-only (for the website gallery,
---     not applied on !redeem).
+--     not applied on !redeem). Skin colors and admin-granted mutation
+--     slots/entombment level ARE captured and applied — see applyCustomizer
+--     and the mutation-slot handling in applyStateToPawn respectively.
 --   - Heavy actions (kill, restore) are deferred a few seconds off the chat
 --     hook and re-resolve the pawn fresh at fire time (hook parameter
 --     wrappers and cached pawns are unsafe across ticks).
@@ -203,6 +204,26 @@ local SKIN_COLOR_FIELDS = {
     "TeethColor", "MouthColor", "ClawsColor",
 }
 
+-- The 16 FName slots on ATICharacterBase's FReplicatedMutationsData struct
+-- (confirmed via a live GenerateSDK dump of TheIsle.hpp) — 4 base + 4
+-- "parent" (unlocked at 1 entombment) + 8 "elder" split A/B (unlocked at 2
+-- and 3 entombments respectively). Declared up here for the same reason as
+-- SKIN_COLOR_FIELDS: loadParkedDinos needs it, Lua locals must precede use.
+local MUTATION_SLOT_FIELDS = {
+    "MutationSlot1", "MutationSlot2", "MutationSlot3", "MutationSlot4",
+    "ParentMutationSlot1", "ParentMutationSlot2", "ParentMutationSlot3", "ParentMutationSlot4",
+    "ElderMutationSlot1A", "ElderMutationSlot2A", "ElderMutationSlot3A", "ElderMutationSlot4A",
+    "ElderMutationSlot1B", "ElderMutationSlot2B", "ElderMutationSlot3B", "ElderMutationSlot4B",
+}
+
+-- JSON keys use lowerCamelCase (e.g. "mutationSlot1") while the live
+-- struct's actual field names are PascalCase ("MutationSlot1") — this just
+-- lowercases the first letter, same relationship as bodyColorR/BodyColor.R
+-- elsewhere in this file.
+local function mutationJsonKey(field)
+    return field:sub(1, 1):lower() .. field:sub(2)
+end
+
 local function jsonReadColorField(body, fieldName)
     local sub = body:match('"' .. fieldName .. '"%s*:%s*(%b{})')
     if sub == nil then return nil end
@@ -291,17 +312,30 @@ end
 -- across array elements if run on the full file body; %b{} (Lua's balanced-
 -- match pattern) splits the "dinos" array into individual flat-object
 -- substrings first, and each field is read from just its own object.
+-- Builds `"mutationSlot1":"...",...` for all 16 slots (empty string for an
+-- unused slot) from a table keyed by the PascalCase struct field names
+-- (MUTATION_SLOT_FIELDS) — the shape capturePawnState/applyStateToPawn use.
+local function mutationsToJsonFragment(mutations)
+    local parts = {}
+    for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+        local value = (mutations and mutations[field]) or ""
+        table.insert(parts, string.format('"%s":"%s"', mutationJsonKey(field), jsonEscape(value)))
+    end
+    return table.concat(parts, ",")
+end
+
 local function dinoToJson(state)
     return string.format(
         '{"name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
         '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
         '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
-        '"capturedAt":%d}',
+        '"capturedAt":%d,"entombments":%d,%s}',
         jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
         state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
         state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
         state.primeElder and "true" or "false", state.bodyColorR or 0, state.bodyColorG or 0,
-        state.bodyColorB or 0, state.capturedAt
+        state.bodyColorB or 0, state.capturedAt, state.entombments or 0,
+        mutationsToJsonFragment(state.mutations)
     )
 end
 
@@ -346,6 +380,15 @@ local function loadParkedDinos(steam)
             end
             skin = { name = jsonReadString(skinSection, "name"), colors = colors }
         end
+        -- Admin-granted (or naturally captured, via !park on an
+        -- already-mutated dino) entombment level + mutation slots. Read
+        -- into a table keyed by the PascalCase struct field name — the
+        -- shape applyStateToPawn's field-write loop expects — from the
+        -- lowerCamelCase JSON keys dinoToJson writes.
+        local mutations = {}
+        for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+            mutations[field] = jsonReadString(objStr, mutationJsonKey(field)) or ""
+        end
         table.insert(dinos, {
             name = jsonReadString(objStr, "name"),
             classPath = jsonReadString(objStr, "classPath"),
@@ -364,6 +407,8 @@ local function loadParkedDinos(steam)
             bodyColorB = jsonReadNumber(objStr, "bodyColorB"),
             capturedAt = jsonReadNumber(objStr, "capturedAt"),
             skin = skin,
+            entombments = jsonReadNumber(objStr, "entombments") or 0,
+            mutations = mutations,
         })
     end
     return dinos
@@ -414,6 +459,31 @@ local function capturePawnState(pawn)
         state.bodyColorG = color.G
         state.bodyColorB = color.B
     end)
+    -- Entombment tier + mutation slots this dino already has (whether from
+    -- natural gameplay or an earlier admin grant) — captured so a plain
+    -- !park on an already-mutated dino doesn't silently drop them. See
+    -- EVRIMA_EntombBonus_Fix.md: ElderReplicationStacks is the tier counter
+    -- (0/1/2 = Life 1/2/3, confirmed; higher is untested but clamped to 3
+    -- here to match this feature's own 0-3 range), separate from the slot
+    -- FNames themselves.
+    pcall(function()
+        local stacks = pawn:GetElderReplicationStacks()
+        if type(stacks) == "number" then state.entombments = math.min(3, math.max(0, stacks)) end
+    end)
+    pcall(function()
+        local mutData = pawn.ReplicatedMutationsData
+        local mutations = {}
+        for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+            local value = ""
+            local okRead, raw = pcall(function() return mutData[field] end)
+            if okRead and raw ~= nil then
+                local okStr, s = pcall(function() return raw:ToString() end)
+                if okStr and type(s) == "string" and s ~= "None" then value = s end
+            end
+            mutations[field] = value
+        end
+        state.mutations = mutations
+    end)
     state.capturedAt = os.time()
     return state
 end
@@ -443,6 +513,112 @@ local function applyStateToPawn(pawn, state)
     pcall(function() pawn:SetStamina(state.stamina) end)
     pcall(function() pawn:SetHunger(state.hunger) end)
     pcall(function() pawn:SetThirst(state.thirst) end)
+end
+
+-- Restores entombment level + mutation slots (admin-granted via
+-- Compensation, or naturally captured by !park on an already-mutated
+-- dino) — per EVRIMA_QuestMutation_Fix.md, this needs to run ~500ms AFTER
+-- the bulk growth/vitals writes above, on a FRESHLY re-resolved pawn
+-- (never the wrapper captured synchronously above, which can go stale
+-- across ticks — same rule already applied to the friend-teleport
+-- re-derive elsewhere in this file). Also per that doc: SetSlotNEquippedMutation
+-- silently rejects on a just-restored pawn, so this field-writes
+-- pawn.ReplicatedMutationsData directly and pushes via
+-- SetReplicatedMutationsData instead.
+local function applyMutationsDeferred(steam, entombments, mutations)
+    if entombments == nil or entombments <= 0 or mutations == nil then return end
+    local hasAny = false
+    for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+        if mutations[field] ~= nil and mutations[field] ~= "" then
+            hasAny = true
+            break
+        end
+    end
+    if not hasAny then return end
+
+    local fired = false
+    local handle
+    handle = LoopInGameThreadWithDelay(500, function()
+        -- LoopInGameThreadWithDelay REPEATS rather than firing once
+        -- (confirmed elsewhere this session) — this guard makes every
+        -- tick after the first a no-op regardless of whether the
+        -- best-effort CancelDelayedAction below actually exists/works.
+        if fired then return end
+        fired = true
+        pcall(function()
+            if handle ~= nil and CancelDelayedAction ~= nil then CancelDelayedAction(handle) end
+        end)
+
+        local gm = findGameMode()
+        if gm == nil then return end
+        local ctrl
+        pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+        local pawn = livePawnFromCtrl(ctrl)
+        if pawn == nil then return end
+
+        local okMut, mutData = pcall(function() return pawn.ReplicatedMutationsData end)
+        local written = 0
+        if okMut and mutData ~= nil then
+            for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+                local value = mutations[field]
+                if value ~= nil and value ~= "" then
+                    local okF, fn = pcall(function() return FName(value) end)
+                    if okF and fn ~= nil then
+                        local okW = pcall(function() mutData[field] = fn end)
+                        if okW then written = written + 1 end
+                    end
+                end
+            end
+            if written > 0 then
+                pcall(function() pawn:SetReplicatedMutationsData(mutData, true) end)
+            end
+        end
+
+        -- Quest-locked mutation names need to be in the unlock list or the
+        -- engine's other systems won't treat the grant as legitimate.
+        -- Appended, not overwritten, so any unlocks the engine itself
+        -- hydrated on respawn are preserved.
+        local okMR, mrData = pcall(function() return pawn.MutationsRequirementsData end)
+        if okMR and mrData ~= nil then
+            local okArr, arr = pcall(function() return mrData.UnlockRequiredMutations end)
+            if okArr and arr ~= nil then
+                local currentN
+                pcall(function() currentN = #arr end)
+                currentN = type(currentN) == "number" and currentN or 0
+                local existing = {}
+                for i = 1, currentN do
+                    local raw
+                    pcall(function() raw = arr[i] end)
+                    if raw ~= nil then
+                        local s
+                        pcall(function() s = raw:ToString() end)
+                        if type(s) == "string" then existing[s] = true end
+                    end
+                end
+                local added = 0
+                for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+                    local value = mutations[field]
+                    if value ~= nil and value ~= "" and not existing[value] then
+                        local okW = pcall(function() arr[currentN + 1 + added] = FName(value) end)
+                        if okW then
+                            added = added + 1
+                            existing[value] = true
+                        end
+                    end
+                end
+                if added > 0 then
+                    pcall(function() pawn:SetMutationRequirementsData(mrData) end)
+                end
+            end
+        end
+
+        -- Confirmed safe for 0-2 (Life 1/2/3); 3 is untested by the source
+        -- doc but degrades safely — worst case the boosted value doesn't
+        -- apply while the slots themselves still do.
+        pcall(function() pawn:SetElderReplicationStacks(entombments) end)
+        log("Applied entombment=" .. tostring(entombments) .. " mutations=" .. tostring(written)
+            .. " for " .. steam)
+    end)
 end
 
 -- ── Deferred action queue (rule 5: never SetHealth/notify/etc from inside a hook) ──
@@ -577,6 +753,7 @@ local function tryRedeem(steam, snapshotId, name)
     end
 
     applyStateToPawn(pawn, target)
+    applyMutationsDeferred(steam, target.entombments, target.mutations)
     -- A skin attached to this specific snapshot (via the website's
     -- Attach action, spending a charge) travels with it — applied once,
     -- right here, never via a continuous per-player poll. This is what
@@ -1042,7 +1219,7 @@ local function tryGrowthPauseToggle(steam, action)
 
     if action == "pause" then
         local growth
-        pcall(function() growth = pawn.Growth end)
+        pcall(function() growth = pawn:GetGrowth() end)
         if growth == nil then
             return false, "Failed: could not read growth."
         end
@@ -1099,12 +1276,60 @@ local function writeGrowthStatus(steam, pawn)
     local paused = false
     pcall(function() paused = pawn.bIsGrowthPaused and true or false end)
     local growth = 0
-    pcall(function() growth = pawn.Growth or 0 end)
+    pcall(function() growth = pawn:GetGrowth() or 0 end)
     local body = string.format(
         '{"paused":%s,"growth":%f,"updatedAt":%d}',
         paused and "true" or "false", growth, os.time() * 1000
     )
     writeAll(growthStatusFilePath(steam), body)
+end
+
+-- TEMPORARY diagnostic (2026-09-11): dump a live dino's mutation catalog
+-- once, to source real mutation FNames for the entombment compensation
+-- feature (see EVRIMA_EntombBonus_Fix.md / EVRIMA_QuestMutation_Fix.md for
+-- the underlying SetReplicatedMutationsData mechanism) rather than
+-- guessing names from a wiki. FindFirstOf("TIMutations") + the global
+-- GetAllLifecycleMutations() call was tried first (boot-time, no live
+-- pawn needed) but came back nil — the global catalog isn't populated at
+-- boot. This version instead reads a live dino's own per-instance catalog
+-- (GetAllEnabledLifecycleMutationsAll/GetAvailableLifecycleMutationsAll on
+-- ATIDinosaurBase), gated to fire exactly once via mutationDumpDone. Only
+-- ordinary UFunctions — NOT ForEachFunction, which is confirmed to
+-- hard-crash this build. Remove once the catalog has been captured from
+-- the log; see git history if it needs revisiting.
+local mutationDumpDone = false
+local function tryMutationDumpOnce(pawn)
+    if mutationDumpDone or pawn == nil then return end
+    mutationDumpDone = true
+    local ok, err = pcall(function()
+        local classPath
+        pcall(function() classPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
+        local all
+        pcall(function() all = pawn:GetAllEnabledLifecycleMutationsAll() end)
+        if all == nil then pcall(function() all = pawn:GetAvailableLifecycleMutationsAll() end) end
+        if all == nil then
+            log("MutationDump: both catalog calls returned nil for class=" .. tostring(classPath))
+            return
+        end
+        local n
+        pcall(function() n = #all end)
+        if type(n) ~= "number" then
+            log("MutationDump: could not read array length for class=" .. tostring(classPath))
+            return
+        end
+        log("MutationDump: class=" .. tostring(classPath) .. " entries=" .. tostring(n))
+        for i = 1, n do
+            local entry
+            pcall(function() entry = all[i] end)
+            local name, mtype
+            if entry ~= nil then
+                pcall(function() name = entry.MutationName:ToString() end)
+                pcall(function() mtype = tostring(entry.MutationType) end)
+            end
+            log("MutationDump[" .. i .. "] name=" .. tostring(name) .. " type=" .. tostring(mtype))
+        end
+    end)
+    if not ok then log("MutationDump: failed: " .. tostring(err)) end
 end
 
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
@@ -1154,7 +1379,10 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteTeleportRequest(steam)
                     checkWebsiteGrowthPauseRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
-                    if pawn ~= nil then writeGrowthStatus(steam, pawn) end
+                    if pawn ~= nil then
+                        writeGrowthStatus(steam, pawn)
+                        tryMutationDumpOnce(pawn)
+                    end
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end

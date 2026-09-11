@@ -1937,6 +1937,53 @@ const checkAdminPanelAccess = async () => {
 
 checkAdminPanelAccess();
 
+// Compensation form: entombment level + the mutation slots it unlocks.
+// Read-only catalog (no admin gate — see functions/api/mutations-catalog.js),
+// so this can just load unconditionally alongside the rest of page init;
+// it only ever gets used inside the admin-only form anyway.
+let mutationCatalog = [];
+let mutationSlotTiers = [];
+const MUTATION_TIER_LABELS = ['Base', 'Parent', 'Elder A', 'Elder B'];
+
+const renderMutationSlots = () => {
+  const container = document.querySelector('[data-comp-mutation-slots]');
+  const entombmentsSelect = document.querySelector('[data-comp-entombments]');
+  if (!container || !entombmentsSelect) return;
+  const level = Number(entombmentsSelect.value) || 0;
+  const optionsHtml = mutationCatalog
+    .map((m) => `<option value="${String(m.name).replace(/"/g, '&quot;')}">${m.name}</option>`)
+    .join('');
+  container.innerHTML = mutationSlotTiers.slice(0, level + 1).map((fields, tierIndex) => `
+    <div class="mini-heading mutation-tier-heading">${MUTATION_TIER_LABELS[tierIndex] || 'Tier'} mutation slots</div>
+    <div class="field-row four-up">
+      ${fields.map((field) => `
+        <label>
+          ${field}
+          <select data-comp-mutation-field="${field}">
+            <option value="">— none —</option>
+            ${optionsHtml}
+          </select>
+        </label>
+      `).join('')}
+    </div>
+  `).join('');
+};
+
+const loadMutationCatalog = async () => {
+  try {
+    const response = await fetch('/api/mutations-catalog');
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.mutations)) mutationCatalog = data.mutations;
+    if (response.ok && Array.isArray(data.tiers)) mutationSlotTiers = data.tiers;
+  } catch (error) {
+    console.debug('Mutation catalog load failed:', error);
+  }
+  renderMutationSlots();
+};
+
+document.querySelector('[data-comp-entombments]')?.addEventListener('change', renderMutationSlots);
+loadMutationCatalog();
+
 document.querySelector('[data-compensation-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const profile = getSteamProfile();
@@ -1949,6 +1996,10 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     showToast('Enter a valid 17-digit Steam ID.');
     return;
   }
+  const mutations = {};
+  document.querySelectorAll('[data-comp-mutation-field]').forEach((select) => {
+    if (select.value) mutations[select.dataset.compMutationField] = select.value;
+  });
   const body = {
     granterSteamId: profile.steamId,
     targetSteamId,
@@ -1958,6 +2009,8 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     staminaPct: Number(document.querySelector('[data-comp-stamina]')?.value),
     hungerPct: Number(document.querySelector('[data-comp-hunger]')?.value),
     thirstPct: Number(document.querySelector('[data-comp-thirst]')?.value),
+    entombments: Number(document.querySelector('[data-comp-entombments]')?.value) || 0,
+    mutations,
   };
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
@@ -1975,6 +2028,9 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       const codeSuffix = data.dino?.compCode ? ` (ref ${data.dino.compCode})` : '';
       showToast(`Granted a ${body.species} to ${targetSteamId}.${codeSuffix}`);
       document.querySelector('[data-comp-target]').value = '';
+      const entombmentsSelect = document.querySelector('[data-comp-entombments]');
+      if (entombmentsSelect) entombmentsSelect.value = '0';
+      renderMutationSlots();
     }
   } catch (error) {
     console.debug('Compensation grant failed:', error);

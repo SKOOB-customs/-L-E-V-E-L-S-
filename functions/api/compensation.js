@@ -2,8 +2,9 @@
  * Admin-panel compensation grant (website -> Worker -> game-server file).
  *
  * POST { granterSteamId, targetSteamId, species, name?, growthPct?,
- *        healthPct?, staminaPct?, hungerPct?, thirstPct? } -> proxies to the
- * bridge Worker's /compensation-grant route, which appends a redeemable
+ *        healthPct?, staminaPct?, hungerPct?, thirstPct?, entombments?,
+ *        mutations? } -> proxies to the bridge Worker's
+ * /compensation-grant route, which appends a redeemable
  * dino snapshot to the target's parked_<steamid>.json — the exact file
  * format main.lua's !park already produces, so !redeem / the website's
  * Redeem button need no changes to pick it up. Same cross-service
