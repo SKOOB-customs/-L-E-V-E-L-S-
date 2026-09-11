@@ -1396,6 +1396,44 @@ h6,
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.five-up {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.field-inline-action {
+  align-self: end;
+  margin-top: 0;
+}
+
+.strike-entry {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--panel-soft);
+  margin-bottom: 10px;
+}
+
+.strike-entry-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.strike-entry-reason {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+}
+
+.strike-entry-evidence {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -1467,6 +1505,10 @@ textarea {
   .two-up,
   .staff-management-form {
     grid-template-columns: 1fr;
+  }
+
+  .five-up {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .site-header {

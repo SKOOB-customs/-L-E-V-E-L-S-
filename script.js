@@ -1500,3 +1500,196 @@ parkedSearchEl?.addEventListener('input', renderParkedGrid);
 parkedSortEl?.addEventListener('change', renderParkedGrid);
 document.querySelector('[data-tab="inventory"]')?.addEventListener('click', loadParkedList);
 loadParkedList();
+
+// ── Admin Panel: compensation + strikes ──
+//
+// Gated to whoever's in admin_tiers.json (any tier — owner/senior/admin),
+// synced by the bridge Worker's cron into KV and checked here via
+// /api/admin-status. The tab itself is just a UI reveal; the actual writes
+// (/api/compensation, /api/strikes) re-validate tier server-side on the
+// Worker regardless of whether this check ever ran, same trust model as
+// every other write path on this site.
+const ADMIN_PANEL_SPECIES = [
+  'Allosaurus', 'Austroraptor', 'Beipiaosaurus', 'Carnotaurus', 'Ceratosaurus',
+  'Deinosuchus', 'Diabloceratops', 'Dilophosaurus', 'Dryosaurus', 'Gallimimus',
+  'Herrerasaurus', 'Hypsilophodon', 'Kentrosaurus', 'Maiasaura', 'Omniraptor',
+  'Pachycephalosaurus', 'Pteranodon', 'Stegosaurus', 'Tenontosaurus',
+  'Triceratops', 'Troodon', 'Tyrannosaurus',
+];
+
+const compSpeciesSelect = document.querySelector('[data-comp-species]');
+if (compSpeciesSelect) {
+  compSpeciesSelect.innerHTML = ADMIN_PANEL_SPECIES
+    .map((species) => `<option value="${species}">${species}</option>`)
+    .join('');
+}
+
+const checkAdminPanelAccess = async () => {
+  const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
+  const adminPanelPanel = document.getElementById('admin-panel');
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    if (adminPanelTabButton) adminPanelTabButton.hidden = true;
+    if (adminPanelPanel) adminPanelPanel.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch(`/api/admin-status?steam_id=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    const hasAccess = Boolean(data.tier);
+    if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
+    if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
+  } catch (error) {
+    console.debug('Admin panel access check failed:', error);
+  }
+};
+
+checkAdminPanelAccess();
+
+document.querySelector('[data-compensation-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetSteamId = document.querySelector('[data-comp-target]')?.value.trim() || '';
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const body = {
+    granterSteamId: profile.steamId,
+    targetSteamId,
+    species: document.querySelector('[data-comp-species]')?.value,
+    name: document.querySelector('[data-comp-name]')?.value.trim() || '',
+    growthPct: Number(document.querySelector('[data-comp-growth]')?.value),
+    healthPct: Number(document.querySelector('[data-comp-health]')?.value),
+    staminaPct: Number(document.querySelector('[data-comp-stamina]')?.value),
+    hungerPct: Number(document.querySelector('[data-comp-hunger]')?.value),
+    thirstPct: Number(document.querySelector('[data-comp-thirst]')?.value),
+  };
+
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/compensation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not grant that dino.');
+    } else {
+      showToast(`Granted a ${body.species} to ${targetSteamId}.`);
+      document.querySelector('[data-comp-target]').value = '';
+      document.querySelector('[data-comp-name]').value = '';
+    }
+  } catch (error) {
+    console.debug('Compensation grant failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+const renderStrikeList = (strikes) => {
+  const listEl = document.querySelector('[data-strike-list]');
+  const emptyEl = document.querySelector('[data-strike-empty]');
+  if (!listEl) return;
+  if (!strikes || strikes.length === 0) {
+    listEl.innerHTML = '';
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+  listEl.innerHTML = strikes.map((strike) => {
+    const date = new Date(strike.issuedAt).toLocaleString();
+    const reason = String(strike.reason || '').replace(/</g, '&lt;');
+    const evidence = String(strike.evidence || '').replace(/</g, '&lt;');
+    return `
+      <div class="strike-entry">
+        <div class="strike-entry-meta">
+          <span>By ${strike.issuerSteamId} (${strike.issuerTier})</span>
+          <span>${date}</span>
+        </div>
+        <p class="strike-entry-reason">${reason}</p>
+        ${evidence ? `<p class="strike-entry-evidence">${evidence}</p>` : ''}
+      </div>
+    `;
+  }).join('');
+};
+
+const loadStrikeHistory = async () => {
+  const profile = getSteamProfile();
+  const targetSteamId = document.querySelector('[data-strike-target]')?.value.trim() || '';
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  try {
+    const response = await fetch(
+      `/api/strikes?targetSteamId=${encodeURIComponent(targetSteamId)}&requesterSteamId=${encodeURIComponent(profile.steamId)}`,
+    );
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not load strike history.');
+      return;
+    }
+    renderStrikeList(data.strikes);
+  } catch (error) {
+    console.debug('Strike history load failed:', error);
+    showToast('Could not reach the server right now.');
+  }
+};
+
+document.querySelector('[data-strike-load]')?.addEventListener('click', loadStrikeHistory);
+
+document.querySelector('[data-strike-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetSteamId = document.querySelector('[data-strike-target]')?.value.trim() || '';
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const reason = document.querySelector('[data-strike-reason]')?.value.trim() || '';
+  if (!reason) {
+    showToast('A reason is required.');
+    return;
+  }
+  const evidence = document.querySelector('[data-strike-evidence]')?.value.trim() || '';
+
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/strikes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issuerSteamId: profile.steamId, targetSteamId, reason, evidence }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not issue that strike.');
+    } else {
+      showToast(`Strike issued against ${targetSteamId}.`);
+      document.querySelector('[data-strike-reason]').value = '';
+      document.querySelector('[data-strike-evidence]').value = '';
+      loadStrikeHistory();
+    }
+  } catch (error) {
+    console.debug('Strike issue failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});

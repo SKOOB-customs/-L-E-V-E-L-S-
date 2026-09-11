@@ -334,6 +334,89 @@ const readParkResult = (env, steamId, requestId) => readResult(env, parkResultPa
 const requestRedeem = (env, steamId, snapshotId) => writeRequest(env, redeemRequestPath, steamId, { snapshotId });
 const readRedeemResult = (env, steamId, requestId) => readResult(env, redeemResultPath, steamId, requestId);
 
+// ── Website admin panel: admin-tier lookup, compensation, strikes ──
+//
+// admin_tiers.json (written directly via Pterodactyl when the roster was
+// seeded — see main.lua's tierOf/canPerform, which reads the same file for
+// the in-game audit log) had no website-facing reader until now. Synced
+// into KV on the same 1-minute cron as the other two syncs, so tier checks
+// here are a KV read, not a Pterodactyl round-trip per admin-panel action.
+const ADMIN_TIERS_PATH = `${PARKED_SAVED_DIR}/admin_tiers.json`;
+
+const syncAdminTiers = async (env) => {
+  let raw;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(ADMIN_TIERS_PATH)}`);
+    raw = await response.text();
+  } catch {
+    return { synced: false }; // roster file doesn't exist yet
+  }
+  let tiers;
+  try {
+    tiers = JSON.parse(raw);
+  } catch {
+    return { synced: false };
+  }
+  await env.PARKED_KV.put('admin_tiers:index', JSON.stringify({
+    owner: Array.isArray(tiers.owner) ? tiers.owner : [],
+    senior: Array.isArray(tiers.senior) ? tiers.senior : [],
+    admin: Array.isArray(tiers.admin) ? tiers.admin : [],
+    updatedAt: Date.now(),
+  }));
+  return { synced: true };
+};
+
+const getAdminTier = async (env, steamId) => {
+  const raw = await env.PARKED_KV.get('admin_tiers:index');
+  if (!raw) return null;
+  let tiers;
+  try {
+    tiers = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (tiers.owner?.includes(steamId)) return 'owner';
+  if (tiers.senior?.includes(steamId)) return 'senior';
+  if (tiers.admin?.includes(steamId)) return 'admin';
+  return null;
+};
+
+// Same 22-species roster as Game.ini's current AllowedClasses (see the
+// admin-panel plan doc) — update by hand if that list changes. classPath
+// shape confirmed against real LogTheIsleJoinData log lines this session.
+const KNOWN_SPECIES = [
+  'Allosaurus', 'Austroraptor', 'Beipiaosaurus', 'Carnotaurus', 'Ceratosaurus',
+  'Deinosuchus', 'Diabloceratops', 'Dilophosaurus', 'Dryosaurus', 'Gallimimus',
+  'Herrerasaurus', 'Hypsilophodon', 'Kentrosaurus', 'Maiasaura', 'Omniraptor',
+  'Pachycephalosaurus', 'Pteranodon', 'Stegosaurus', 'Tenontosaurus',
+  'Triceratops', 'Troodon', 'Tyrannosaurus',
+];
+
+const classPathForSpecies = (species) =>
+  `/Game/TheIsle/Core/Characters/Dinosaurs/${species}/BP_${species}.BP_${species}_C`;
+
+// Reused by both the compensation grant and (indirectly) syncParkedDinos'
+// own file format — mirrors main.lua's writeParkedDinos envelope exactly,
+// so !redeem / the website's Redeem button need zero changes to handle a
+// compensation-granted dino.
+const grantCompensationDino = async (env, targetSteamId, dino) => {
+  const path = `${PARKED_SAVED_DIR}/parked_${targetSteamId}.json`;
+  let dinos = [];
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+    const raw = await response.text();
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.dinos)) dinos = parsed.dinos;
+  } catch {
+    dinos = []; // no existing file for this player yet
+  }
+  dinos.push(dino);
+  const body = JSON.stringify({ version: 2, steam: targetSteamId, dinos });
+  await pterodactylWriteFile(env, path, body);
+};
+
+const pctToFraction = (value) => Math.min(100, Math.max(0, Number(value) || 0)) / 100;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -359,7 +442,8 @@ export default {
       try {
         const parked = await syncParkedDinos(env);
         const audit = await syncAdminAuditLog(env).catch((error) => ({ error: error.message }));
-        return json({ ok: true, count: Object.keys(parked).length, parked, audit });
+        const tiers = await syncAdminTiers(env).catch((error) => ({ error: error.message }));
+        return json({ ok: true, count: Object.keys(parked).length, parked, audit, tiers });
       } catch (error) {
         return json({ error: error.message || 'Sync failed' }, 502);
       }
@@ -469,6 +553,149 @@ export default {
       }
     }
 
+    // Website admin panel — tells the site whether to show the Admin Panel
+    // tab at all. Not itself a security boundary (that's the POST routes
+    // below, which re-check tier server-side); this is purely UI reveal.
+    if (url.pathname === '/admin-tier' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ tier: null });
+      try {
+        const tier = await getAdminTier(env, steamId);
+        return json({ tier });
+      } catch (error) {
+        return json({ error: error.message || 'Tier lookup failed' }, 502);
+      }
+    }
+
+    // Compensation: an admin grants a player a redeemable dino snapshot
+    // without touching the game server directly. Reuses the exact file
+    // format main.lua's !park already produces, so !redeem / the website's
+    // Redeem button need no changes to pick it up.
+    if (url.pathname === '/compensation-grant' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (typeof species !== 'string' || !KNOWN_SPECIES.includes(species)) {
+        return json({ error: 'Invalid species' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      const dino = {
+        name: typeof name === 'string' ? name.slice(0, 24) : '',
+        classPath: classPathForSpecies(species),
+        growth: pctToFraction(growthPct ?? 100),
+        health: pctToFraction(healthPct ?? 100),
+        maxHealth: 1,
+        stamina: pctToFraction(staminaPct ?? 100),
+        hunger: pctToFraction(hungerPct ?? 100),
+        thirst: pctToFraction(thirstPct ?? 100),
+        maxHunger: 1,
+        maxThirst: 1,
+        maxStamina: 1,
+        primeElder: false,
+        bodyColorR: 0,
+        bodyColorG: 0,
+        bodyColorB: 0,
+        capturedAt: Math.floor(Date.now() / 1000),
+      };
+      try {
+        await grantCompensationDino(env, targetSteamId, dino);
+        return json({ ok: true, dino });
+      } catch (error) {
+        return json({ error: error.message || 'Compensation grant failed' }, 502);
+      }
+    }
+
+    // Strikes: pure Cloudflare-side records, never touch the game server —
+    // already outside any admin's file-system reach, so no hash chain is
+    // needed here the way the game-server-side audit log needs one.
+    if (url.pathname === '/strikes-issue' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { issuerSteamId, targetSteamId, reason, evidence } = body || {};
+      if (typeof issuerSteamId !== 'string' || !/^\d{17}$/.test(issuerSteamId)) {
+        return json({ error: 'Missing or invalid issuerSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (typeof reason !== 'string' || reason.trim() === '') {
+        return json({ error: 'Reason is required' }, 400);
+      }
+      const issuerTier = await getAdminTier(env, issuerSteamId);
+      if (!issuerTier) return json({ error: 'Not an admin' }, 403);
+
+      const issuedAt = Date.now();
+      const strike = {
+        targetSteamId,
+        reason: reason.slice(0, 2000),
+        evidence: typeof evidence === 'string' ? evidence.slice(0, 2000) : '',
+        issuerSteamId,
+        issuerTier,
+        issuedAt,
+      };
+      try {
+        await env.PARKED_KV.put(`strikes:${targetSteamId}:${issuedAt}`, JSON.stringify(strike));
+        return json({ ok: true, strike });
+      } catch (error) {
+        return json({ error: error.message || 'Strike issue failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/strikes-list' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      const targetSteamId = url.searchParams.get('targetSteamId');
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!targetSteamId || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const requesterTier = await getAdminTier(env, requesterSteamId);
+      if (!requesterTier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        const list = await env.PARKED_KV.list({ prefix: `strikes:${targetSteamId}:` });
+        const strikes = await Promise.all(
+          list.keys.map(async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return null;
+            }
+          }),
+        );
+        const cleaned = strikes.filter(Boolean).sort((a, b) => b.issuedAt - a.issuedAt);
+        return json({ ok: true, strikes: cleaned });
+      } catch (error) {
+        return json({ error: error.message || 'Strike list failed' }, 502);
+      }
+    }
+
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
 
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
@@ -542,6 +769,9 @@ export default {
     );
     ctx.waitUntil(
       syncAdminAuditLog(env).catch((error) => console.error('syncAdminAuditLog failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncAdminTiers(env).catch((error) => console.error('syncAdminTiers failed:', error.message)),
     );
   },
 };
