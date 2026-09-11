@@ -27,10 +27,13 @@
   "kv_namespaces": [
     { "binding": "PARKED_KV", "id": "6cdde6c4833f48d9ace3f24c0a474120" }
   ],
-  // Polls the game server's parked-state files every 2 minutes (see the
-  // `scheduled` handler in bridge-worker.js).
+  // Polls the game server's parked-state files every minute — Cloudflare's
+  // tightest cron granularity — to keep the "just parked, why isn't it on
+  // the website yet" gap as short as possible (see the `scheduled` handler
+  // in bridge-worker.js; /sync-parked is also callable directly to force
+  // an immediate sync without waiting for this).
   "triggers": {
-    "crons": ["*/2 * * * *"]
+    "crons": ["* * * * *"]
   },
   // Scoped so the Worker only intercepts status requests, not the whole site (Pages must still serve "/")
   "routes": [
