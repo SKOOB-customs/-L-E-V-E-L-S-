@@ -401,6 +401,57 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
+// ── Player directory (admin panel name-search autocomplete) ──
+//
+// The Steam Web API's GetPlayerSummaries can resolve a known steamId to a
+// name, but has no search-by-name capability at all (confirmed this
+// session) — so a "type a name, get a dropdown of matching steamIds" admin
+// panel feature has to be built from data this server already produces:
+// TheIsle.log's own LogTheIsleJoinData lines, e.g.
+//   LogTheIsleJoinData: [2026.09.11-11.54.57] AyoSidhu (Ubbe) [76561198274950397] Joined The Server.
+// Synced on the same 1-minute cron as the other syncs, merging newly-seen
+// name/steamId pairs into a single KV index rather than tracking a
+// seq/offset into the log (unlike the admin audit log): the log FILE
+// itself rotates to a TheIsle-backup-*.log on every server restart and a
+// fresh, empty TheIsle.log starts in its place, so an offset wouldn't
+// survive that — re-scanning the current live file each tick and merging
+// is naturally idempotent and self-healing across restarts, and a
+// player's directory entry persists in KV forever once seen even after
+// their join line rotates out of the live log.
+const GAME_LOG_PATH = '/TheIsle/Saved/Logs/TheIsle.log';
+const JOIN_LINE_RE = /LogTheIsleJoinData: \[[^\]]+\] (.+?) \[(\d{17})\] Joined The Server/g;
+
+const syncPlayerDirectory = async (env) => {
+  let raw;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(GAME_LOG_PATH)}`);
+    raw = await response.text();
+  } catch {
+    return { synced: 0 }; // no one has joined since the last restart yet
+  }
+
+  const existingRaw = await env.PARKED_KV.get('player_directory:index');
+  let players = {};
+  if (existingRaw) {
+    try {
+      players = JSON.parse(existingRaw).players || {};
+    } catch {
+      players = {};
+    }
+  }
+
+  let match;
+  JOIN_LINE_RE.lastIndex = 0;
+  while ((match = JOIN_LINE_RE.exec(raw)) !== null) {
+    const name = match[1].trim();
+    const steamId = match[2];
+    if (name) players[steamId] = { name, lastSeen: Date.now() };
+  }
+
+  await env.PARKED_KV.put('player_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));
+  return { synced: Object.keys(players).length };
+};
+
 // Same 22-species roster as Game.ini's current AllowedClasses (see the
 // admin-panel plan doc) — update by hand if that list changes. classPath
 // shape confirmed against real LogTheIsleJoinData log lines this session.
@@ -1384,6 +1435,33 @@ export default {
       }
     }
 
+    // Admin-panel name-search autocomplete. Gated on the requester actually
+    // holding an admin tier (unlike /admin-roster-public, which is meant to
+    // be public) since this exposes every logged-in player's Steam name
+    // alongside their steamId, not just the admin roster.
+    if (url.pathname === '/player-directory' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, players: [] });
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+      const raw = await env.PARKED_KV.get('player_directory:index');
+      if (!raw) return json({ ok: true, players: [] });
+      try {
+        const { players } = JSON.parse(raw);
+        const list = Object.entries(players || {}).map(([steamId, entry]) => ({
+          steamId,
+          name: entry.name,
+          lastSeen: entry.lastSeen,
+        }));
+        return json({ ok: true, players: list });
+      } catch {
+        return json({ ok: true, players: [] });
+      }
+    }
+
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
 
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
@@ -1444,7 +1522,10 @@ export default {
 
       await writer.close();
       reader.releaseLock();
-      return json({ uptime: null, active_mods: 0, players_online: players, max_players: 0 });
+      // Matches Game.ini's MaxPlayerCount=150 — RCON's PlayerList response
+      // doesn't carry a server capacity figure, so this is hand-set rather
+      // than read live; update if the server's player cap ever changes.
+      return json({ uptime: null, active_mods: 0, players_online: players, max_players: 150 });
     } catch (error) {
       try { socket?.close(); } catch { }
       return json({ error: error.message || 'RCON request failed', stage }, 502);
@@ -1460,6 +1541,9 @@ export default {
     );
     ctx.waitUntil(
       syncAdminTiers(env).catch((error) => console.error('syncAdminTiers failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncPlayerDirectory(env).catch((error) => console.error('syncPlayerDirectory failed:', error.message)),
     );
   },
 };

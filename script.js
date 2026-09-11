@@ -1775,6 +1775,37 @@ if (compSpeciesSelect) {
     .join('');
 }
 
+// Name-search autocomplete for the 3 target-steamId fields below. Backed by
+// a <datalist> populated from the game server's own join logs (there's no
+// Steam API for searching by name) — each option's value is "Name —
+// steamId" so the browser's native datalist filtering matches on the name,
+// and extractSteamId() below pulls the trailing 17-digit id back out
+// whichever way the field got filled in (typed manually or picked from the
+// dropdown).
+const loadPlayerDirectory = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  const datalist = document.getElementById('known-players-list');
+  if (!datalist) return;
+  try {
+    const response = await fetch(`/api/player-directory?requesterSteamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.players)) return;
+    datalist.innerHTML = data.players
+      .map((p) => `<option value="${String(p.name).replace(/"/g, '&quot;')} — ${p.steamId}"></option>`)
+      .join('');
+  } catch (error) {
+    console.debug('Player directory load failed:', error);
+  }
+};
+
+const extractSteamId = (rawValue) => {
+  const trimmed = (rawValue || '').trim();
+  if (/^\d{17}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/(\d{17})\s*$/);
+  return match ? match[1] : trimmed;
+};
+
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
@@ -1790,6 +1821,7 @@ const checkAdminPanelAccess = async () => {
     const hasAccess = Boolean(data.tier);
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
+    if (hasAccess) loadPlayerDirectory();
   } catch (error) {
     console.debug('Admin panel access check failed:', error);
   }
@@ -1804,7 +1836,7 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     showToast('Sign in with Steam first.');
     return;
   }
-  const targetSteamId = document.querySelector('[data-comp-target]')?.value.trim() || '';
+  const targetSteamId = extractSteamId(document.querySelector('[data-comp-target]')?.value);
   if (!/^\d{17}$/.test(targetSteamId)) {
     showToast('Enter a valid 17-digit Steam ID.');
     return;
@@ -1853,7 +1885,7 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
     showToast('Sign in with Steam first.');
     return;
   }
-  const targetSteamId = document.querySelector('[data-skin-target]')?.value.trim() || '';
+  const targetSteamId = extractSteamId(document.querySelector('[data-skin-target]')?.value);
   if (!/^\d{17}$/.test(targetSteamId)) {
     showToast('Enter a valid 17-digit Steam ID.');
     return;
@@ -1948,7 +1980,7 @@ const renderStrikeList = (strikes) => {
 
 const loadStrikeHistory = async () => {
   const profile = getSteamProfile();
-  const targetSteamId = document.querySelector('[data-strike-target]')?.value.trim() || '';
+  const targetSteamId = extractSteamId(document.querySelector('[data-strike-target]')?.value);
   if (!profile?.steamId) {
     showToast('Sign in with Steam first.');
     return;
@@ -1982,7 +2014,7 @@ document.querySelector('[data-strike-form]')?.addEventListener('submit', async (
     showToast('Sign in with Steam first.');
     return;
   }
-  const targetSteamId = document.querySelector('[data-strike-target]')?.value.trim() || '';
+  const targetSteamId = extractSteamId(document.querySelector('[data-strike-target]')?.value);
   if (!/^\d{17}$/.test(targetSteamId)) {
     showToast('Enter a valid 17-digit Steam ID.');
     return;

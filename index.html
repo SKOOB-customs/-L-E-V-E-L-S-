@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=4e60ea8" />
+    <link rel="stylesheet" href="styles.css?v=d4cc2cb" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -578,14 +578,16 @@
             <h2>Compensation, strikes &amp; glitch skins</h2>
           </div>
 
+          <datalist id="known-players-list"></datalist>
+
           <section class="panel content-box">
             <div class="mini-heading">Compensation</div>
             <p class="dino-park-note">Grants a redeemable dino snapshot straight to a player's Inventory — same as a real <code>!park</code>, just without them needing to park one themselves.</p>
             <form class="submit-form" data-compensation-form>
               <div class="field-row two-up">
                 <label>
-                  Target Steam ID
-                  <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-comp-target required />
+                  Target Steam ID or name
+                  <input type="text" maxlength="64" placeholder="7656119... or a player name" list="known-players-list" data-comp-target required />
                 </label>
                 <label>
                   Species
@@ -631,8 +633,8 @@
             <p class="dino-park-note">Look up a player's strike history before issuing another.</p>
             <div class="field-row two-up">
               <label>
-                Target Steam ID
-                <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-strike-target />
+                Target Steam ID or name
+                <input type="text" maxlength="64" placeholder="7656119... or a player name" list="known-players-list" data-strike-target />
               </label>
               <div class="submit-actions field-inline-action">
                 <button class="action-button" type="button" data-strike-load>Load history</button>
@@ -667,8 +669,8 @@
             <form class="submit-form" data-skin-form>
               <div class="field-row two-up">
                 <label>
-                  Target Steam ID
-                  <input type="text" inputmode="numeric" pattern="\d{17}" maxlength="17" placeholder="7656119..." data-skin-target required />
+                  Target Steam ID or name
+                  <input type="text" maxlength="64" placeholder="7656119... or a player name" list="known-players-list" data-skin-target required />
                 </label>
                 <label>
                   Skin name
@@ -1026,6 +1028,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=4e60ea8"></script>
+    <script src="script.js?v=d4cc2cb"></script>
   </body>
 </html>
