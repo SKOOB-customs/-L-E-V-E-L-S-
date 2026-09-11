@@ -1695,3 +1695,44 @@ document.querySelector('[data-strike-form]')?.addEventListener('submit', async (
     if (submitBtn) submitBtn.disabled = false;
   }
 });
+
+// ── Community tab: public staff roster ──
+//
+// Unauthenticated, unlike the Admin Panel tab above — this is a public
+// "meet the team" listing (/api/staff-roster -> the bridge Worker's
+// /admin-roster-public -> the same KV-synced admin_tiers.json). Tiers with
+// no members (Senior Admin right now) stay hidden entirely rather than
+// showing an empty section.
+const loadStaffRoster = async () => {
+  const rosterEl = document.querySelector('[data-staff-roster]');
+  if (!rosterEl) return;
+  try {
+    const response = await fetch('/api/staff-roster');
+    const data = await response.json();
+    let anyVisible = false;
+    ['owner', 'senior', 'admin'].forEach((tier) => {
+      const members = data[tier] || [];
+      const groupEl = document.querySelector(`[data-staff-group="${tier}"]`);
+      const listEl = document.querySelector(`[data-staff-list="${tier}"]`);
+      if (!groupEl || !listEl) return;
+      if (members.length === 0) {
+        groupEl.hidden = true;
+        return;
+      }
+      groupEl.hidden = false;
+      anyVisible = true;
+      listEl.innerHTML = members.map((member) => `
+        <div class="staff-member">
+          ${member.avatar ? `<img src="${member.avatar}" alt="" />` : ''}
+          <span class="staff-member-name">${String(member.name).replace(/</g, '&lt;')}</span>
+        </div>
+      `).join('');
+    });
+    rosterEl.hidden = !anyVisible;
+  } catch (error) {
+    console.debug('Staff roster load failed:', error);
+  }
+};
+
+document.querySelector('[data-tab="community"]')?.addEventListener('click', loadStaffRoster);
+loadStaffRoster();

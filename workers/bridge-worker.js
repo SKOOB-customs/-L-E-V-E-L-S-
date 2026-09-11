@@ -570,6 +570,27 @@ export default {
       }
     }
 
+    // Public staff roster — the Community tab's "meet the team" listing.
+    // Unlike /admin-tier this is intentionally unauthenticated: it's a
+    // public transparency page, not an admin-only action, and returns
+    // nothing beyond what's already public knowledge in-game (who has
+    // admin, at what tier).
+    if (url.pathname === '/admin-roster-public' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ owner: [], senior: [], admin: [] });
+      const raw = await env.PARKED_KV.get('admin_tiers:index');
+      if (!raw) return json({ owner: [], senior: [], admin: [] });
+      try {
+        const tiers = JSON.parse(raw);
+        return json({
+          owner: Array.isArray(tiers.owner) ? tiers.owner : [],
+          senior: Array.isArray(tiers.senior) ? tiers.senior : [],
+          admin: Array.isArray(tiers.admin) ? tiers.admin : [],
+        });
+      } catch {
+        return json({ owner: [], senior: [], admin: [] });
+      }
+    }
+
     // Compensation: an admin grants a player a redeemable dino snapshot
     // without touching the game server directly. Reuses the exact file
     // format main.lua's !park already produces, so !redeem / the website's

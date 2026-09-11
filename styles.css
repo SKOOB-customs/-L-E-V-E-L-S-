@@ -1425,6 +1425,49 @@ h6,
   color: var(--muted);
 }
 
+.staff-roster {
+  margin-top: 20px;
+}
+
+.staff-roster-group + .staff-roster-group {
+  margin-top: 18px;
+}
+
+.staff-roster-tier-label {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.staff-roster-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.staff-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 8px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+
+.staff-member img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: block;
+}
+
+.staff-member-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
 .submit-form {
   display: grid;
   gap: 18px;
