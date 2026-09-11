@@ -1893,7 +1893,6 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     granterSteamId: profile.steamId,
     targetSteamId,
     species: document.querySelector('[data-comp-species]')?.value,
-    name: document.querySelector('[data-comp-name]')?.value.trim() || '',
     growthPct: Number(document.querySelector('[data-comp-growth]')?.value),
     healthPct: Number(document.querySelector('[data-comp-health]')?.value),
     staminaPct: Number(document.querySelector('[data-comp-stamina]')?.value),
@@ -1916,7 +1915,6 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       const codeSuffix = data.dino?.compCode ? ` (ref ${data.dino.compCode})` : '';
       showToast(`Granted a ${body.species} to ${targetSteamId}.${codeSuffix}`);
       document.querySelector('[data-comp-target]').value = '';
-      document.querySelector('[data-comp-name]').value = '';
     }
   } catch (error) {
     console.debug('Compensation grant failed:', error);
