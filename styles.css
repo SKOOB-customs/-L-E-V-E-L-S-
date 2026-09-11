@@ -913,11 +913,20 @@ strong.stat-critical {
   inset: 0;
   z-index: 100;
   background: rgba(0, 0, 0, 0.72);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   padding: 24px;
   overflow-y: auto;
+}
+
+/* The [hidden] attribute alone can't win against the class's own display
+   rule above (a class selector beats the UA stylesheet's [hidden] rule) —
+   this is what let an invisible, full-screen, click-blocking overlay sit
+   over the entire site even while "hidden" (real bug, fixed 2026-09-11).
+   display only switches to flex once [hidden] is actually removed. */
+.parked-modal-overlay:not([hidden]) {
+  display: flex;
 }
 
 .parked-modal-box {
