@@ -1553,11 +1553,23 @@ const openParkedDinoModal = (entry) => {
 
   parkedModalContent.append(image, species, titleRow, growthBar, stats, detailStats);
 
+  // Redeeming/renaming/releasing/editing someone else's dino makes no
+  // sense, so all of those are only offered for the viewer's own cards.
+  // The API still only trusts the client-supplied steamId either way —
+  // same trust model the rest of this site already uses.
+  const viewerSteamId = getSteamProfile()?.steamId;
+  const isOwner = Boolean(entry.steam && viewerSteamId && entry.steam === viewerSteamId);
+
   // Mutation slots, grouped by tier, limited to whatever this dino's own
   // entombment level actually unlocked — mutationSlotTiers/MUTATION_TIER_LABELS
   // are the same ones loadMutationCatalog() already fetches for the
   // Compensation form (no admin gate on that endpoint, so it's populated
-  // for every signed-in visitor already).
+  // for every signed-in visitor already). A FILLED slot only ever got
+  // there by being actually equipped live in-game (captured on !park) or
+  // by an admin's Compensation grant — both legitimate, so the owner can
+  // reassign which specific mutation sits there. An EMPTY slot was never
+  // earned by either path, so it's shown locked rather than editable —
+  // this endpoint has no way to grant a brand-new mutation for free.
   const entombments = entry.entombments || 0;
   const allMutationFields = mutationSlotTiers.flat();
   const hasAnyMutation = entombments > 0 || allMutationFields.some((field) => entry[field]);
@@ -1576,19 +1588,82 @@ const openParkedDinoModal = (entry) => {
         const label = document.createElement('small');
         label.textContent = mutationSlotShortLabel(field);
         slot.appendChild(label);
-        slot.append(filled ? value : '— empty —');
+
+        if (!filled) {
+          slot.append('LOCKED');
+          grid.appendChild(slot);
+          return;
+        }
+
+        if (!isOwner) {
+          slot.append(value);
+          grid.appendChild(slot);
+          return;
+        }
+
+        const select = document.createElement('select');
+        select.className = 'parked-modal-mutation-select';
+        mutationCatalog
+          .filter((m) => mutationAllowedForSpecies(m.diet, entry.species))
+          .forEach((m) => {
+            const option = document.createElement('option');
+            option.value = m.name;
+            option.textContent = m.name;
+            option.selected = m.name === value;
+            select.appendChild(option);
+          });
+        // The dino's current mutation might not be in the filtered list
+        // (a diet tag corrected after this was granted, say) — keep it
+        // selectable rather than silently swapping it out from under the
+        // player the moment they open the modal.
+        if (!Array.from(select.options).some((opt) => opt.value === value)) {
+          const currentOption = document.createElement('option');
+          currentOption.value = value;
+          currentOption.textContent = value;
+          currentOption.selected = true;
+          select.prepend(currentOption);
+        }
+        const previousValue = value;
+        select.addEventListener('click', (event) => event.stopPropagation());
+        select.addEventListener('change', async () => {
+          const newValue = select.value;
+          select.disabled = true;
+          try {
+            const response = await fetch('/api/edit-parked-mutation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                steamId: entry.steam,
+                requesterSteamId: viewerSteamId,
+                snapshotId: entry.capturedAt,
+                field,
+                mutationName: newValue,
+              }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+              showToast(data.error || 'Could not update that mutation.');
+              select.value = previousValue;
+            } else {
+              entry[field] = newValue;
+              showToast(`${mutationSlotShortLabel(field)} set to ${newValue}.`);
+            }
+          } catch (error) {
+            console.debug('Mutation edit failed:', error);
+            showToast('Could not reach the server right now.');
+            select.value = previousValue;
+          } finally {
+            select.disabled = false;
+          }
+        });
+        slot.appendChild(select);
         grid.appendChild(slot);
       });
       parkedModalContent.append(heading, grid);
     });
   }
 
-  // Redeeming someone else's dino makes no sense, so these are only
-  // offered for the viewer's own cards. The API still only trusts the
-  // client-supplied steamId either way — same trust model the rest of this
-  // site already uses (/api/live-dino, the old inventory API), not a new gap.
-  const viewerSteamId = getSteamProfile()?.steamId;
-  if (entry.steam && viewerSteamId && entry.steam === viewerSteamId) {
+  if (isOwner) {
     const renameRow = document.createElement('div');
     renameRow.className = 'parked-rename-row';
 

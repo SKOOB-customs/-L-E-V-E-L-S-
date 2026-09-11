@@ -565,6 +565,15 @@ const KNOWN_SPECIES = [
 const classPathForSpecies = (species) =>
   `/Game/TheIsle/Core/Characters/Dinosaurs/${species}/BP_${species}.BP_${species}_C`;
 
+// Inverse of classPathForSpecies — same regex script.js's speciesFromClassPath
+// uses client-side, needed here to diet-check a mutation edit against the
+// species a stored snapshot actually is (the request only carries a
+// snapshotId, not a species).
+const speciesFromClassPath = (classPath) => {
+  const match = /\/Dinosaurs\/([^/]+)\//.exec(classPath || '');
+  return match ? match[1] : null;
+};
+
 // Best-effort diet classification per species, matching ETIMutationTypes'
 // Carnivore/Herbivore split — NOT yet confirmed against the game's own
 // data (same caveat as KNOWN_MUTATIONS below). Gallimimus is the one
@@ -1394,6 +1403,60 @@ export default {
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Release failed' }, 502);
+      }
+    }
+
+    // Inventory: a player reassigns which specific mutation occupies ONE
+    // of their own parked dino's ALREADY-FILLED slots. Deliberately does
+    // NOT allow filling a currently-empty slot — every slot that already
+    // has a mutation got it either from actually being equipped live
+    // in-game (captured by !park) or from an admin's Compensation grant,
+    // and both are legitimate; a slot that's empty was never earned by
+    // either path, so it stays locked rather than letting a player grant
+    // themselves a brand-new mutation for free through this endpoint.
+    if (url.pathname === '/edit-parked-mutation' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, snapshotId, field, mutationName } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Not the owner of this dino' }, 403);
+      }
+      if (typeof snapshotId !== 'number') {
+        return json({ error: 'Missing or invalid snapshotId' }, 400);
+      }
+      if (typeof field !== 'string' || !MUTATION_SLOT_FIELDS.includes(field)) {
+        return json({ error: 'Unknown mutation slot' }, 400);
+      }
+      if (typeof mutationName !== 'string' || !KNOWN_MUTATION_NAMES.has(mutationName)) {
+        return json({ error: 'Unknown mutation name' }, 400);
+      }
+      try {
+        const dinos = await readParkedDinosArray(env, steamId);
+        const dino = dinos.find((d) => d.capturedAt === snapshotId);
+        if (!dino) return json({ error: 'Snapshot not found' }, 404);
+        if (!dino[field]) {
+          return json({ error: 'This mutation slot is locked — it was never earned or granted' }, 403);
+        }
+        const species = speciesFromClassPath(dino.classPath);
+        const speciesDiet = SPECIES_DIET[species] || 'omnivore';
+        if (!mutationDietAllowed(KNOWN_MUTATION_DIET.get(mutationName), speciesDiet)) {
+          return json({ error: `${mutationName} isn't available to a ${speciesDiet} species like ${species}` }, 400);
+        }
+        dino[field] = mutationName;
+        await writeParkedDinosArray(env, steamId, dinos);
+        return json({ ok: true, dino });
+      } catch (error) {
+        return json({ error: error.message || 'Mutation edit failed' }, 502);
       }
     }
 
