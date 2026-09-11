@@ -7,13 +7,16 @@
 --         (e.g. "!park Rex") is our own metadata for the website gallery —
 --         the game has no such field, so it's just stored as-is. Players can
 --         have any number of dinos parked at once (no "one at a time" limit).
--- !redeem applies the saved stats for the sender's most recently parked dino
---         of the SAME SPECIES as their current live pawn, IF that pawn is a
---         fresh spawn (growth below FRESH_SPAWN_GROWTH_CEILING). Consumes
---         (deletes) that one snapshot on success; any other parked dinos are
---         untouched. To redeem a SPECIFIC (not-most-recent) parked dino, use
---         the website's per-card Redeem button instead — see the
---         website-redeem-request section below.
+-- !redeem [name]  applies the saved stats for one parked dino of the SAME
+--         SPECIES as the sender's current live pawn, IF that pawn is a fresh
+--         spawn (growth below FRESH_SPAWN_GROWTH_CEILING). Bare "!redeem"
+--         picks the most recently parked matching-species dino; "!redeem
+--         <name>" picks the most recent matching-species dino with that name
+--         (case-insensitive) specifically, even if newer same-species parks
+--         exist in between. Consumes (deletes) that one snapshot on success;
+--         any other parked dinos are untouched. To redeem by exact snapshot
+--         rather than by name, use the website's per-card Redeem button
+--         instead — see the website-redeem-request section below.
 -- !parkstatus reports everything currently parked for the sender.
 --
 -- Architecture notes (see EVRIMA_State_Restore_Cookbook.md / DinoStorage
@@ -400,14 +403,22 @@ local function processPark(steam, name)
     safeNotify(steam, message)
 end
 
--- Core redeem logic shared by the in-game !redeem command and website-
--- triggered redeem requests. With snapshotId == nil, picks the most recent
--- parked dino matching the player's current live species (the !redeem
--- shortcut). With a specific snapshotId, only that exact snapshot qualifies
--- (the website's per-card Redeem button) — still gated by the same
--- species-match and fresh-spawn safety checks either way.
+-- Core redeem logic shared by the in-game !redeem[/redeem <name>] command
+-- and website-triggered redeem requests. Every candidate must match the
+-- player's current live species (applying one species' vitals onto
+-- another's model makes no sense) and that pawn must be a fresh spawn —
+-- those two checks always apply. Within the species-matching candidates,
+-- selection narrows further:
+--   1. snapshotId given (the website's per-card Redeem button) -> only that
+--      exact snapshot qualifies.
+--   2. name given ("!redeem <name>") -> the most recent same-species dino
+--      with that name (case-insensitive), even if a *newer* unnamed or
+--      differently-named same-species park exists in between — a name
+--      pins down a specific dino regardless of recency among the rest.
+--   3. neither given (bare "!redeem") -> the most recent same-species dino,
+--      full stop (today's original shortcut behavior).
 -- Returns ok (bool), message (string).
-local function tryRedeem(steam, snapshotId)
+local function tryRedeem(steam, snapshotId, name)
     local gm = findGameMode()
     if gm == nil then return false, "Redeem failed: internal error." end
     local ctrl
@@ -429,13 +440,20 @@ local function tryRedeem(steam, snapshotId)
         return false, "Redeem only works on a freshly-spawned juvenile."
     end
 
+    local lowerName = (name ~= nil and name ~= "") and name:lower() or nil
     local dinos = loadParkedDinos(steam)
     local target = nil
     for _, d in ipairs(dinos) do
         if d.classPath == liveClassPath then
-            if snapshotId == nil then
-                if target == nil or (d.capturedAt or 0) > (target.capturedAt or 0) then target = d end
-            elseif d.capturedAt == snapshotId then
+            local matches
+            if snapshotId ~= nil then
+                matches = (d.capturedAt == snapshotId)
+            elseif lowerName ~= nil then
+                matches = (d.name ~= nil and d.name:lower() == lowerName)
+            else
+                matches = true
+            end
+            if matches and (target == nil or (d.capturedAt or 0) > (target.capturedAt or 0)) then
                 target = d
             end
         end
@@ -444,6 +462,9 @@ local function tryRedeem(steam, snapshotId)
     if target == nil then
         if snapshotId ~= nil then
             return false, "Redeem failed: that snapshot wasn't found, or its species doesn't match what you're playing."
+        end
+        if lowerName ~= nil then
+            return false, "Redeem failed: no parked dino named \"" .. name .. "\" matches what you're playing."
         end
         return false, "Redeem failed: spawn as a species you have parked, then try again."
     end
@@ -454,8 +475,8 @@ local function tryRedeem(steam, snapshotId)
     return true, "Dino restored from your parked snapshot" .. label .. "."
 end
 
-local function processRedeem(steam)
-    local ok, message = tryRedeem(steam, nil)
+local function processRedeem(steam, name)
+    local ok, message = tryRedeem(steam, nil, name)
     safeNotify(steam, message)
     if ok then log("Redeemed for " .. steam) end
 end
@@ -509,7 +530,7 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     for _, action in ipairs(drain) do
         local ok, err = pcall(function()
             if action.kind == "park" then processPark(action.steam, action.extra)
-            elseif action.kind == "redeem" then processRedeem(action.steam)
+            elseif action.kind == "redeem" then processRedeem(action.steam, action.extra)
             elseif action.kind == "status" then processParkStatus(action.steam)
             elseif action.kind == "testcurl" then processTestCurl(action.steam)
             end
@@ -583,7 +604,7 @@ local function checkWebsiteRedeemRequest(steam)
     local snapshotId = jsonReadNumber(body, "snapshotId")
     if requestId == nil then return end
 
-    local ok, message = tryRedeem(steam, snapshotId)
+    local ok, message = tryRedeem(steam, snapshotId, nil)
     safeNotify(steam, message)
     log("Website redeem request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))
@@ -680,8 +701,9 @@ local function registerChatHook()
                 if lower == "!park" or lower:match("^!park%s") then
                     command = "!park"
                     nameArg = trimmed:match("^%S+%s*(.-)%s*$") or ""
-                elseif lower == "!redeem" then
+                elseif lower == "!redeem" or lower:match("^!redeem%s") then
                     command = "!redeem"
+                    nameArg = trimmed:match("^%S+%s*(.-)%s*$") or ""
                 elseif lower == "!parkstatus" then
                     command = "!parkstatus"
                 elseif lower == "!testcurl" then
@@ -699,7 +721,7 @@ local function registerChatHook()
 
                 log("dispatching command: " .. command)
                 if command == "!park" then queueAction("park", steam, nameArg)
-                elseif command == "!redeem" then queueAction("redeem", steam)
+                elseif command == "!redeem" then queueAction("redeem", steam, nameArg)
                 elseif command == "!parkstatus" then queueAction("status", steam)
                 else queueAction("testcurl", steam) end
             end)
