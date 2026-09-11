@@ -30,20 +30,20 @@
 --   - Heavy actions (kill, restore) are deferred a few seconds off the chat
 --     hook and re-resolve the pawn fresh at fire time (hook parameter
 --     wrappers and cached pawns are unsafe across ticks).
---   - Website-triggered redeem: the mod can't list directory contents from
---     Lua at all, so it can't discover a request file for an arbitrary
+--   - Website-triggered park/redeem: the mod can't list directory contents
+--     from Lua at all, so it can't discover a request file for an arbitrary
 --     player. Instead a poll loop walks gm.AllPlayerControllers (a
 --     TSet<APlayerController*>, iterated via :ForEach — NOT indexable with
 --     #/[i], that's a TSet-vs-TArray gotcha) and checks each currently-online
---     player's own fixed-name request file. FindAllOf("TIPlayerController")
+--     player's own fixed-name request files. FindAllOf("TIPlayerController")
 --     is NOT safe (crashes on stale post-disconnect entries, per
 --     EVRIMA_Lua_Safety_Rules.md Rule 3), and GameState.PlayerArray — the
 --     OTHER pattern the same rule documents as safe — turned out to return
 --     "TrivialObject" entries on THIS build that UE4SS hasn't bound methods
 --     for (:GetOwningController() throws), confirmed live; AllPlayerControllers
 --     hands back real, fully-bound controllers directly and doesn't have that
---     problem. This means a website redeem can only ever be processed while
---     that player is actually connected — which is required anyway, since
+--     problem. This means a website park/redeem can only ever be processed
+--     while that player is actually connected — which is required anyway, since
 --     applying stats needs a live pawn.
 
 local MOD_NAME = "LevelsPark"
@@ -364,34 +364,40 @@ local function queueAction(kind, steam, extra)
     pendingActions[#pendingActions + 1] = { kind = kind, steam = steam, extra = extra }
 end
 
-local function processPark(steam, name)
+-- Core park logic shared by the in-game !park command and website-
+-- triggered park requests (the Live Dino tab's Park button — see the
+-- website-bridge section below). Returns ok (bool), message (string).
+local function tryPark(steam, name)
     local gm = findGameMode()
-    if gm == nil then return end
+    if gm == nil then return false, "Park failed: internal error." end
     local ctrl
     pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
     local pawn = livePawnFromCtrl(ctrl)
     if pawn == nil then
-        safeNotify(steam, "Park failed: no live dino found.")
-        return
+        return false, "Park failed: no live dino found."
     end
 
     local state = capturePawnState(pawn)
     state.name = sanitizeName(name)
     if state.classPath == nil or state.growth == nil then
-        safeNotify(steam, "Park failed: could not read dino state.")
-        return
+        return false, "Park failed: could not read dino state."
     end
 
     if not saveParkedState(steam, state) then
-        safeNotify(steam, "Park failed: could not save state.")
-        return
+        return false, "Park failed: could not save state."
     end
 
     pcall(function() pawn:SetHealth(0) end)
     log("Parked " .. steam .. " (" .. tostring(state.classPath) .. ", growth=" .. tostring(state.growth)
         .. (state.name ~= "" and (", name=" .. state.name) or "") .. ")")
-    safeNotify(steam, "Dino parked" .. (state.name ~= "" and (" as \"" .. state.name .. "\"") or "")
-        .. ". Respawn as the same species, then type !redeem to restore it.")
+    local message = "Dino parked" .. (state.name ~= "" and (" as \"" .. state.name .. "\"") or "")
+        .. ". Respawn as the same species, then type !redeem to restore it."
+    return true, message
+end
+
+local function processPark(steam, name)
+    local ok, message = tryPark(steam, name)
+    safeNotify(steam, message)
 end
 
 -- Core redeem logic shared by the in-game !redeem command and website-
@@ -512,16 +518,25 @@ LoopInGameThreadWithDelay(ACTION_DELAY_MS, function()
     end
 end)
 
--- ── Website-triggered redeem (mod ↔ website bridge, write direction) ──
+-- ── Website-triggered park/redeem (mod ↔ website bridge, write direction) ──
 --
--- The website writes redeem_request_<steamid>.json (via Bropanel's
--- Pterodactyl API — see workers/bridge-worker.js) when a player clicks
--- Redeem on a specific parked-dino card. This mod has no way to list
--- directory contents, so it can't discover that file for an arbitrary
--- player; instead this loop walks the currently-online players (via
--- gm.AllPlayerControllers, not FindAllOf or GameState.PlayerArray — see the
--- header notes) and checks each one's own fixed-name request file.
+-- The website writes park_request_<steamid>.json (Live Dino tab's Park
+-- button) or redeem_request_<steamid>.json (a specific parked-dino card's
+-- Redeem button) via Bropanel's Pterodactyl API — see
+-- workers/bridge-worker.js. This mod has no way to list directory contents,
+-- so it can't discover either file for an arbitrary player; instead this
+-- loop walks the currently-online players (via gm.AllPlayerControllers, not
+-- FindAllOf or GameState.PlayerArray — see the header notes) and checks
+-- each one's own fixed-name request files.
 local REDEEM_REQUEST_POLL_MS = 3000
+
+local function parkRequestFilePath(steam)
+    return SAVED_DIR .. "/park_request_" .. steam .. ".json"
+end
+
+local function parkResultFilePath(steam)
+    return SAVED_DIR .. "/park_result_" .. steam .. ".json"
+end
 
 local function redeemRequestFilePath(steam)
     return SAVED_DIR .. "/redeem_request_" .. steam .. ".json"
@@ -529,6 +544,32 @@ end
 
 local function redeemResultFilePath(steam)
     return SAVED_DIR .. "/redeem_result_" .. steam .. ".json"
+end
+
+local function writeRequestResult(resultPath, requestId, ok, message)
+    local resultJson = string.format(
+        '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
+        jsonEscape(requestId), ok and "true" or "false", jsonEscape(message), os.time()
+    )
+    writeAll(resultPath, resultJson)
+end
+
+local function checkWebsiteParkRequest(steam)
+    local path = parkRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local name = jsonReadString(body, "name")
+    if requestId == nil then return end
+
+    local ok, message = tryPark(steam, name)
+    safeNotify(steam, message)
+    log("Website park request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(parkResultFilePath(steam), requestId, ok, message)
 end
 
 local function checkWebsiteRedeemRequest(steam)
@@ -546,12 +587,7 @@ local function checkWebsiteRedeemRequest(steam)
     safeNotify(steam, message)
     log("Website redeem request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))
-
-    local resultJson = string.format(
-        '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
-        jsonEscape(requestId), ok and "true" or "false", jsonEscape(message), os.time()
-    )
-    writeAll(redeemResultFilePath(steam), resultJson)
+    writeRequestResult(redeemResultFilePath(steam), requestId, ok, message)
 end
 
 -- Throttled diagnostic logging (this loop fires every REDEEM_REQUEST_POLL_MS,
@@ -593,7 +629,10 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
         controllers:ForEach(function(ctrl)
             local ok, err = pcall(function()
                 local steam = getControllerSteamId(unwrapIfNeeded(ctrl))
-                if steam ~= "" then checkWebsiteRedeemRequest(steam) end
+                if steam ~= "" then
+                    checkWebsiteParkRequest(steam)
+                    checkWebsiteRedeemRequest(steam)
+                end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end
         end)

@@ -204,26 +204,28 @@ const syncParkedDinos = async (env) => {
 
 const REDEEM_SAVED_DIR = PARKED_SAVED_DIR;
 
+const parkRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/park_request_${steamId}.json`;
+const parkResultPath = (steamId) => `${REDEEM_SAVED_DIR}/park_result_${steamId}.json`;
 const redeemRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/redeem_request_${steamId}.json`;
 const redeemResultPath = (steamId) => `${REDEEM_SAVED_DIR}/redeem_result_${steamId}.json`;
 
-// Writes a redeem request the mod's poll loop will pick up (see main.lua's
-// GameState.PlayerArray-based poller — it can only discover this file while
-// steamId is actually online, which is required anyway since applying
-// stats needs a live pawn).
-const requestRedeem = async (env, steamId, snapshotId) => {
+// Writes a request file the mod's poll loop will pick up (see main.lua's
+// gm.AllPlayerControllers-based poller — it can only discover this file
+// while steamId is actually online, which is required anyway since
+// applying stats needs a live pawn). Shared by both park and redeem.
+const writeRequest = async (env, requestPath, steamId, payload) => {
   const requestId = crypto.randomUUID();
-  const body = JSON.stringify({ snapshotId, requestId, requestedAt: Date.now() });
-  await pterodactylWriteFile(env, redeemRequestPath(steamId), body);
+  const body = JSON.stringify({ ...payload, requestId, requestedAt: Date.now() });
+  await pterodactylWriteFile(env, requestPath(steamId), body);
   return requestId;
 };
 
 // Reads back the mod's result file, if any. Returns null if nothing has
 // been written yet or if it belongs to a different (older) request.
-const readRedeemResult = async (env, steamId, requestId) => {
+const readResult = async (env, resultPath, steamId, requestId) => {
   let raw;
   try {
-    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(redeemResultPath(steamId))}`);
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(resultPath(steamId))}`);
     raw = await response.text();
   } catch {
     return null; // no result file yet
@@ -237,6 +239,11 @@ const readRedeemResult = async (env, steamId, requestId) => {
   if (data?.requestId !== requestId) return null; // stale result from an earlier request
   return data;
 };
+
+const requestPark = (env, steamId, name) => writeRequest(env, parkRequestPath, steamId, { name: name || '' });
+const readParkResult = (env, steamId, requestId) => readResult(env, parkResultPath, steamId, requestId);
+const requestRedeem = (env, steamId, snapshotId) => writeRequest(env, redeemRequestPath, steamId, { snapshotId });
+const readRedeemResult = (env, steamId, requestId) => readResult(env, redeemResultPath, steamId, requestId);
 
 export default {
   async fetch(request, env) {
@@ -265,6 +272,58 @@ export default {
         return json({ ok: true, count: Object.keys(parked).length, parked });
       } catch (error) {
         return json({ error: error.message || 'Sync failed' }, 502);
+      }
+    }
+
+    // Website → mod write direction: a player clicked Park on the Live Dino
+    // tab. Called by functions/api/park.js, not directly by the browser
+    // (same indirection as the read-path bridge).
+    if (url.pathname === '/park-request' && request.method === 'POST') {
+      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Pterodactyl bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, name } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (name !== undefined && typeof name !== 'string') {
+        return json({ error: 'Invalid name' }, 400);
+      }
+      try {
+        const requestId = await requestPark(env, steamId, name);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Park request failed' }, 502);
+      }
+    }
+
+    // Polled by the website after a park request to find out whether the
+    // mod actually processed it (and whether it succeeded).
+    if (url.pathname === '/park-result' && request.method === 'GET') {
+      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readParkResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Park result lookup failed' }, 502);
       }
     }
 
