@@ -1117,8 +1117,16 @@ const renderLiveDino = (dino) => {
       bar.style.width = `${clamped}%`;
       bar.classList.toggle('stat-critical', isCritical);
     });
+    // Paused growth gets 3-decimal precision so a player can see exactly
+    // where they froze it — the bar above still uses the rounded value,
+    // this is purely the text label. Every other stat (and growth while
+    // still moving) stays a plain rounded whole number.
+    const preciseGrowthPaused = stat === 'growth' && dino.growthPaused;
+    const displayText = preciseGrowthPaused
+      ? `${Math.min(100, Math.max(0, (dino.growth || 0) * 100)).toFixed(3)}%`
+      : `${clamped}%`;
     document.querySelectorAll(`[data-dino-value="${stat}"]`).forEach((value) => {
-      value.textContent = `${clamped}%`;
+      value.textContent = displayText;
       value.classList.toggle('stat-critical', isCritical);
     });
   });
