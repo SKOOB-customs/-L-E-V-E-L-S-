@@ -1,5 +1,11 @@
 const roleOrder = ['Owner', 'Admin', 'Moderator'];
 
+// Must match discord-login.js's cookie name exactly — this was previously
+// referenced below without being declared anywhere in this file, which
+// threw an unhandled ReferenceError (a bare 500, before ever reaching the
+// try/catch) on every single Discord OAuth callback.
+const stateCookieName = 'levels_discord_oauth_state';
+
 const getCookie = (request, name) => {
   const cookies = request.headers.get('Cookie') || '';
   return cookies.split(';').map((cookie) => cookie.trim()).find((cookie) => cookie.startsWith(`${name}=`))?.slice(name.length + 1) || '';
@@ -18,6 +24,11 @@ export async function onRequestGet({ request, env }) {
   if (url.searchParams.get('error') || !state || state !== getCookie(request, stateCookieName)) {
     return redirectToProfile(origin, { discord_error: 'authorization' });
   }
+  // See discord-login.js: an optional steamId rides through as
+  // "<uuid>:<steamId>" — only present when this login started from a flow
+  // (like ticket submission) that needs a persistent Steam<->Discord link.
+  const linkSteamId = state.split(':')[1];
+  const shouldLink = /^\d{17}$/.test(linkSteamId || '');
 
   if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET || !env.DISCORD_GUILD_ID) {
     return redirectToProfile(origin, { discord_error: 'configuration' });
@@ -57,6 +68,20 @@ export async function onRequestGet({ request, env }) {
     };
     const staffRole = roleOrder.find((role) => configuredRoles[role] && member.roles.includes(configuredRoles[role])) || 'Player';
     const username = user.global_name || user.username || 'Discord user';
+
+    if (shouldLink && env.PARKED_KV) {
+      try {
+        await env.PARKED_KV.put(`discord_link:${linkSteamId}`, JSON.stringify({
+          discordId: user.id,
+          discordName: username,
+          linkedAt: Date.now(),
+        }));
+      } catch {
+        // Never block the login over this — worst case the ticket flow
+        // just asks them to link again.
+      }
+    }
+
     return redirectToProfile(origin, {
       discord_id: user.id,
       discord_name: username,

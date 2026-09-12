@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=826da9e" />
+    <link rel="stylesheet" href="styles.css?v=f6a6d77" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -1107,6 +1107,14 @@
             <p class="dino-park-note">Log in with Steam from the Profile tab to submit a ticket.</p>
           </section>
 
+          <section class="panel content-box" data-ticket-needs-discord hidden>
+            <div class="mini-heading">Link your Discord</div>
+            <p class="dino-park-note">A linked Discord account is required to submit a ticket, so staff always have a real identity to hand your ticket off to.</p>
+            <div class="submit-actions">
+              <a class="action-button" data-ticket-link-discord href="/api/discord-login">Link Discord</a>
+            </div>
+          </section>
+
           <section class="panel content-box" data-ticket-signed-in hidden>
             <div class="mini-heading">New ticket</div>
             <p class="dino-park-note">Goes straight to staff in Discord — no need to type it all out yourself.</p>
@@ -1140,6 +1148,13 @@
               </div>
             </form>
           </section>
+
+          <section class="panel content-box" data-my-tickets-section hidden>
+            <div class="mini-heading">My Tickets</div>
+            <div class="dino-history-list" data-my-tickets-list>
+              <p class="empty-state">No tickets submitted yet.</p>
+            </div>
+          </section>
         </section>
       </main>
 
@@ -1152,6 +1167,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=826da9e"></script>
+    <script src="script.js?v=f6a6d77"></script>
   </body>
 </html>

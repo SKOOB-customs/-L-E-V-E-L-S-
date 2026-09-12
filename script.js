@@ -683,13 +683,40 @@ const loadDinoHistory = async () => {
 
 // ── Support tickets ──
 
-const initTicketForm = () => {
+const initTicketForm = async () => {
   const profile = getSteamProfile();
   const signedIn = document.querySelector('[data-ticket-signed-in]');
   const signedOut = document.querySelector('[data-ticket-signed-out]');
-  if (signedIn) signedIn.hidden = !profile;
+  const needsDiscord = document.querySelector('[data-ticket-needs-discord]');
+  const myTicketsSection = document.querySelector('[data-my-tickets-section]');
+
   if (signedOut) signedOut.hidden = !!profile;
-  if (!profile) return;
+  if (!profile) {
+    if (signedIn) signedIn.hidden = true;
+    if (needsDiscord) needsDiscord.hidden = true;
+    if (myTicketsSection) myTicketsSection.hidden = true;
+    return;
+  }
+
+  if (myTicketsSection) myTicketsSection.hidden = false;
+  loadMyTickets();
+
+  let linked = false;
+  try {
+    const response = await fetch(`/api/discord-link-status?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    linked = !!data.linked;
+  } catch (error) {
+    console.debug('Discord link status check failed:', error);
+  }
+
+  if (signedIn) signedIn.hidden = !linked;
+  if (needsDiscord) {
+    needsDiscord.hidden = linked;
+    const linkBtn = needsDiscord.querySelector('[data-ticket-link-discord]');
+    if (linkBtn) linkBtn.href = `/api/discord-login?steamId=${encodeURIComponent(profile.steamId)}`;
+  }
+  if (!linked) return;
 
   const steamIdInput = document.querySelector('[data-ticket-steamid]');
   if (steamIdInput) steamIdInput.value = profile.steamId;
@@ -699,6 +726,59 @@ const initTicketForm = () => {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     timeInput.value = now.toISOString().slice(0, 16);
+  }
+};
+
+const TICKET_STATUS_LABELS = { open: 'Open', claimed: 'Claimed' };
+
+const buildTicketCard = (ticket) => {
+  const card = document.createElement('div');
+  card.className = 'panel dino-history-card';
+
+  const header = document.createElement('div');
+  header.className = 'dino-history-card-header';
+  const title = document.createElement('strong');
+  title.textContent = ticket.dinoLabel && ticket.dinoLabel !== 'Not specified' ? ticket.dinoLabel : 'Ticket';
+  const badge = document.createElement('span');
+  badge.className = `badge dino-history-status-${ticket.status === 'claimed' ? 'parked' : 'alive'}`;
+  badge.textContent = ticket.status === 'claimed'
+    ? `Claimed by ${ticket.claimedByName || 'staff'}`
+    : (TICKET_STATUS_LABELS[ticket.status] || ticket.status);
+  header.append(title, badge);
+
+  const reason = document.createElement('p');
+  reason.className = 'dino-park-note';
+  reason.textContent = ticket.reason;
+
+  const when = document.createElement('p');
+  when.className = 'dino-park-note';
+  when.textContent = ticket.createdAt ? new Date(ticket.createdAt).toLocaleString() : '';
+
+  card.append(header, reason, when);
+  return card;
+};
+
+const loadMyTickets = async () => {
+  const profile = getSteamProfile();
+  const list = document.querySelector('[data-my-tickets-list]');
+  if (!list || !profile?.steamId) return;
+  try {
+    const response = await fetch(`/api/my-tickets?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.tickets)) return;
+    list.innerHTML = '';
+    if (!data.tickets.length) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No tickets submitted yet.';
+      list.appendChild(empty);
+      return;
+    }
+    data.tickets
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .forEach((ticket) => list.appendChild(buildTicketCard(ticket)));
+  } catch (error) {
+    console.debug('My tickets load failed:', error);
   }
 };
 
