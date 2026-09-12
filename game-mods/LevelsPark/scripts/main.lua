@@ -792,6 +792,22 @@ local function tryRedeem(steam, snapshotId, name)
 
     if target == nil then
         if snapshotId ~= nil then
+            -- Diagnostic for an intermittent stress-test report (2026-09-11):
+            -- same dino, same species, sometimes fails this exact check.
+            -- Logs the live class, the requested snapshotId, and every
+            -- currently-parked snapshot's classPath+capturedAt for this
+            -- player, so a real occurrence gives ground truth instead of a
+            -- guess — distinguishes "genuinely already consumed" (a
+            -- Worker-side file write racing this mod's own read-modify-write,
+            -- since neither side locks the file) from "classPath actually
+            -- differs" from a stale website snapshotId.
+            local dump = {}
+            for _, d in ipairs(dinos) do
+                table.insert(dump, tostring(d.classPath) .. "@" .. tostring(d.capturedAt))
+            end
+            log("Redeem miss: steam=" .. steam .. " requestedSnapshotId=" .. tostring(snapshotId)
+                .. " liveClassPath=" .. tostring(liveClassPath)
+                .. " parked=[" .. table.concat(dump, ", ") .. "]")
             return false, "Redeem failed: that snapshot wasn't found, or its species doesn't match what you're playing."
         end
         if lowerName ~= nil then
