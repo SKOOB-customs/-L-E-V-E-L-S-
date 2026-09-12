@@ -69,6 +69,7 @@ export async function onRequestGet({ request, env }) {
     const staffRole = roleOrder.find((role) => configuredRoles[role] && member.roles.includes(configuredRoles[role])) || 'Player';
     const username = user.global_name || user.username || 'Discord user';
 
+    let linked = false;
     if (shouldLink && env.PARKED_KV) {
       try {
         await env.PARKED_KV.put(`discord_link:${linkSteamId}`, JSON.stringify({
@@ -76,9 +77,42 @@ export async function onRequestGet({ request, env }) {
           discordName: username,
           linkedAt: Date.now(),
         }));
+        linked = true;
       } catch {
         // Never block the login over this — worst case the ticket flow
         // just asks them to link again.
+      }
+    }
+
+    // Best-effort "thanks for linking" DM — silently does nothing until
+    // the bot is set up (DISCORD_BOT_TOKEN), same as every other
+    // bot-dependent feature added for ticket claiming.
+    if (linked && env.DISCORD_BOT_TOKEN) {
+      try {
+        const dmChannelResponse = await fetch('https://discord.com/api/v10/users/@me/channels', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ recipient_id: user.id }),
+        });
+        if (dmChannelResponse.ok) {
+          const dmChannel = await dmChannelResponse.json();
+          await fetch(`https://discord.com/api/v10/channels/${dmChannel.id}/messages`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              content: "Thanks for linking your Discord to the LeveLs website! You're all set to submit support tickets.",
+            }),
+          });
+        }
+      } catch {
+        // Not linking's job to guarantee delivery — a closed-DMs player
+        // shouldn't see their link itself fail.
       }
     }
 
@@ -86,6 +120,7 @@ export async function onRequestGet({ request, env }) {
       discord_id: user.id,
       discord_name: username,
       discord_role: staffRole,
+      ...(linked ? { discord_linked: '1' } : {}),
     });
   } catch {
     return redirectToProfile(origin, { discord_error: 'membership' });

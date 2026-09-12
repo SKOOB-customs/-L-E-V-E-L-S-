@@ -858,6 +858,18 @@ const displaySteamStatus = async () => {
     }
   }
   if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
+  // The Profile page's plain "Login with Discord" button previously never
+  // carried a steamId, so using it (instead of the Support tab's dedicated
+  // "Link Discord" button) never actually persisted a link — a player
+  // could go through the whole Discord OAuth flow and see a success toast
+  // with no real link ever recorded. Any Discord login now links, as long
+  // as they're already signed in with Steam at the time.
+  const connectDiscordBtn = document.getElementById('connectDiscordBtn');
+  if (connectDiscordBtn) {
+    connectDiscordBtn.href = profile?.steamId
+      ? `/api/discord-login?steamId=${encodeURIComponent(profile.steamId)}`
+      : '/api/discord-login';
+  }
   loadDinoHistory();
   initTicketForm();
 
@@ -962,12 +974,16 @@ const consumeSteamRedirect = () => {
   const discordId = params.get('discord_id');
   const discordName = params.get('discord_name');
   const discordRole = params.get('discord_role');
+  const discordLinked = params.get('discord_linked') === '1';
 
   if (params.get('discord_error')) {
     showToast('Discord login failed. Make sure you are in the Levels Discord server.');
   } else if (discordId && discordName && discordRole) {
     setDiscordProfile(discordId, discordName, discordRole);
-    showToast('Discord permissions connected successfully!');
+    showToast(discordLinked
+      ? `Discord linked as ${discordName} — you can now submit tickets.`
+      : 'Discord permissions connected successfully!');
+    if (discordLinked) initTicketForm();
   } else if (params.get('steam_error')) {
     showToast('Steam login failed. Please try again.');
   } else if (steamId && /^\d{17}$/.test(steamId) && steamName) {
