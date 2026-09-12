@@ -83,6 +83,20 @@ const showToast = (message) => {
   }, 2200);
 };
 
+// Shrinks an element's font-size just enough for its own text to stop
+// clipping against its box (e.g. a long Steam display name in the fixed-
+// height header button) — resets to the CSS default first so a shorter
+// name later doesn't stay stuck at a previously-shrunk size.
+const fitTextToBox = (el, { minFontPx = 11, step = 1 } = {}) => {
+  if (!el) return;
+  el.style.fontSize = '';
+  let fontPx = Number.parseFloat(getComputedStyle(el).fontSize);
+  while (el.scrollWidth > el.clientWidth && fontPx > minFontPx) {
+    fontPx -= step;
+    el.style.fontSize = `${fontPx}px`;
+  }
+};
+
 const tabButtons = document.querySelectorAll('.tab-button');
 const tabPanels = document.querySelectorAll('.tab-panel');
 
@@ -534,9 +548,11 @@ const displaySteamStatus = async () => {
     if (profile) {
       headerSteamBtn.textContent = profile.username;
       headerSteamBtn.href = '#profile';
+      fitTextToBox(headerSteamBtn);
     } else {
       headerSteamBtn.textContent = 'Steam';
       headerSteamBtn.href = '/api/steam-login';
+      headerSteamBtn.style.fontSize = '';
     }
   }
   if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
@@ -2302,6 +2318,12 @@ if (compSpeciesSelect) {
 // actual steamId the moment a suggestion is picked.
 let playerDirectory = [];
 
+// Friend/request cards only ever get a raw steamId from the backend (the
+// Friends KV records don't store a name) — this resolves it to whatever
+// Steam display name the join-log-derived directory has on file, falling
+// back to the bare steamId for someone the directory hasn't seen yet.
+const nameForSteamId = (steamId) => playerDirectory.find((p) => p.steamId === steamId)?.name || steamId;
+
 const loadPlayerDirectory = async () => {
   const profile = getSteamProfile();
   if (!profile?.steamId) return;
@@ -2751,7 +2773,7 @@ const buildFriendRequestCard = (req) => {
 
   const name = document.createElement('h3');
   name.className = 'request-card-name';
-  name.textContent = req.fromSteamId;
+  name.textContent = nameForSteamId(req.fromSteamId);
 
   const meta = document.createElement('p');
   meta.className = 'request-card-meta';
@@ -2828,7 +2850,7 @@ const buildFriendCard = (friend) => {
 
   const name = document.createElement('h3');
   name.className = 'friend-card-name';
-  name.textContent = friend.steamId;
+  name.textContent = nameForSteamId(friend.steamId);
 
   const meta = document.createElement('p');
   meta.className = 'friend-card-meta';
@@ -2880,7 +2902,7 @@ const buildFriendCard = (friend) => {
   removeBtn.addEventListener('click', async () => {
     const steamId = getSteamProfile()?.steamId;
     if (!steamId) return;
-    if (!window.confirm(`Remove ${friend.steamId} from your friends?`)) return;
+    if (!window.confirm(`Remove ${nameForSteamId(friend.steamId)} from your friends?`)) return;
     removeBtn.disabled = true;
     try {
       const response = await fetch('/api/friend-remove', {
@@ -2913,7 +2935,7 @@ const buildTeleportRequestCard = (req) => {
 
   const name = document.createElement('h3');
   name.className = 'request-card-name';
-  name.textContent = req.fromSteamId;
+  name.textContent = nameForSteamId(req.fromSteamId);
 
   const meta = document.createElement('p');
   meta.className = 'request-card-meta';

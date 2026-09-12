@@ -407,7 +407,7 @@ h6,
 }
 
 #headerSteamBtn {
-  max-width: 160px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1112,6 +1112,8 @@ strong.stat-critical {
 .friend-card-actions .action-button,
 .request-card-actions .action-button {
   flex: 1 1 auto;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.82rem;
 }
 
 .skin-card {
