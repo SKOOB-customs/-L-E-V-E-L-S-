@@ -338,19 +338,20 @@ h6,
 .currency-display {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0.6rem 0.9rem;
+  gap: 8px;
+  padding: 0.4rem 0.9rem;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--line);
   font-weight: 800;
+  font-size: 1.05rem;
   color: var(--chrome-1);
   white-space: nowrap;
 }
 
 .currency-icon {
-  width: 18px;
-  height: 18px;
+  width: 38px;
+  height: 38px;
   object-fit: contain;
   flex: none;
 }
@@ -1918,12 +1919,18 @@ strong.stat-critical {
   position: relative;
 }
 
+/* position: fixed + JS-computed viewport coordinates (not position:
+   absolute anchored to .player-search) — every .panel sets
+   backdrop-filter, which creates its own CSS stacking context, so a
+   nested absolutely-positioned dropdown's z-index only ever wins against
+   siblings INSIDE that same panel, never against a separate sibling
+   panel later in the DOM (e.g. "Friend Requests" sitting right below
+   "Add a Friend" and covering its dropdown — a real reported bug).
+   Fixed positioning with a single shared, body-level element sidesteps
+   the stacking-context trap entirely instead of fighting it per panel. */
 .player-suggestions {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: fixed;
+  z-index: 500;
   max-height: 220px;
   overflow-y: auto;
   background: var(--panel-strong);

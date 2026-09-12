@@ -2004,24 +2004,50 @@ export default {
     // legitimately needs for every player, not only admins, and isn't any
     // more sensitive than what the in-game player list already shows.
     if (url.pathname === '/player-directory' && request.method === 'GET') {
-      if (!env.PARKED_KV) return json({ ok: true, players: [] });
+      if (!env.PARKED_KV) return json({ ok: true, players: [], unnamedSteamIds: [] });
       const requesterSteamId = url.searchParams.get('requesterSteamId');
       if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
+      let players = {};
       const raw = await env.PARKED_KV.get('player_directory:index');
-      if (!raw) return json({ ok: true, players: [] });
-      try {
-        const { players } = JSON.parse(raw);
-        const list = Object.entries(players || {}).map(([steamId, entry]) => ({
-          steamId,
-          name: entry.name,
-          lastSeen: entry.lastSeen,
-        }));
-        return json({ ok: true, players: list });
-      } catch {
-        return json({ ok: true, players: [] });
+      if (raw) {
+        try {
+          players = JSON.parse(raw).players || {};
+        } catch {
+          players = {};
+        }
       }
+      const list = Object.entries(players).map(([steamId, entry]) => ({
+        steamId,
+        name: entry.name,
+        lastSeen: entry.lastSeen,
+      }));
+
+      // A confirmed friend may have never actually joined this game server
+      // (the only source the join-log directory above can draw from) — a
+      // real reported case: added as a friend by Steam ID, but unsearchable
+      // by name since nothing here ever learned their name. Every distinct
+      // steamId referenced by ANY friends: pair, not just the requester's
+      // own, since this directory is shared across every admin-panel/
+      // friend-request search on the site. This Worker has no
+      // STEAM_API_KEY (that's Pages-only), so it just hands back the raw
+      // ids still missing a name — functions/api/player-directory.js
+      // resolves them via GetPlayerSummaries and merges the result.
+      const unnamedSteamIds = new Set();
+      try {
+        const friendKeys = await env.PARKED_KV.list({ prefix: 'friends:' });
+        for (const key of friendKeys.keys) {
+          const parts = key.name.split(':');
+          for (const id of [parts[1], parts[2]]) {
+            if (id && /^\d{17}$/.test(id) && !players[id]) unnamedSteamIds.add(id);
+          }
+        }
+      } catch {
+        // best-effort — the join-log directory above still returns fine either way
+      }
+
+      return json({ ok: true, players: list, unnamedSteamIds: [...unnamedSteamIds] });
     }
 
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);

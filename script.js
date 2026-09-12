@@ -2362,53 +2362,81 @@ const loadPlayerDirectory = async () => {
 
 const extractSteamId = (rawValue) => (rawValue || '').trim();
 
+// One shared dropdown, portalled directly onto <body> rather than living
+// inside each field's own .player-search wrapper. Every .panel sets
+// backdrop-filter, which creates its own CSS stacking context — a nested
+// position:absolute child's z-index only ever wins against siblings
+// INSIDE that same panel, never against a separate sibling panel later in
+// the DOM (a real reported bug: the Friends tab's "Friend Requests" panel
+// was covering the "Add a Friend" dropdown right above it). position:fixed
+// with coordinates computed from the input's own getBoundingClientRect()
+// sidesteps the stacking-context trap entirely instead of fighting it
+// panel by panel.
+const playerSuggestionsPortal = document.createElement('div');
+playerSuggestionsPortal.className = 'player-suggestions';
+playerSuggestionsPortal.hidden = true;
+document.body.appendChild(playerSuggestionsPortal);
+let playerSuggestionsOwner = null;
+
+const hidePlayerSuggestions = (forInput) => {
+  if (forInput && playerSuggestionsOwner !== forInput) return;
+  playerSuggestionsPortal.hidden = true;
+  playerSuggestionsPortal.innerHTML = '';
+  playerSuggestionsOwner = null;
+};
+
+// Closes on scroll rather than trying to track and re-position live —
+// matches how most native/browser dropdowns behave, and avoids the
+// dropdown visually drifting away from its input mid-scroll.
+window.addEventListener('scroll', () => hidePlayerSuggestions(), true);
+
+// Delegated once on the shared portal rather than per-field. mousedown
+// (not click) fires before the input's blur, and preventDefault here
+// stops that blur from happening at all — so this is the only thing that
+// closes the dropdown, rather than a race between blur-hides-it and
+// click-tries-to-read-it-first.
+playerSuggestionsPortal.addEventListener('mousedown', (event) => {
+  const row = event.target.closest('[data-steam-id]');
+  if (!row || !playerSuggestionsOwner) return;
+  event.preventDefault();
+  playerSuggestionsOwner.value = row.dataset.steamId;
+  hidePlayerSuggestions();
+});
+
 const attachPlayerAutocomplete = (inputEl) => {
   if (!inputEl) return;
-  const suggestionsEl = inputEl.closest('.player-search')?.querySelector('[data-player-suggestions]');
-  if (!suggestionsEl) return;
-
-  const hideSuggestions = () => {
-    suggestionsEl.hidden = true;
-    suggestionsEl.innerHTML = '';
-  };
 
   const renderSuggestions = () => {
     const query = inputEl.value.trim().toLowerCase();
     if (!query || /^\d+$/.test(query)) {
-      hideSuggestions();
+      hidePlayerSuggestions(inputEl);
       return;
     }
     const matches = playerDirectory
       .filter((p) => String(p.name || '').toLowerCase().includes(query))
       .slice(0, 8);
     if (matches.length === 0) {
-      hideSuggestions();
+      hidePlayerSuggestions(inputEl);
       return;
     }
-    suggestionsEl.innerHTML = matches.map((p) => `
+    playerSuggestionsOwner = inputEl;
+    const rect = inputEl.getBoundingClientRect();
+    playerSuggestionsPortal.style.left = `${rect.left}px`;
+    playerSuggestionsPortal.style.top = `${rect.bottom + 4}px`;
+    playerSuggestionsPortal.style.width = `${rect.width}px`;
+    playerSuggestionsPortal.innerHTML = matches.map((p) => `
       <div class="player-suggestion" data-steam-id="${p.steamId}">
         ${String(p.name).replace(/</g, '&lt;')}
         <small>${p.steamId}</small>
       </div>
     `).join('');
-    suggestionsEl.hidden = false;
+    playerSuggestionsPortal.hidden = false;
   };
 
   inputEl.addEventListener('input', renderSuggestions);
   inputEl.addEventListener('focus', renderSuggestions);
-  // mousedown (not click) fires before the input's blur, and preventDefault
-  // here stops that blur from happening at all — so hideSuggestions() below
-  // is the only thing that closes the dropdown, rather than a race between
-  // blur-hides-it and click-tries-to-read-it-first.
-  suggestionsEl.addEventListener('mousedown', (event) => {
-    const row = event.target.closest('[data-steam-id]');
-    if (!row) return;
-    event.preventDefault();
-    inputEl.value = row.dataset.steamId;
-    hideSuggestions();
-  });
   inputEl.addEventListener('blur', () => {
-    setTimeout(hideSuggestions, 150);
+    setTimeout(() => hidePlayerSuggestions(inputEl), 150);
   });
 };
 
