@@ -544,6 +544,10 @@ const spawnCurrencyGainFx = (display, delta) => {
     void icon.offsetWidth;
     icon.classList.add('is-gaining');
     icon.addEventListener('animationend', () => icon.classList.remove('is-gaining'), { once: true });
+    // Safety net: if animationend never fires for any reason, the coin
+    // would otherwise be stuck showing the one-shot "gain" pose forever
+    // instead of resuming its idle sway/glimmer loop.
+    setTimeout(() => icon.classList.remove('is-gaining'), 700);
   }
   const fx = document.createElement('span');
   fx.className = 'currency-gain-fx';

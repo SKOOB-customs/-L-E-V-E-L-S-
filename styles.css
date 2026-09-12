@@ -410,17 +410,6 @@ h6,
   100% { opacity: 0; transform: translate(-50%, -30px) scale(1); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .currency-icon,
-  .currency-icon.is-gaining {
-    animation: none;
-  }
-  .currency-gain-fx {
-    animation: none;
-    opacity: 0;
-  }
-}
-
 .nav-dropdown {
   position: relative;
 }
