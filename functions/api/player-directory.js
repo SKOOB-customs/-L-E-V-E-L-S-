@@ -5,13 +5,16 @@
  *
  * GET ?requesterSteamId= -> proxied to the bridge Worker's
  * /player-directory route (join-log-derived: name + steamId for anyone
- * who's actually connected to this game server), then enriched with any
- * confirmed friend who's never joined the server at all — a real reported
- * case (added as a friend by Steam ID, but unsearchable by name since the
- * join-log directory has nothing on them). The Worker hands back those
- * steamIds unnamed (it has no STEAM_API_KEY, that's Pages-only) and this
- * resolves their real names via GetPlayerSummaries, same call
- * friends.js/staff-roster.js already make.
+ * who's actually connected to this game server), enriched with:
+ * - any confirmed friend who's never joined the server at all (the Worker
+ *   hands back those steamIds unnamed, since it has no STEAM_API_KEY —
+ *   that's Pages-only — and this resolves them via GetPlayerSummaries,
+ *   same call friends.js/staff-roster.js already make), and
+ * - web_login_directory:index, a KV key this Function has direct access
+ *   to (same PARKED_KV binding parked-list.js already reads directly)
+ *   that steam-callback.js writes to synchronously on every website
+ *   login — covers anyone who's used the site but never joined in-game or
+ *   been friended, immediately rather than on any batch/cron delay.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -64,6 +67,25 @@ export async function onRequestGet(context) {
       }
     }
     delete data.unnamedSteamIds;
+
+    if (response.ok && Array.isArray(data.players) && env.PARKED_KV) {
+      try {
+        const raw = await env.PARKED_KV.get('web_login_directory:index');
+        if (raw) {
+          const { players: webPlayers } = JSON.parse(raw);
+          const existingIds = new Set(data.players.map((p) => p.steamId));
+          for (const [steamId, entry] of Object.entries(webPlayers || {})) {
+            if (!existingIds.has(steamId)) {
+              data.players.push({ steamId, name: entry.name, lastSeen: entry.lastLoginAt });
+              existingIds.add(steamId);
+            }
+          }
+        }
+      } catch {
+        // Fall through — the directory from the Worker above still returns fine either way.
+      }
+    }
+
     return json(data, response.status);
   } catch (error) {
     return json({ error: error.message || 'Player directory lookup failed' }, 502);

@@ -35,6 +35,35 @@ export async function onRequestGet({ request, env }) {
     }
   }
 
+  // Record every website login immediately, not on any batch/cron delay —
+  // the admin-panel/friends-tab name-search directory was previously only
+  // ever populated from the game server's own join logs (or a confirmed
+  // friend's steamId), which meant a player who's only ever used the
+  // website and never joined in-game or been friended was unsearchable by
+  // name until they happened to do one of those things. This is a direct,
+  // synchronous KV write right at login — safe to do unconditionally here
+  // since a login is a rare, one-per-session event, nowhere near the
+  // 1,000-writes/day free-tier ceiling that forced the batched/conditional
+  // approach for the 5-minute currency-tick and join-log syncs elsewhere.
+  if (env.PARKED_KV) {
+    try {
+      const raw = await env.PARKED_KV.get('web_login_directory:index');
+      let players = {};
+      if (raw) {
+        try {
+          players = JSON.parse(raw).players || {};
+        } catch {
+          players = {};
+        }
+      }
+      players[steamId] = { name: username, lastLoginAt: Date.now() };
+      await env.PARKED_KV.put('web_login_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));
+    } catch {
+      // Never block a login over this — the name-search directory is a
+      // convenience, not something login itself depends on.
+    }
+  }
+
   // Check if user is staff for automatic in-game permission status
   let staffRole = '';
   if (env.STAFF_STEAM_IDS) {
