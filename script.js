@@ -2318,12 +2318,6 @@ if (compSpeciesSelect) {
 // actual steamId the moment a suggestion is picked.
 let playerDirectory = [];
 
-// Friend/request cards only ever get a raw steamId from the backend (the
-// Friends KV records don't store a name) — this resolves it to whatever
-// Steam display name the join-log-derived directory has on file, falling
-// back to the bare steamId for someone the directory hasn't seen yet.
-const nameForSteamId = (steamId) => playerDirectory.find((p) => p.steamId === steamId)?.name || steamId;
-
 const loadPlayerDirectory = async () => {
   const profile = getSteamProfile();
   if (!profile?.steamId) return;
@@ -2773,7 +2767,7 @@ const buildFriendRequestCard = (req) => {
 
   const name = document.createElement('h3');
   name.className = 'request-card-name';
-  name.textContent = nameForSteamId(req.fromSteamId);
+  name.textContent = req.fromName || req.fromSteamId;
 
   const meta = document.createElement('p');
   meta.className = 'request-card-meta';
@@ -2850,7 +2844,7 @@ const buildFriendCard = (friend) => {
 
   const name = document.createElement('h3');
   name.className = 'friend-card-name';
-  name.textContent = nameForSteamId(friend.steamId);
+  name.textContent = friend.name || friend.steamId;
 
   const meta = document.createElement('p');
   meta.className = 'friend-card-meta';
@@ -2902,7 +2896,7 @@ const buildFriendCard = (friend) => {
   removeBtn.addEventListener('click', async () => {
     const steamId = getSteamProfile()?.steamId;
     if (!steamId) return;
-    if (!window.confirm(`Remove ${nameForSteamId(friend.steamId)} from your friends?`)) return;
+    if (!window.confirm(`Remove ${friend.name || friend.steamId} from your friends?`)) return;
     removeBtn.disabled = true;
     try {
       const response = await fetch('/api/friend-remove', {
@@ -2935,7 +2929,7 @@ const buildTeleportRequestCard = (req) => {
 
   const name = document.createElement('h3');
   name.className = 'request-card-name';
-  name.textContent = nameForSteamId(req.fromSteamId);
+  name.textContent = req.fromName || req.fromSteamId;
 
   const meta = document.createElement('p');
   meta.className = 'request-card-meta';

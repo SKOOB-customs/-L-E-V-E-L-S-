@@ -1,7 +1,10 @@
 /**
  * Friends: the caller's own pending incoming teleport requests.
  *
- * GET ?steamId= -> proxied to the bridge Worker's /teleport-requests route.
+ * GET ?steamId= -> proxied to the bridge Worker's /teleport-requests
+ * route, enriched with the requester's real Steam display name (fromName)
+ * via GetPlayerSummaries — see friends.js for why this can't just use the
+ * join-log-derived directory.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -39,6 +42,25 @@ export async function onRequestGet(context) {
       },
     });
     const data = await response.json();
+    if (response.ok && Array.isArray(data.requests)) {
+      const names = {};
+      if (data.requests.length > 0 && env.STEAM_API_KEY) {
+        try {
+          const ids = [...new Set(data.requests.map((r) => r.fromSteamId))];
+          const summaryUrl = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${env.STEAM_API_KEY}&steamids=${ids.join(',')}`;
+          const summaryResponse = await fetch(summaryUrl);
+          if (summaryResponse.ok) {
+            const summaryData = await summaryResponse.json();
+            for (const player of summaryData?.response?.players || []) {
+              names[player.steamid] = player.personaname;
+            }
+          }
+        } catch {
+          // Fall through — every request below just falls back to its bare steamId.
+        }
+      }
+      data.requests = data.requests.map((r) => ({ ...r, fromName: names[r.fromSteamId] || r.fromSteamId }));
+    }
     return json(data, response.status);
   } catch (error) {
     return json({ error: error.message || 'Teleport requests lookup failed' }, 502);
