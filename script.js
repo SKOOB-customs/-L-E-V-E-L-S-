@@ -2332,7 +2332,7 @@ const attachPlayerAutocomplete = (inputEl) => {
   });
 };
 
-['[data-comp-target]', '[data-strike-target]', '[data-skin-target]'].forEach((selector) => {
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]'].forEach((selector) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
@@ -2354,16 +2354,18 @@ const checkAdminPanelAccess = async () => {
     // renderHub() ran at page load before this async check resolved, so the
     // Admin Panel card wasn't in the grid yet for an actual admin — add it
     // in now that we know for sure.
-    if (hasAccess) {
-      loadPlayerDirectory();
-      renderHub();
-    }
+    if (hasAccess) renderHub();
   } catch (error) {
     console.debug('Admin panel access check failed:', error);
   }
 };
 
 checkAdminPanelAccess();
+// Now open to any signed-in player (not admin-gated server-side anymore)
+// since the Friends tab's "Add a friend" field needs the same name-search
+// lookup — loadPlayerDirectory() itself already no-ops for a signed-out
+// visitor.
+loadPlayerDirectory();
 
 // Compensation form: entombment level + the mutation slots it unlocks.
 // Read-only catalog (no admin gate — see functions/api/mutations-catalog.js),
@@ -3010,7 +3012,7 @@ document.querySelector('[data-friend-request-form]')?.addEventListener('submit',
     return;
   }
   const targetInput = document.querySelector('[data-friend-target]');
-  const toSteamId = targetInput?.value.trim() || '';
+  const toSteamId = extractSteamId(targetInput?.value);
   if (!/^\d{17}$/.test(toSteamId)) {
     showToast('Enter a valid 17-digit Steam ID.');
     return;

@@ -1854,18 +1854,20 @@ export default {
       }
     }
 
-    // Admin-panel name-search autocomplete. Gated on the requester actually
-    // holding an admin tier (unlike /admin-roster-public, which is meant to
-    // be public) since this exposes every logged-in player's Steam name
-    // alongside their steamId, not just the admin roster.
+    // Name-search autocomplete, used by both the admin panel (Compensation/
+    // Strikes/Skins target fields) and the Friends tab's "Add a friend"
+    // field — any signed-in player can look this up (still requires a
+    // valid requesterSteamId, same lightweight identity convention as the
+    // rest of this site, but not admin-tier-gated): the data is just a
+    // Steam name + steamId for anyone who's joined, which a friends feature
+    // legitimately needs for every player, not only admins, and isn't any
+    // more sensitive than what the in-game player list already shows.
     if (url.pathname === '/player-directory' && request.method === 'GET') {
       if (!env.PARKED_KV) return json({ ok: true, players: [] });
       const requesterSteamId = url.searchParams.get('requesterSteamId');
       if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
-      const tier = await getAdminTier(env, requesterSteamId);
-      if (!tier) return json({ error: 'Not an admin' }, 403);
       const raw = await env.PARKED_KV.get('player_directory:index');
       if (!raw) return json({ ok: true, players: [] });
       try {
