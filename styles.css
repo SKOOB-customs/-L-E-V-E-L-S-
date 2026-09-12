@@ -577,11 +577,12 @@ h6,
 
 .direct-connect {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  gap: 8px;
   padding: 20px 24px;
   margin-bottom: 18px;
+  text-align: center;
 }
 
 .direct-connect-label {
@@ -590,6 +591,15 @@ h6,
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.direct-connect-note {
+  margin: 0;
+  color: var(--text);
+}
+
+.direct-connect-note strong {
+  color: var(--chrome-1);
 }
 
 .stats-row {
@@ -2025,11 +2035,6 @@ textarea {
 
   .parked-modal-mutation-grid {
     grid-template-columns: 1fr;
-  }
-
-  .direct-connect {
-    flex-direction: column;
-    text-align: center;
   }
 
   .site-header,
