@@ -1091,9 +1091,27 @@ const updateGrowthPauseButtonForLiveState = (isAlive, growth, paused) => {
   btn.textContent = 'Pause Growth';
 };
 
+// Mirrors the game's own 75% growth lock-in for Prime eligibility (see
+// EVRIMA_Prime_Elder_Mechanism.md) — only offered below that threshold.
+const SET_PRIME_GROWTH_CEILING = 0.75;
+const SET_PRIME_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
+
+const updateSetPrimeButtonForLiveState = (isAlive, growth, isPrime) => {
+  const btn = document.querySelector('[data-set-prime]');
+  if (!btn || SET_PRIME_BUSY_LABELS.has(btn.textContent)) return;
+  if (isPrime) {
+    btn.disabled = true;
+    btn.textContent = 'Already Prime';
+    return;
+  }
+  btn.disabled = !isAlive || growth >= SET_PRIME_GROWTH_CEILING;
+  btn.textContent = 'Set Prime (Bypass)';
+};
+
 const renderLiveDino = (dino) => {
   updateParkButtonForLiveState((dino.health || 0) > 0);
   updateGrowthPauseButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.growthPaused));
+  updateSetPrimeButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.primeElder));
 
   // querySelectorAll, not querySelector — the same stat/name/prime markup
   // is duplicated in the compact strip under the map (see index.html's
@@ -1306,6 +1324,28 @@ document.querySelector('[data-growth-pause]')?.addEventListener('click', (event)
     waitingLabel: 'Waiting for in-game…',
     onSuccess: () => {
       pollLiveDino(); // refresh so the button reflects the new paused state
+    },
+  });
+});
+
+// Live Dino tab's Set Prime (Bypass) button — forces Prime status on the
+// caller's own live dino, skipping the game's normal prime-condition
+// requirements (see functions/api/set-prime.js / EVRIMA_Prime_Elder_Mechanism.md).
+document.querySelector('[data-set-prime]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/set-prime',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Set Prime (Bypass)',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino(); // refresh so the PRIME badge and button state update
     },
   });
 });

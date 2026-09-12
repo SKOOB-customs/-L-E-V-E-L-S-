@@ -992,6 +992,14 @@ local function growthStatusFilePath(steam)
     return SAVED_DIR .. "/growth_status_" .. steam .. ".json"
 end
 
+local function setPrimeRequestFilePath(steam)
+    return SAVED_DIR .. "/set_prime_request_" .. steam .. ".json"
+end
+
+local function setPrimeResultFilePath(steam)
+    return SAVED_DIR .. "/set_prime_result_" .. steam .. ".json"
+end
+
 local function writeRequestResult(resultPath, requestId, ok, message)
     local resultJson = string.format(
         '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
@@ -1334,6 +1342,83 @@ local function checkWebsiteGrowthPauseRequest(steam)
     writeRequestResult(growthPauseResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Website-triggered Prime bypass (Live Dino tab) ──
+--
+-- The naive pawn.EligiblePrimeElderData.bIsEligiblePrime = true does NOT
+-- stick — confirmed by EVRIMA_Prime_Elder_Mechanism.md: the engine
+-- recomputes that cached bool from 10 bPrimeConditionN flags on every
+-- relevant tick, so setting the bool alone gets silently reverted about a
+-- frame later. The real recipe is to force all 10 condition flags true
+-- AND the cached bool true, then push the whole struct via
+-- SetEligiblePrimeElderData — the engine sees the 5-of-10 threshold
+-- massively exceeded and keeps it true. Below 75% growth the engine keeps
+-- recomputing every tick, but since all 10 flags stay true, it keeps
+-- landing on true anyway; at/above 75% growth the result gets locked in
+-- permanently and stops recomputing at all — this button is gated below
+-- 75% specifically so a bypass grant doesn't instantly and permanently
+-- lock in prime on an already-mature dino with a single click.
+local PRIME_BYPASS_GROWTH_CEILING = 0.75
+
+local function trySetPrime(steam)
+    local gm = findGameMode()
+    if gm == nil then return false, "Failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Failed: spawn in first, then try again."
+    end
+
+    local growth
+    pcall(function() growth = pawn:GetGrowth() end)
+    if growth == nil then
+        return false, "Failed: could not read growth."
+    end
+    if growth >= PRIME_BYPASS_GROWTH_CEILING then
+        return false, string.format(
+            "Prime bypass only works below 75%% growth (currently %.0f%%).", growth * 100
+        )
+    end
+
+    local ok, err = pcall(function()
+        local pe = pawn:GetEligiblePrimeElderData()
+        pe.bPrimeCondition1 = true
+        pe.bPrimeCondition2 = true
+        pe.bPrimeCondition3 = true
+        pe.bPrimeCondition4 = true
+        pe.bPrimeCondition5 = true
+        pe.bPrimeCondition6 = true
+        pe.bPrimeCondition7 = true
+        pe.bPrimeCondition8 = true
+        pe.bPrimeCondition9 = true
+        pe.bPrimeCondition10 = true
+        pe.bIsEligiblePrime = true
+        pawn:SetEligiblePrimeElderData(pe)
+    end)
+    if not ok then
+        log("Set-prime: write failed: " .. tostring(err))
+        return false, "Failed: could not set Prime status."
+    end
+    return true, "Prime status granted."
+end
+
+local function checkWebsiteSetPrimeRequest(steam)
+    local path = setPrimeRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    if requestId == nil then return end
+
+    local ok, message = trySetPrime(steam)
+    safeNotify(steam, message)
+    log("Website set-prime request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(setPrimeResultFilePath(steam), requestId, ok, message)
+end
+
 -- Opportunistic status write, not request-driven — see growthStatusFilePath
 -- above for why the website needs this at all.
 local function writeGrowthStatus(steam, pawn)
@@ -1442,6 +1527,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteSkinUseRequest(steam)
                     checkWebsiteTeleportRequest(steam)
                     checkWebsiteGrowthPauseRequest(steam)
+                    checkWebsiteSetPrimeRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     if pawn ~= nil then
                         writeGrowthStatus(steam, pawn)

@@ -383,6 +383,11 @@ const growthStatusPath = (steamId) => `${REDEEM_SAVED_DIR}/growth_status_${steam
 const requestGrowthPause = (env, steamId, action) => writeRequest(env, growthPauseRequestPath, steamId, { action });
 const readGrowthPauseResult = (env, steamId, requestId) => readResult(env, growthPauseResultPath, steamId, requestId);
 
+const setPrimeRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/set_prime_request_${steamId}.json`;
+const setPrimeResultPath = (steamId) => `${REDEEM_SAVED_DIR}/set_prime_result_${steamId}.json`;
+const requestSetPrime = (env, steamId) => writeRequest(env, setPrimeRequestPath, steamId, {});
+const readSetPrimeResult = (env, steamId, requestId) => readResult(env, setPrimeResultPath, steamId, requestId);
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -1257,6 +1262,46 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Growth pause result lookup failed' }, 502);
+      }
+    }
+
+    // Live Dino tab: force Prime status on the caller's own live dino,
+    // bypassing the game's normal prime-condition requirements — self-
+    // service (no admin tier needed), gated to growth < 75% server-side
+    // by main.lua's trySetPrime, which reads the live pawn's real growth.
+    if (url.pathname === '/set-prime-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const requestId = await requestSetPrime(env, steamId);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Set-prime request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/set-prime-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readSetPrimeResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Set-prime result lookup failed' }, 502);
       }
     }
 
