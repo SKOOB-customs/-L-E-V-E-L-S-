@@ -349,11 +349,13 @@ h6,
   font-size: 1.1rem;
   color: var(--chrome-1);
   white-space: nowrap;
+  overflow: visible;
 }
 
 .currency-icon {
-  width: 40px;
-  height: 40px;
+  width: 68px;
+  height: 68px;
+  margin: -11px 0;
   object-fit: contain;
   flex: none;
 }
