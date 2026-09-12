@@ -578,17 +578,10 @@ h6,
 .direct-connect {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  justify-content: center;
   gap: 16px;
   padding: 20px 24px;
   margin-bottom: 18px;
-}
-
-.direct-connect-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 .direct-connect-label {
@@ -597,17 +590,6 @@ h6,
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-.direct-connect-address {
-  font-size: 1.1rem;
-  letter-spacing: 0.02em;
-  color: var(--chrome-1);
-}
-
-.direct-connect-actions {
-  display: flex;
-  gap: 12px;
 }
 
 .stats-row {
@@ -2047,12 +2029,7 @@ textarea {
 
   .direct-connect {
     flex-direction: column;
-    align-items: stretch;
     text-align: center;
-  }
-
-  .direct-connect-actions {
-    justify-content: center;
   }
 
   .site-header,

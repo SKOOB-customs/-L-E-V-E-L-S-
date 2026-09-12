@@ -2862,17 +2862,3 @@ document.querySelector('[data-friend-request-form]')?.addEventListener('submit',
 document.querySelector('[data-tab="friends"]')?.addEventListener('click', loadFriendsTabData);
 loadFriendsTabData();
 
-// Overview tab's Direct Connect block — a steam:// link plus a plain
-// copy-to-clipboard fallback for players who'd rather paste the address
-// into the in-game "Connect to IP" prompt themselves.
-document.querySelector('[data-copy-address]')?.addEventListener('click', async () => {
-  const address = document.querySelector('[data-direct-connect-address]')?.textContent.trim();
-  if (!address) return;
-  try {
-    await navigator.clipboard.writeText(address);
-    showToast('Server IP copied.');
-  } catch (error) {
-    console.debug('Clipboard copy failed:', error);
-    showToast(`Copy failed — server IP is ${address}`);
-  }
-});
