@@ -682,6 +682,15 @@ end
 -- stop blocking the instant a genuinely new pawn (a real respawn) appears.
 local lastParkedPawnAddr = {}
 
+-- Below this health%, parking is blocked outright — closes the "combat
+-- park" exploit where a player about to die in a fight parks their dino
+-- at near-zero health instead of losing it, then redeems it back later
+-- with the fight consequence completely erased. 99.99 rather than a flat
+-- 100 gives a hair of float-rounding tolerance on GetHealth()/GetMaxHealth()
+-- (both come back as floats, e.g. health=48.999998 on a nominally "full"
+-- juvenile) without opening the door to parking at any real injury.
+local PARK_MIN_HEALTH_PCT = 99.99
+
 -- Core park logic shared by the in-game !park command and website-
 -- triggered park requests (the Live Dino tab's Park button — see the
 -- website-bridge section below). Returns ok (bool), message (string).
@@ -693,6 +702,20 @@ local function tryPark(steam, name)
     local pawn = livePawnFromCtrl(ctrl)
     if pawn == nil then
         return false, "Park failed: no live dino found."
+    end
+
+    local health, maxHealth
+    pcall(function() health = pawn:GetHealth() end)
+    pcall(function() maxHealth = pawn:GetMaxHealth() end)
+    if health == nil or maxHealth == nil or maxHealth <= 0 then
+        return false, "Park failed: could not read health."
+    end
+    local healthPct = (health / maxHealth) * 100
+    if healthPct < PARK_MIN_HEALTH_PCT then
+        return false, string.format(
+            "Park failed: health must be at least 99.99%% (currently %.2f%%). Heal up fully before parking — this stops parking mid-fight to dodge a death.",
+            healthPct
+        )
     end
 
     local addr

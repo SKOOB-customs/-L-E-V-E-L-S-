@@ -575,6 +575,41 @@ h6,
   font-size: 1.1rem;
 }
 
+.direct-connect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+}
+
+.direct-connect-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.direct-connect-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.direct-connect-address {
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+  color: var(--chrome-1);
+}
+
+.direct-connect-actions {
+  display: flex;
+  gap: 12px;
+}
+
 .stats-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2008,6 +2043,16 @@ textarea {
 
   .parked-modal-mutation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .direct-connect {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .direct-connect-actions {
+    justify-content: center;
   }
 
   .site-header,

@@ -1060,11 +1060,22 @@ const updateMapMarker = (location) => {
 // requestActionAndPoll's own button-state management mid-click.
 const PARK_BUTTON_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
 
-const updateParkButtonForLiveState = (isAlive) => {
+// Mirrors main.lua's own PARK_MIN_HEALTH_PCT gate (tryPark rejects a park
+// below this regardless) — disabling the button proactively here is pure
+// UX, the server-side check is the real enforcement either way.
+const PARK_MIN_HEALTH_PCT = 99.99;
+
+const updateParkButtonForLiveState = (healthPct) => {
   const btn = document.querySelector('[data-park-dino]');
   if (!btn || PARK_BUTTON_BUSY_LABELS.has(btn.textContent)) return;
-  btn.disabled = !isAlive;
-  btn.textContent = isAlive ? 'Park Dino' : 'Dino not alive';
+  if (healthPct <= 0) {
+    btn.disabled = true;
+    btn.textContent = 'Dino not alive';
+    return;
+  }
+  const canPark = healthPct >= PARK_MIN_HEALTH_PCT;
+  btn.disabled = !canPark;
+  btn.textContent = canPark ? 'Park Dino' : 'Heal up to park';
 };
 
 // Mirrors the game's own bIsGrowthPaused range: pausable only from 50%
@@ -1109,7 +1120,7 @@ const updateSetPrimeButtonForLiveState = (isAlive, growth, isPrime) => {
 };
 
 const renderLiveDino = (dino) => {
-  updateParkButtonForLiveState((dino.health || 0) > 0);
+  updateParkButtonForLiveState((dino.health || 0) * 100);
   updateGrowthPauseButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.growthPaused));
   updateSetPrimeButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.primeElder));
 
@@ -2850,3 +2861,18 @@ document.querySelector('[data-friend-request-form]')?.addEventListener('submit',
 
 document.querySelector('[data-tab="friends"]')?.addEventListener('click', loadFriendsTabData);
 loadFriendsTabData();
+
+// Overview tab's Direct Connect block — a steam:// link plus a plain
+// copy-to-clipboard fallback for players who'd rather paste the address
+// into the in-game "Connect to IP" prompt themselves.
+document.querySelector('[data-copy-address]')?.addEventListener('click', async () => {
+  const address = document.querySelector('[data-direct-connect-address]')?.textContent.trim();
+  if (!address) return;
+  try {
+    await navigator.clipboard.writeText(address);
+    showToast('Server IP copied.');
+  } catch (error) {
+    console.debug('Clipboard copy failed:', error);
+    showToast(`Copy failed — server IP is ${address}`);
+  }
+});

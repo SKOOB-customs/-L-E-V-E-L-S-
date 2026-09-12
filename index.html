@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=f92c4b7" />
+    <link rel="stylesheet" href="styles.css?v=d31a8c5" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -115,6 +115,17 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section class="direct-connect panel" aria-label="Direct connect">
+            <div class="direct-connect-info">
+              <span class="direct-connect-label">Skip the server browser</span>
+              <strong class="direct-connect-address" data-direct-connect-address>168.100.160.159:27056</strong>
+            </div>
+            <div class="direct-connect-actions">
+              <a class="action-button" data-direct-connect-link href="steam://connect/168.100.160.159:27056">Direct Connect</a>
+              <button class="secondary-button" type="button" data-copy-address>Copy IP</button>
             </div>
           </section>
 
@@ -984,7 +995,7 @@
               <input type="text" class="gallery-search" data-park-name-input placeholder="Optional name..." maxlength="24" />
               <button class="action-button" type="button" data-park-dino>Park Dino</button>
             </div>
-            <p class="dino-park-note">Same as typing <code>!park</code> in-game — despawns this dino and saves it to your Inventory. You can also do this from in-game chat directly.</p>
+            <p class="dino-park-note">Same as typing <code>!park</code> in-game — despawns this dino and saves it to your Inventory. You can also do this from in-game chat directly. Requires full health, so you can't park mid-fight to dodge a death.</p>
 
             <div class="submit-actions">
               <button class="action-button" type="button" data-growth-pause disabled>Pause Growth</button>
@@ -1058,6 +1069,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=f92c4b7"></script>
+    <script src="script.js?v=d31a8c5"></script>
   </body>
 </html>
