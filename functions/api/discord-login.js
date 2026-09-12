@@ -25,7 +25,12 @@ export async function onRequestGet({ request, env }) {
     state,
   });
 
-  const response = Response.redirect(`https://discord.com/oauth2/authorize?${params.toString()}`, 302);
-  response.headers.append('Set-Cookie', `${stateCookieName}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/discord-callback; Max-Age=600`);
-  return response;
+  // Response.redirect() returns a Response whose headers are spec-immutable
+  // — appending Set-Cookie to it throws "Can't modify immutable headers."
+  // (confirmed live: this crashed every single Discord login attempt with
+  // an unhandled 500). Building the redirect manually via `new Response`
+  // gives a real, mutable Headers object instead.
+  const headers = new Headers({ Location: `https://discord.com/oauth2/authorize?${params.toString()}` });
+  headers.append('Set-Cookie', `${stateCookieName}=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/discord-callback; Max-Age=600`);
+  return new Response(null, { status: 302, headers });
 }

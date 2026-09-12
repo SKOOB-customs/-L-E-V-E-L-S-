@@ -2752,6 +2752,15 @@ checkAdminPanelAccess();
 // lookup — loadPlayerDirectory() itself already no-ops for a signed-out
 // visitor.
 loadPlayerDirectory();
+// A one-time load-at-page-open snapshot meant a staff member who kept the
+// admin panel/Friends tab open for a while would never see a player who
+// joined, linked Discord, or friended someone AFTER that snapshot was
+// taken (a real reported bug — a connected, even staff-perm'd player was
+// "not searchable" simply because their directory entry didn't exist yet
+// when the page first loaded). Refreshed periodically so it eventually
+// catches up without needing a manual page reload — same 30s-class
+// polling interval already used for the currency balance.
+setInterval(loadPlayerDirectory, 60000);
 
 // Compensation form: entombment level + the mutation slots it unlocks.
 // Read-only catalog (no admin gate — see functions/api/mutations-catalog.js),
