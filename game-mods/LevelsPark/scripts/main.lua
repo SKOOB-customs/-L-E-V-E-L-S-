@@ -1081,6 +1081,74 @@ end
 -- near jsonReadColorField, not here — tryRedeem needs it and comes before
 -- this section in the file.
 
+-- ── LeveLs Coins (currency): earn-by-playtime + admin grants ──
+--
+-- Source of truth is this per-player local file, exactly like every other
+-- per-player ledger in this mod (skin charges, parked dinos) — the Worker
+-- aggregates these into one KV key on its existing 1-minute cron rather
+-- than writing KV directly from here, since a KV write on every 5-minute
+-- tick per player would burn through Cloudflare's 1,000-writes/day free
+-- quota the same way the parked-dino/admin-tier/player-directory syncs
+-- already did once this session (see bridge-worker.js's syncCurrency).
+--
+-- Rate: 95 currency per minute at a 1.0x reference, awarded every 5
+-- minutes of continuous online+spawned play, plus a shorter final
+-- fractional payout on disconnect using actual elapsed seconds — reverse-
+-- engineered from a reference screenshot's own numbers
+-- (5.0m×2.0x=950, 3.8m×2.0x=718, 2.1m×2.0x=395 all divide out to the same
+-- ~95/min constant). Multipliers given exactly by the user: 7.5x for the
+-- 4 named species below, 2.0x for everything else.
+local CURRENCY_SPECIES_MULTIPLIER = {
+    Beipiaosaurus = 7.5,
+    Dryosaurus = 7.5,
+    Gallimimus = 7.5,
+    Hypsilophodon = 7.5,
+}
+local CURRENCY_DEFAULT_MULTIPLIER = 2.0
+local CURRENCY_BASE_RATE_PER_MIN = 95
+local CURRENCY_TICK_SECONDS = 300
+
+local function currencyFilePath(steam)
+    return SAVED_DIR .. "/currency_" .. steam .. ".json"
+end
+
+local function loadCurrencyBalance(steam)
+    local path = currencyFilePath(steam)
+    if not fileExists(path) then return 0 end
+    local body = readAll(path)
+    if body == nil or body == "" then return 0 end
+    return jsonReadNumber(body, "balance") or 0
+end
+
+local function writeCurrencyBalance(steam, balance)
+    local body = string.format('{"balance":%f,"updatedAt":%d}', balance, os.time())
+    writeAll(currencyFilePath(steam), body)
+end
+
+local function addCurrency(steam, amount)
+    if amount == nil or amount <= 0 then return end
+    writeCurrencyBalance(steam, loadCurrencyBalance(steam) + amount)
+end
+
+-- classPath may be nil (e.g. a disconnect where the pawn's already gone —
+-- callers pass the last-known classPath they recorded while it was still
+-- live) — speciesFromClassPath already handles nil by returning "Unknown",
+-- which just falls through to the default multiplier below.
+local function awardCurrencyForSeconds(steam, classPath, seconds)
+    if seconds == nil or seconds <= 0 then return end
+    local species = speciesFromClassPath(classPath)
+    local multiplier = CURRENCY_SPECIES_MULTIPLIER[species] or CURRENCY_DEFAULT_MULTIPLIER
+    addCurrency(steam, (seconds / 60) * CURRENCY_BASE_RATE_PER_MIN * multiplier)
+end
+
+-- Per-player accrual state, persisted only in memory across poll ticks
+-- (not written to disk) — steam -> { lastTickAt, classPath }. classPath is
+-- refreshed every tick a live pawn is found, so the disconnect-detection
+-- pass below still has a last-known species to rate the final partial
+-- payout against even though the pawn itself is gone by then.
+local currencyTickState = {}
+local currencyPreviouslyOnline = {}
+
 -- Charge ledger: {"skins":[{"name":...,"code":"SKIN-XXXX","colors":{...},"charges":N}]}
 -- Written by the Worker's /skin-grant-charges (admin grants) and
 -- /skin-attach-parked (decrements on attach); read and decremented here on
@@ -1539,6 +1607,8 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
         return
     end
 
+    local currencyCurrentlyOnline = {}
+
     pcall(function()
         controllers:ForEach(function(ctrl)
             local ok, err = pcall(function()
@@ -1555,12 +1625,49 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     if pawn ~= nil then
                         writeGrowthStatus(steam, pawn)
                         tryMutationDumpOnce(pawn)
+
+                        currencyCurrentlyOnline[steam] = true
+                        local state = currencyTickState[steam]
+                        if state == nil then
+                            state = { lastTickAt = os.time(), classPath = nil }
+                            currencyTickState[steam] = state
+                        end
+                        pcall(function()
+                            state.classPath = stripClassPrefix(pawn:GetClass():GetFullName())
+                        end)
+                        while os.time() - state.lastTickAt >= CURRENCY_TICK_SECONDS do
+                            awardCurrencyForSeconds(steam, state.classPath, CURRENCY_TICK_SECONDS)
+                            state.lastTickAt = state.lastTickAt + CURRENCY_TICK_SECONDS
+                        end
+                    elseif currencyTickState[steam] ~= nil then
+                        -- Online but no live pawn (menu/dead) — reset the
+                        -- clock rather than letting idle time build into a
+                        -- backlog that pays out the moment they respawn.
+                        currencyTickState[steam].lastTickAt = os.time()
                     end
                 end
             end)
             if not ok then log("Redeem-request poll: controller check failed: " .. tostring(err)) end
         end)
     end)
+
+    -- Disconnect detection: anyone tracked as online last tick but absent
+    -- from AllPlayerControllers this tick just left — pay out their final
+    -- partial interval (actual elapsed seconds, less than one full tick)
+    -- using the last species we saw them as, then drop their state.
+    for steam, _ in pairs(currencyPreviouslyOnline) do
+        if not currencyCurrentlyOnline[steam] then
+            local state = currencyTickState[steam]
+            if state ~= nil then
+                local elapsed = os.time() - state.lastTickAt
+                if elapsed > 0 then
+                    awardCurrencyForSeconds(steam, state.classPath, elapsed)
+                end
+                currencyTickState[steam] = nil
+            end
+        end
+    end
+    currencyPreviouslyOnline = currencyCurrentlyOnline
 end)
 
 -- ── Chat command hook ──

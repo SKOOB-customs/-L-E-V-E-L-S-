@@ -335,6 +335,26 @@ h6,
   gap: 12px;
 }
 
+.currency-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  font-weight: 800;
+  color: var(--chrome-1);
+  white-space: nowrap;
+}
+
+.currency-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex: none;
+}
+
 .nav-dropdown {
   position: relative;
 }

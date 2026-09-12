@@ -534,6 +534,30 @@ const renderStaffRoster = () => {
   });
 };
 
+const renderCurrencyBalance = (balance) => {
+  const display = document.querySelector('[data-currency-display]');
+  const balanceEl = document.querySelector('[data-currency-balance]');
+  if (!display || !balanceEl) return;
+  display.hidden = false;
+  balanceEl.textContent = Math.floor(balance).toLocaleString();
+};
+
+const loadCurrencyBalance = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    const display = document.querySelector('[data-currency-display]');
+    if (display) display.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch(`/api/currency-balance?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (response.ok && typeof data.balance === 'number') renderCurrencyBalance(data.balance);
+  } catch (error) {
+    console.debug('Currency balance load failed:', error);
+  }
+};
+
 const displaySteamStatus = async () => {
   const profile = getSteamProfile();
   const discordProfile = getDiscordProfile();
@@ -549,10 +573,12 @@ const displaySteamStatus = async () => {
       headerSteamBtn.textContent = profile.username;
       headerSteamBtn.href = '#profile';
       fitTextToBox(headerSteamBtn);
+      loadCurrencyBalance();
     } else {
       headerSteamBtn.textContent = 'Steam';
       headerSteamBtn.href = '/api/steam-login';
       headerSteamBtn.style.fontSize = '';
+      loadCurrencyBalance();
     }
   }
   if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
@@ -679,6 +705,10 @@ consumeSteamRedirect();
 // Render staff roster and Steam profile status on page load
 renderStaffRoster();
 displaySteamStatus();
+// Cheap KV read on the Worker side — a 30s poll is plenty responsive for
+// a balance that only actually changes every 5 minutes of playtime or on
+// an admin grant.
+setInterval(loadCurrencyBalance, 30000);
 
 // Global chat sidebar (local-only: no backend yet, so messages persist per browser)
 const chatToggle = document.getElementById('chatToggle');
@@ -2382,7 +2412,7 @@ const attachPlayerAutocomplete = (inputEl) => {
   });
 };
 
-['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]'].forEach((selector) => {
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]'].forEach((selector) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
@@ -2527,6 +2557,48 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     }
   } catch (error) {
     console.debug('Compensation grant failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+document.querySelector('[data-currency-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetSteamId = extractSteamId(document.querySelector('[data-currency-target]')?.value);
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const amount = Number(document.querySelector('[data-currency-amount]')?.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast('Enter an amount greater than 0.');
+    return;
+  }
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/currency-grant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ granterSteamId: profile.steamId, targetSteamId, amount }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not grant that currency.');
+    } else {
+      showToast(`Granted ${amount.toLocaleString()} LC to ${targetSteamId}. New balance: ${data.balance.toLocaleString()} LC.`);
+      document.querySelector('[data-currency-target]').value = '';
+      document.querySelector('[data-currency-amount]').value = '';
+      if (targetSteamId === profile.steamId) loadCurrencyBalance();
+    }
+  } catch (error) {
+    console.debug('Currency grant failed:', error);
     showToast('Could not reach the server right now.');
   } finally {
     if (submitBtn) submitBtn.disabled = false;

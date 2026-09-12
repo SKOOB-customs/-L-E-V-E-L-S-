@@ -221,6 +221,65 @@ const syncParkedDinos = async (env) => {
   return parked;
 };
 
+// ── LeveLs Coins (currency) sync ──
+//
+// Source of truth is one currency_<steamid>.json per player on the game
+// server (main.lua's writeCurrencyBalance), written on every 5-minute
+// playtime tick — aggregating them into one KV key here (rather than
+// writing KV per-player per-tick) is what keeps this off the same
+// 1,000-writes/day free-quota cliff syncParkedDinos/syncAdminTiers/
+// syncPlayerDirectory already hit once this session. Only writes when
+// the aggregated balances actually changed.
+const listCurrencyFiles = async (env) => {
+  const response = await pterodactylFetch(
+    env,
+    `/files/list?directory=${encodeURIComponent(PARKED_SAVED_DIR)}`,
+  );
+  const body = await response.json();
+  return (body.data || [])
+    .map((entry) => entry.attributes)
+    .filter((attrs) => attrs?.is_file && /^currency_\d+\.json$/.test(attrs.name));
+};
+
+const readCurrencyFile = async (env, filename) => {
+  const path = `${PARKED_SAVED_DIR}/${filename}`;
+  const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+  return response.text();
+};
+
+const CURRENCY_FILENAME_RE = /^currency_(\d+)\.json$/;
+
+const syncCurrency = async (env) => {
+  const files = await listCurrencyFiles(env);
+  const balances = {};
+  for (const file of files) {
+    const match = file.name.match(CURRENCY_FILENAME_RE);
+    if (!match) continue;
+    const raw = await readCurrencyFile(env, file.name);
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue; // skip a partially-written file rather than failing the whole sync
+    }
+    if (typeof data?.balance !== 'number') continue;
+    balances[match[1]] = data.balance;
+  }
+  const existingRaw = await env.PARKED_KV.get('currency:index');
+  let existingBalances = null;
+  if (existingRaw) {
+    try {
+      existingBalances = JSON.parse(existingRaw).balances || {};
+    } catch {
+      existingBalances = null;
+    }
+  }
+  if (JSON.stringify(existingBalances) !== JSON.stringify(balances)) {
+    await env.PARKED_KV.put('currency:index', JSON.stringify({ updatedAt: Date.now(), balances }));
+  }
+  return balances;
+};
+
 // ── Admin-tier audit log sync ──
 //
 // main.lua's admin-action hooks (Ban/Kick/SetWeather/SetNewAvailableClasses
@@ -1099,6 +1158,88 @@ export default {
       }
     }
 
+    // LeveLs Coins: an admin grants a player currency directly, on top of
+    // whatever they've earned by playing. Writes the same
+    // currency_<steamid>.json file main.lua's playtime accrual writes
+    // (read-modify-write, so a grant adds to the existing balance rather
+    // than overwriting it), then patches the KV index in the same
+    // request — grants are rare, manual actions, so one extra KV write
+    // per grant is a non-issue, and it means the balance shows up on the
+    // site immediately rather than waiting for the next 1-minute cron.
+    if (url.pathname === '/currency-grant' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, targetSteamId, amount } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      const grantAmount = Number(amount);
+      if (!Number.isFinite(grantAmount) || grantAmount <= 0) {
+        return json({ error: 'amount must be a positive number' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        const currencyPath = `${PARKED_SAVED_DIR}/currency_${targetSteamId}.json`;
+        let currentBalance = 0;
+        try {
+          const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(currencyPath)}`);
+          const data = JSON.parse(await response.text());
+          if (typeof data?.balance === 'number') currentBalance = data.balance;
+        } catch {
+          // no existing file yet — starts at 0
+        }
+        const newBalance = currentBalance + grantAmount;
+        await pterodactylWriteFile(env, currencyPath, JSON.stringify({ balance: newBalance, updatedAt: Date.now() }));
+
+        const existingRaw = await env.PARKED_KV.get('currency:index');
+        let balances = {};
+        if (existingRaw) {
+          try {
+            balances = JSON.parse(existingRaw).balances || {};
+          } catch {
+            balances = {};
+          }
+        }
+        balances[targetSteamId] = newBalance;
+        await env.PARKED_KV.put('currency:index', JSON.stringify({ updatedAt: Date.now(), balances }));
+
+        return json({ ok: true, balance: newBalance });
+      } catch (error) {
+        return json({ error: error.message || 'Currency grant failed' }, 502);
+      }
+    }
+
+    // Header balance display — a pure KV read (populated by the 1-minute
+    // syncCurrency cron, or patched immediately by a grant above), no
+    // Pterodactyl round-trip needed for something checked this often.
+    if (url.pathname === '/currency-balance' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ ok: true, balance: 0 });
+      try {
+        const raw = await env.PARKED_KV.get('currency:index');
+        if (!raw) return json({ ok: true, balance: 0 });
+        const { balances } = JSON.parse(raw);
+        return json({ ok: true, balance: balances?.[steamId] || 0 });
+      } catch {
+        return json({ ok: true, balance: 0 });
+      }
+    }
+
     // Glitch skins v2: admins grant CHARGES of a named skin, not a direct
     // apply — an earlier version wrote skin_<steamid>.json directly and
     // auto-restored it to whatever pawn a player currently had, which
@@ -1965,6 +2106,9 @@ export default {
     );
     ctx.waitUntil(
       syncPlayerDirectory(env).catch((error) => console.error('syncPlayerDirectory failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncCurrency(env).catch((error) => console.error('syncCurrency failed:', error.message)),
     );
   },
 };

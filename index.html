@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=f61c9a4" />
+    <link rel="stylesheet" href="styles.css?v=c47e2d9" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -63,6 +63,10 @@
         </button>
 
         <div class="header-actions">
+          <div class="currency-display" data-currency-display hidden>
+            <img class="currency-icon" src="assets/Dynamic Art/coin.png" alt="" />
+            <span data-currency-balance>0</span>
+          </div>
           <a class="chrome-button" id="headerSteamBtn" href="/api/steam-login">Steam</a>
           <a class="chrome-button" href="https://discord.gg/KpDeBAZrF" target="_blank" rel="noreferrer">Join Discord</a>
         </div>
@@ -759,6 +763,29 @@
               </div>
             </form>
           </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Currency</div>
+            <p class="dino-park-note">Grants LeveLs Coins directly to a player, on top of whatever they've earned by playing — adds to their existing balance.</p>
+            <form class="submit-form" data-currency-form>
+              <div class="field-row two-up">
+                <label>
+                  Target Steam ID or name
+                  <div class="player-search">
+                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-currency-target required />
+                    <div class="player-suggestions" data-player-suggestions hidden></div>
+                  </div>
+                </label>
+                <label>
+                  Amount
+                  <input type="number" min="1" step="1" placeholder="1000" data-currency-amount required />
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Grant coins</button>
+              </div>
+            </form>
+          </section>
         </section>
 
         <section class="tab-panel" id="inventory" data-tab="inventory">
@@ -1076,6 +1103,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=f61c9a4"></script>
+    <script src="script.js?v=c47e2d9"></script>
   </body>
 </html>
