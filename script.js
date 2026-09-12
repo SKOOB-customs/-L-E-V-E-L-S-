@@ -534,12 +534,34 @@ const renderStaffRoster = () => {
   });
 };
 
+let lastRenderedCurrencyBalance = null;
+
+const spawnCurrencyGainFx = (display, delta) => {
+  const icon = display.querySelector('.currency-icon');
+  if (icon) {
+    icon.classList.remove('is-gaining');
+    void icon.offsetWidth;
+    icon.classList.add('is-gaining');
+    icon.addEventListener('animationend', () => icon.classList.remove('is-gaining'), { once: true });
+  }
+  const fx = document.createElement('span');
+  fx.className = 'currency-gain-fx';
+  fx.textContent = `+${Math.floor(delta).toLocaleString()}`;
+  display.appendChild(fx);
+  fx.addEventListener('animationend', () => fx.remove(), { once: true });
+};
+
 const renderCurrencyBalance = (balance) => {
   const display = document.querySelector('[data-currency-display]');
   const balanceEl = document.querySelector('[data-currency-balance]');
   if (!display || !balanceEl) return;
   display.hidden = false;
-  balanceEl.textContent = Math.floor(balance).toLocaleString();
+  const rounded = Math.floor(balance);
+  if (lastRenderedCurrencyBalance !== null && rounded > lastRenderedCurrencyBalance) {
+    spawnCurrencyGainFx(display, rounded - lastRenderedCurrencyBalance);
+  }
+  lastRenderedCurrencyBalance = rounded;
+  balanceEl.textContent = rounded.toLocaleString();
 };
 
 const loadCurrencyBalance = async () => {
