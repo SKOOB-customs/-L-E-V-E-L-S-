@@ -329,12 +329,13 @@ local function dinoToJson(state)
         '{"name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
         '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
         '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
-        '"capturedAt":%d,"entombments":%d,%s}',
+        '"capturedAt":%d,"entombments":%d,"dinoId":"%s",%s}',
         jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
         state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
         state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
         state.primeElder and "true" or "false", state.bodyColorR or 0, state.bodyColorG or 0,
         state.bodyColorB or 0, state.capturedAt, state.entombments or 0,
+        jsonEscape(state.dinoId or ""),
         mutationsToJsonFragment(state.mutations)
     )
 end
@@ -406,6 +407,7 @@ local function loadParkedDinos(steam)
             bodyColorG = jsonReadNumber(objStr, "bodyColorG"),
             bodyColorB = jsonReadNumber(objStr, "bodyColorB"),
             capturedAt = jsonReadNumber(objStr, "capturedAt"),
+            dinoId = jsonReadString(objStr, "dinoId"),
             skin = skin,
             entombments = jsonReadNumber(objStr, "entombments") or 0,
             mutations = mutations,
@@ -682,6 +684,188 @@ end
 -- stop blocking the instant a genuinely new pawn (a real respawn) appears.
 local lastParkedPawnAddr = {}
 
+-- ── Dino history ──
+--
+-- Per-player record of every dino they've spawned as: {version, steam,
+-- entries: [{dinoId, classPath, species, status, firstSpawnedAt,
+-- lastUpdatedAt, events: [{type, at, growthPct}]}]}. dinoId is minted the
+-- moment a genuinely new pawn address appears (see the poll loop further
+-- down) and is carried forward through a park -> respawn -> !redeem cycle
+-- (tryPark stores it on the parked snapshot; tryRedeem reads it back and
+-- continues the same entry instead of starting a new one) — capturedAt
+-- can't serve this role since it's regenerated on every !park. status is
+-- "alive", "parked", "dead" (health hit 0), or "disconnected" (player left
+-- without parking or a caught death) — the last two are terminal for that
+-- dinoId. Declared up here (not near currency further down) because
+-- tryPark/tryRedeem below need it, and Lua locals must precede use.
+local MAX_DINO_HISTORY_ENTRIES = 40
+
+local function dinoHistoryFilePath(steam)
+    return SAVED_DIR .. "/dino_history_" .. steam .. ".json"
+end
+
+local function historyEventToJson(evt)
+    return string.format('{"type":"%s","at":%d,"growthPct":%f}',
+        jsonEscape(evt.type), evt.at, evt.growthPct or 0)
+end
+
+local function historyEntryToJson(entry)
+    local eventParts = {}
+    for _, evt in ipairs(entry.events or {}) do
+        table.insert(eventParts, historyEventToJson(evt))
+    end
+    return string.format(
+        '{"dinoId":"%s","classPath":"%s","species":"%s","status":"%s",' ..
+        '"firstSpawnedAt":%d,"lastUpdatedAt":%d,"events":[%s]}',
+        jsonEscape(entry.dinoId), jsonEscape(entry.classPath or ""), jsonEscape(entry.species or ""),
+        jsonEscape(entry.status), entry.firstSpawnedAt, entry.lastUpdatedAt,
+        table.concat(eventParts, ",")
+    )
+end
+
+local function parseHistoryEvents(eventsSection)
+    local events = {}
+    for objStr in (eventsSection or "[]"):gmatch("%b{}") do
+        table.insert(events, {
+            type = jsonReadString(objStr, "type"),
+            at = jsonReadNumber(objStr, "at"),
+            growthPct = jsonReadNumber(objStr, "growthPct") or 0,
+        })
+    end
+    return events
+end
+
+local function loadDinoHistory(steam)
+    local path = dinoHistoryFilePath(steam)
+    if not fileExists(path) then return {} end
+    local body = readAll(path)
+    if body == nil or body == "" then return {} end
+    local entriesSection = body:match('"entries"%s*:%s*(%b[])') or "[]"
+    local entries = {}
+    for objStr in entriesSection:gmatch("%b{}") do
+        local eventsSection = objStr:match('"events"%s*:%s*(%b[])')
+        table.insert(entries, {
+            dinoId = jsonReadString(objStr, "dinoId"),
+            classPath = jsonReadString(objStr, "classPath"),
+            species = jsonReadString(objStr, "species"),
+            status = jsonReadString(objStr, "status"),
+            firstSpawnedAt = jsonReadNumber(objStr, "firstSpawnedAt"),
+            lastUpdatedAt = jsonReadNumber(objStr, "lastUpdatedAt"),
+            events = parseHistoryEvents(eventsSection),
+        })
+    end
+    return entries
+end
+
+local function saveDinoHistory(steam, entries)
+    if #entries == 0 then
+        os.remove(dinoHistoryFilePath(steam))
+        return true
+    end
+    local parts = {}
+    for _, e in ipairs(entries) do table.insert(parts, historyEntryToJson(e)) end
+    local json = string.format('{"version":1,"steam":"%s","entries":[%s]}',
+        jsonEscape(steam), table.concat(parts, ","))
+    return writeAll(dinoHistoryFilePath(steam), json)
+end
+
+-- Drops the oldest terminal (dead/disconnected) entry to make room — never
+-- drops an alive/parked entry, so the cap can be temporarily exceeded if a
+-- player somehow has more than MAX_DINO_HISTORY_ENTRIES active lineages at
+-- once (not possible in practice; a player has exactly one live dino).
+local function pruneDinoHistory(entries)
+    while #entries > MAX_DINO_HISTORY_ENTRIES do
+        local prunedIndex = nil
+        for i, e in ipairs(entries) do
+            if e.status == "dead" or e.status == "disconnected" then
+                prunedIndex = i
+                break
+            end
+        end
+        if prunedIndex == nil then break end
+        table.remove(entries, prunedIndex)
+    end
+end
+
+local function findHistoryEntry(entries, dinoId)
+    for _, e in ipairs(entries) do
+        if e.dinoId == dinoId then return e end
+    end
+    return nil
+end
+
+local function startNewHistoryEntry(steam, dinoId, classPath, growthPct)
+    local entries = loadDinoHistory(steam)
+    local now = os.time()
+    table.insert(entries, {
+        dinoId = dinoId,
+        classPath = classPath or "",
+        species = speciesFromClassPath(classPath),
+        status = "alive",
+        firstSpawnedAt = now,
+        lastUpdatedAt = now,
+        events = { { type = "spawn", at = now, growthPct = growthPct or 0 } },
+    })
+    pruneDinoHistory(entries)
+    saveDinoHistory(steam, entries)
+end
+
+local function appendHistoryEvent(steam, dinoId, eventType, growthPct)
+    if dinoId == nil or dinoId == "" then return end
+    local entries = loadDinoHistory(steam)
+    local entry = findHistoryEntry(entries, dinoId)
+    if entry == nil then return end
+    -- "disconnected" only ever describes a lineage that was still "alive"
+    -- when the player dropped off (no explicit park, no caught death in
+    -- between polls) — a currentDinoId can still point at an already-
+    -- parked or already-dead entry at the moment someone disconnects
+    -- (parking/dying doesn't clear the tracking table), and that entry's
+    -- real, more informative status must never be downgraded to a bare
+    -- "disconnected".
+    if eventType == "disconnected" and entry.status ~= "alive" then return end
+    local now = os.time()
+    table.insert(entry.events, { type = eventType, at = now, growthPct = growthPct or 0 })
+    entry.lastUpdatedAt = now
+    if eventType == "parked" then
+        entry.status = "parked"
+    elseif eventType == "redeemed" then
+        entry.status = "alive"
+    elseif eventType == "died" then
+        entry.status = "dead"
+    elseif eventType == "disconnected" then
+        entry.status = "disconnected"
+    end
+    saveDinoHistory(steam, entries)
+end
+
+-- Called right before a redeem hands off to a different (real) lineage —
+-- if the fresh juvenile the player is currently standing in only ever
+-- logged its initial "spawn" (i.e. they never played it, just respawned
+-- and immediately typed !redeem), that throwaway entry is discarded rather
+-- than left behind as a meaningless one-event record.
+local function dropBareSpawnEntry(steam, dinoId)
+    if dinoId == nil or dinoId == "" then return end
+    local entries = loadDinoHistory(steam)
+    local remaining = {}
+    local changed = false
+    for _, e in ipairs(entries) do
+        local isBareSpawn = (e.dinoId == dinoId and #e.events == 1 and e.events[1].type == "spawn")
+        if isBareSpawn then
+            changed = true
+        else
+            table.insert(remaining, e)
+        end
+    end
+    if changed then saveDinoHistory(steam, remaining) end
+end
+
+-- Per-player live tracking, memory-only (not persisted across a mod
+-- reload) — mirrors currencyTickState's shape/reasoning.
+local dinoHistoryLastAddr = {}
+local dinoHistoryLastHealthOk = {}
+local currentDinoId = {}
+local lastKnownGrowth = {}
+
 -- Below this health%, parking is blocked outright — closes the "combat
 -- park" exploit where a player about to die in a fight parks their dino
 -- at near-zero health instead of losing it, then redeems it back later
@@ -726,6 +910,7 @@ local function tryPark(steam, name)
 
     local state = capturePawnState(pawn)
     state.name = sanitizeName(name)
+    state.dinoId = currentDinoId[steam]
     if state.classPath == nil or state.growth == nil then
         return false, "Park failed: could not read dino state."
     end
@@ -733,9 +918,17 @@ local function tryPark(steam, name)
     if not saveParkedState(steam, state) then
         return false, "Park failed: could not save state."
     end
+    if state.dinoId ~= nil then
+        appendHistoryEvent(steam, state.dinoId, "parked", state.growth * 100)
+    end
 
     lastParkedPawnAddr[steam] = addr
     pcall(function() pawn:SetHealth(0) end)
+    -- This SetHealth(0) is intentional (parking, not dying) — mark the
+    -- health-watch below as already "not ok" so the poll loop's own
+    -- death-transition check doesn't fire a spurious duplicate "died"
+    -- event the next time it sees this same (soon-to-despawn) pawn.
+    dinoHistoryLastHealthOk[steam] = false
     local mutationCount = 0
     if state.mutations ~= nil then
         for _, field in ipairs(MUTATION_SLOT_FIELDS) do
@@ -850,6 +1043,21 @@ local function tryRedeem(steam, snapshotId, name)
         applyCustomizer(pawn, target.skin.colors)
     end
     deleteParkedSnapshot(steam, target.capturedAt)
+
+    -- Carry the parked snapshot's dinoId forward as the continuing
+    -- lineage rather than minting a fresh one — the pawn standing here is
+    -- a NEW spawn (address-wise) that already got its own throwaway
+    -- "spawn"-only history entry from the poll loop before this command
+    -- ran; that entry is discarded since it was never actually played.
+    if target.dinoId ~= nil and target.dinoId ~= "" then
+        local throwawayId = currentDinoId[steam]
+        if throwawayId ~= nil and throwawayId ~= target.dinoId then
+            dropBareSpawnEntry(steam, throwawayId)
+        end
+        currentDinoId[steam] = target.dinoId
+        appendHistoryEvent(steam, target.dinoId, "redeemed", (liveGrowth or 0) * 100)
+    end
+
     local label = (target.name and target.name ~= "") and (" (" .. target.name .. ")") or ""
     return true, "Dino restored from your parked snapshot" .. label .. "."
 end
@@ -1626,6 +1834,40 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                         writeGrowthStatus(steam, pawn)
                         tryMutationDumpOnce(pawn)
 
+                        -- Dino history: detect a genuinely new pawn instance
+                        -- (fresh spawn) via address change, and a live-to-0
+                        -- health transition (death) on the SAME pawn.
+                        local historyAddr
+                        pcall(function() historyAddr = pawn:GetAddress() end)
+                        if historyAddr ~= nil and historyAddr ~= 0 then
+                            local historyGrowth
+                            pcall(function() historyGrowth = pawn:GetGrowth() end)
+                            if historyGrowth ~= nil then lastKnownGrowth[steam] = historyGrowth end
+
+                            if dinoHistoryLastAddr[steam] ~= historyAddr then
+                                dinoHistoryLastAddr[steam] = historyAddr
+                                local historyClassPath
+                                pcall(function()
+                                    historyClassPath = stripClassPrefix(pawn:GetClass():GetFullName())
+                                end)
+                                local newDinoId = steam .. "_" .. tostring(os.time()) .. "_" .. tostring(historyAddr)
+                                currentDinoId[steam] = newDinoId
+                                startNewHistoryEntry(steam, newDinoId, historyClassPath, (historyGrowth or 0) * 100)
+                                dinoHistoryLastHealthOk[steam] = true
+                            end
+
+                            local historyHealth
+                            pcall(function() historyHealth = pawn:GetHealth() end)
+                            if historyHealth ~= nil then
+                                if historyHealth <= 0 and dinoHistoryLastHealthOk[steam] then
+                                    appendHistoryEvent(steam, currentDinoId[steam], "died", (historyGrowth or 0) * 100)
+                                    dinoHistoryLastHealthOk[steam] = false
+                                elseif historyHealth > 0 then
+                                    dinoHistoryLastHealthOk[steam] = true
+                                end
+                            end
+                        end
+
                         currencyCurrentlyOnline[steam] = true
                         local state = currencyTickState[steam]
                         if state == nil then
@@ -1665,6 +1907,19 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                 end
                 currencyTickState[steam] = nil
             end
+
+            -- Dino history: they left without an explicit park and without
+            -- a health-based death getting caught in between polls — end
+            -- the lineage as "disconnected" rather than silently going
+            -- stale, and clear tracking so their next spawn mints fresh.
+            local dinoId = currentDinoId[steam]
+            if dinoId ~= nil then
+                appendHistoryEvent(steam, dinoId, "disconnected", (lastKnownGrowth[steam] or 0) * 100)
+            end
+            currentDinoId[steam] = nil
+            dinoHistoryLastAddr[steam] = nil
+            dinoHistoryLastHealthOk[steam] = nil
+            lastKnownGrowth[steam] = nil
         end
     end
     currencyPreviouslyOnline = currencyCurrentlyOnline

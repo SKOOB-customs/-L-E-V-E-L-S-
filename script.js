@@ -145,6 +145,7 @@ const HUB_PAGES = [
   { tab: 'community', icon: 'CM', title: 'Community', desc: 'Staff roster and Discord.' },
   { tab: 'features', icon: 'FT', title: 'Features', desc: 'What the community can build here.' },
   { tab: 'submit', icon: 'SB', title: 'Submit', desc: 'Share a feature idea or vote on one.' },
+  { tab: 'tickets', icon: 'TK', title: 'Support', desc: 'Submit a ticket straight to staff in Discord.' },
 ];
 
 const loadHubOrder = () => {
@@ -580,6 +581,179 @@ const loadCurrencyBalance = async () => {
   }
 };
 
+// ── Dino History (Profile tab) + ticket dino-picker ──
+
+const DINO_HISTORY_EVENT_LABELS = {
+  spawn: 'Spawned',
+  parked: 'Parked',
+  redeemed: 'Redeemed',
+  died: 'Died',
+  disconnected: 'Disconnected',
+};
+
+const DINO_HISTORY_STATUS_LABELS = {
+  alive: 'Alive',
+  parked: 'Parked',
+  dead: 'Dead',
+  disconnected: 'Disconnected',
+};
+
+let dinoHistoryEntries = [];
+
+const buildDinoHistoryCard = (entry) => {
+  const card = document.createElement('div');
+  card.className = 'panel dino-history-card';
+
+  const header = document.createElement('div');
+  header.className = 'dino-history-card-header';
+  const title = document.createElement('strong');
+  title.textContent = entry.species || 'Unknown species';
+  const badge = document.createElement('span');
+  badge.className = `badge dino-history-status-${entry.status || 'alive'}`;
+  badge.textContent = DINO_HISTORY_STATUS_LABELS[entry.status] || entry.status || 'Alive';
+  header.append(title, badge);
+
+  const timeline = document.createElement('ul');
+  timeline.className = 'dino-history-timeline';
+  (entry.events || []).forEach((evt) => {
+    const item = document.createElement('li');
+    const when = evt.at ? new Date(evt.at * 1000).toLocaleString() : '';
+    item.textContent = `${DINO_HISTORY_EVENT_LABELS[evt.type] || evt.type} — ${(evt.growthPct || 0).toFixed(1)}% growth — ${when}`;
+    timeline.appendChild(item);
+  });
+
+  card.append(header, timeline);
+  return card;
+};
+
+const renderDinoHistoryList = (entries) => {
+  const list = document.querySelector('[data-dino-history-list]');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!entries.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No dino history yet — spawn in-game to start one.';
+    list.appendChild(empty);
+    return;
+  }
+  const sorted = [...entries].sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0));
+  sorted.forEach((entry) => list.appendChild(buildDinoHistoryCard(entry)));
+};
+
+const populateTicketDinoOptions = (entries) => {
+  const select = document.querySelector('[data-ticket-dino]');
+  if (!select) return;
+  const previousValue = select.value;
+  select.innerHTML = '<option value="">Not specified</option>';
+  [...entries]
+    .sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
+    .forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.dinoId;
+      const statusLabel = DINO_HISTORY_STATUS_LABELS[entry.status] || entry.status || '';
+      option.textContent = `${entry.species || 'Unknown'} — ${statusLabel}`;
+      select.appendChild(option);
+    });
+  if ([...select.options].some((opt) => opt.value === previousValue)) select.value = previousValue;
+};
+
+const loadDinoHistory = async () => {
+  const profile = getSteamProfile();
+  const section = document.querySelector('[data-dino-history-section]');
+  if (!profile?.steamId) {
+    if (section) section.hidden = true;
+    dinoHistoryEntries = [];
+    populateTicketDinoOptions(dinoHistoryEntries);
+    return;
+  }
+  if (section) section.hidden = false;
+  try {
+    const response = await fetch(`/api/dino-history?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.entries)) {
+      dinoHistoryEntries = data.entries;
+      renderDinoHistoryList(dinoHistoryEntries);
+      populateTicketDinoOptions(dinoHistoryEntries);
+    }
+  } catch (error) {
+    console.debug('Dino history load failed:', error);
+  }
+};
+
+// ── Support tickets ──
+
+const initTicketForm = () => {
+  const profile = getSteamProfile();
+  const signedIn = document.querySelector('[data-ticket-signed-in]');
+  const signedOut = document.querySelector('[data-ticket-signed-out]');
+  if (signedIn) signedIn.hidden = !profile;
+  if (signedOut) signedOut.hidden = !!profile;
+  if (!profile) return;
+
+  const steamIdInput = document.querySelector('[data-ticket-steamid]');
+  if (steamIdInput) steamIdInput.value = profile.steamId;
+
+  const timeInput = document.querySelector('[data-ticket-time]');
+  if (timeInput && !timeInput.value) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    timeInput.value = now.toISOString().slice(0, 16);
+  }
+};
+
+document.querySelector('[data-ticket-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const reason = document.querySelector('[data-ticket-reason]')?.value.trim();
+  if (!reason) {
+    showToast('Enter a reason.');
+    return;
+  }
+  const incidentTime = document.querySelector('[data-ticket-time]')?.value;
+  if (!incidentTime) {
+    showToast('Enter when it happened.');
+    return;
+  }
+  const dinoSelect = document.querySelector('[data-ticket-dino]');
+  const dinoLabel = dinoSelect?.value ? dinoSelect.options[dinoSelect.selectedIndex].textContent : null;
+
+  const body = {
+    steamId: profile.steamId,
+    username: profile.username,
+    reason,
+    incidentTime,
+    dinoLabel,
+  };
+
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/submit-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not submit that ticket.');
+    } else {
+      showToast('Ticket submitted — staff will follow up in Discord.');
+      event.target.reset();
+      initTicketForm();
+    }
+  } catch (error) {
+    console.debug('Ticket submission failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
 const displaySteamStatus = async () => {
   const profile = getSteamProfile();
   const discordProfile = getDiscordProfile();
@@ -604,6 +778,8 @@ const displaySteamStatus = async () => {
     }
   }
   if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
+  loadDinoHistory();
+  initTicketForm();
 
   if (!statusDiv || !statusMessage) return;
 

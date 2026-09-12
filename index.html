@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=4c1ac3e" />
+    <link rel="stylesheet" href="styles.css?v=4919de4" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -87,6 +87,7 @@
         <button class="tab-button" data-tab="friends" type="button">Friends</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
         <button class="tab-button" data-tab="submit" type="button">Submit</button>
+        <button class="tab-button" data-tab="tickets" type="button">Support</button>
       </div>
 
       <main class="page-content">
@@ -363,6 +364,14 @@
             <div class="submit-actions" style="margin-top: 1rem;">
               <a class="action-button" id="connectSteamBtn" href="/api/steam-login">Login with Steam</a>
               <a class="secondary-button" id="connectDiscordBtn" href="/api/discord-login">Login with Discord</a>
+            </div>
+          </section>
+
+          <section class="panel content-box dino-history-section" data-dino-history-section hidden>
+            <div class="mini-heading">Dino History</div>
+            <p class="dino-park-note">Every dino you've spawned as, including growth% at each spawn, park, redeem, and death.</p>
+            <div class="dino-history-list" data-dino-history-list>
+              <p class="empty-state">No dino history yet — spawn in-game to start one.</p>
             </div>
           </section>
 
@@ -1087,6 +1096,51 @@
             </form>
           </section>
         </section>
+
+        <section class="tab-panel" id="tickets" data-tab="tickets" aria-label="Support">
+          <div class="section-header">
+            <p class="eyebrow">SUPPORT</p>
+            <h2>Submit a ticket</h2>
+          </div>
+
+          <section class="panel content-box" data-ticket-signed-out>
+            <p class="dino-park-note">Log in with Steam from the Profile tab to submit a ticket.</p>
+          </section>
+
+          <section class="panel content-box" data-ticket-signed-in hidden>
+            <div class="mini-heading">New ticket</div>
+            <p class="dino-park-note">Goes straight to staff in Discord — no need to type it all out yourself.</p>
+            <form class="submit-form" data-ticket-form>
+              <div class="field-row two-up">
+                <label>
+                  Steam ID
+                  <input type="text" data-ticket-steamid disabled />
+                </label>
+                <label>
+                  When it happened
+                  <input type="datetime-local" data-ticket-time required />
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Related dino (optional)
+                  <select data-ticket-dino>
+                    <option value="">Not specified</option>
+                  </select>
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Reason
+                  <textarea rows="5" maxlength="1500" placeholder="What happened?" data-ticket-reason required></textarea>
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Submit ticket</button>
+              </div>
+            </form>
+          </section>
+        </section>
       </main>
 
       <footer class="site-footer panel">
@@ -1098,6 +1152,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=4c1ac3e"></script>
+    <script src="script.js?v=4919de4"></script>
   </body>
 </html>

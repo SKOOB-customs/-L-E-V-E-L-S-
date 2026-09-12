@@ -280,6 +280,64 @@ const syncCurrency = async (env) => {
   return balances;
 };
 
+// ── Dino history sync ──
+//
+// Source of truth is one dino_history_<steamid>.json per player on the
+// game server (main.lua's saveDinoHistory), written on every spawn/park/
+// redeem/death/disconnect event. Same aggregate-on-cron-then-conditional-
+// KV-write pattern as syncCurrency above, for the same free-tier-quota
+// reason — these events are far too frequent per player to write KV
+// directly from the mod.
+const listDinoHistoryFiles = async (env) => {
+  const response = await pterodactylFetch(
+    env,
+    `/files/list?directory=${encodeURIComponent(PARKED_SAVED_DIR)}`,
+  );
+  const body = await response.json();
+  return (body.data || [])
+    .map((entry) => entry.attributes)
+    .filter((attrs) => attrs?.is_file && /^dino_history_\d+\.json$/.test(attrs.name));
+};
+
+const readDinoHistoryFile = async (env, filename) => {
+  const path = `${PARKED_SAVED_DIR}/${filename}`;
+  const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+  return response.text();
+};
+
+const DINO_HISTORY_FILENAME_RE = /^dino_history_(\d+)\.json$/;
+
+const syncDinoHistory = async (env) => {
+  const files = await listDinoHistoryFiles(env);
+  const histories = {};
+  for (const file of files) {
+    const match = file.name.match(DINO_HISTORY_FILENAME_RE);
+    if (!match) continue;
+    const raw = await readDinoHistoryFile(env, file.name);
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue; // skip a partially-written file rather than failing the whole sync
+    }
+    if (!Array.isArray(data?.entries)) continue;
+    histories[match[1]] = data.entries;
+  }
+  const existingRaw = await env.PARKED_KV.get('dino_history:index');
+  let existingHistories = null;
+  if (existingRaw) {
+    try {
+      existingHistories = JSON.parse(existingRaw).histories || {};
+    } catch {
+      existingHistories = null;
+    }
+  }
+  if (JSON.stringify(existingHistories) !== JSON.stringify(histories)) {
+    await env.PARKED_KV.put('dino_history:index', JSON.stringify({ updatedAt: Date.now(), histories }));
+  }
+  return histories;
+};
+
 // ── Admin-tier audit log sync ──
 //
 // main.lua's admin-action hooks (Ban/Kick/SetWeather/SetNewAvailableClasses
@@ -2135,6 +2193,9 @@ export default {
     );
     ctx.waitUntil(
       syncCurrency(env).catch((error) => console.error('syncCurrency failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncDinoHistory(env).catch((error) => console.error('syncDinoHistory failed:', error.message)),
     );
   },
 };
