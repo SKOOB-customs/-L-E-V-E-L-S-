@@ -222,31 +222,65 @@ const buildHubCard = (page) => {
 
   // Pointer events (not native HTML5 drag-and-drop) so this works on touch
   // as well as mouse — a real requirement for a game community site.
-  // elementFromPoint + a plain DOM insertBefore/after swap is enough for a
-  // grid layout; no need for a library for something this small.
+  //
+  // The dragged card is pulled out of grid flow and becomes an absolutely-
+  // positioned overlay that tracks the cursor 1:1 (smooth, real drag-follow
+  // feedback), while a same-sized placeholder holds its spot in the grid
+  // and hops to wherever the cursor is hovering, so the rest of the grid
+  // reflows around it live. An earlier version moved the actual card
+  // element on every hover instead of a placeholder, with no cursor-follow
+  // visual at all — just an instant, jarring swap the moment the pointer
+  // crossed into a neighboring card's box. This is the standard technique
+  // most drag-reorder libraries use internally; no library needed for
+  // something this small.
   handle.addEventListener('pointerdown', (event) => {
     event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
+    const pointerId = event.pointerId;
+    handle.setPointerCapture(pointerId);
+
+    const grid = card.parentElement;
+    const rect = card.getBoundingClientRect();
+    const gridRect = grid.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'hub-card-placeholder';
+    placeholder.style.width = `${rect.width}px`;
+    placeholder.style.height = `${rect.height}px`;
+    card.after(placeholder);
+
     card.classList.add('is-dragging');
+    card.style.width = `${rect.width}px`;
+    card.style.left = `${rect.left - gridRect.left}px`;
+    card.style.top = `${rect.top - gridRect.top}px`;
 
     const onMove = (moveEvent) => {
+      card.style.left = `${moveEvent.clientX - gridRect.left - offsetX}px`;
+      card.style.top = `${moveEvent.clientY - gridRect.top - offsetY}px`;
+
       const target = document
         .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
-        ?.closest('.hub-card');
-      if (!target || target === card || target.parentElement !== card.parentElement) return;
-      const siblings = [...card.parentElement.children];
-      if (siblings.indexOf(card) < siblings.indexOf(target)) {
-        target.after(card);
+        ?.closest('.hub-card-placeholder, .hub-card:not(.is-dragging)');
+      if (!target || target === placeholder || target.parentElement !== grid) return;
+      const siblings = [...grid.children];
+      if (siblings.indexOf(placeholder) < siblings.indexOf(target)) {
+        target.after(placeholder);
       } else {
-        target.before(card);
+        target.before(placeholder);
       }
     };
 
     const onUp = () => {
-      card.classList.remove('is-dragging');
-      try { handle.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+      try { handle.releasePointerCapture(pointerId); } catch { /* already released */ }
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
+
+      placeholder.replaceWith(card);
+      card.classList.remove('is-dragging');
+      card.style.width = '';
+      card.style.left = '';
+      card.style.top = '';
       saveHubOrder();
     };
 
