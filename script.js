@@ -108,8 +108,181 @@ if (tabButtons.length) {
 
   const hashTab = window.location.hash.replace('#', '').split('?')[0];
   const hasHashTab = [...tabButtons].some((button) => button.dataset.tab === hashTab);
-  activateTab(hasHashTab ? hashTab : 'gallery');
+  // "hub" (not "gallery") is the landing view on every plain load/refresh —
+  // the hash special-case (set by the Steam-login redirect flow below, e.g.
+  // #profile) still takes priority when present.
+  activateTab(hasHashTab ? hashTab : 'hub');
 }
+
+// ── Home hub: a customizable, drag-reorderable grid of every real page on
+// the site, shown first on every load. Order is a pure per-browser
+// preference (not gameplay data), so it's just localStorage — no need to
+// round-trip it through any backend.
+const HUB_ORDER_STORAGE_KEY = 'levelsHubOrder';
+
+const HUB_PAGES = [
+  { tab: 'overview', icon: 'OV', title: 'Overview', desc: 'Server status, stats, and how to find us in-game.' },
+  { tab: 'gallery', icon: 'SS', title: 'Slideshow', desc: 'Screenshots and community highlights.' },
+  { tab: 'live-dino', icon: 'LD', title: 'Live Dino', desc: 'Track your current dino, pause growth, park it.' },
+  { tab: 'inventory', icon: 'IN', title: 'Inventory', desc: 'Parked dinos, mutations, and glitch skins.' },
+  { tab: 'friends', icon: 'FR', title: 'Friends', desc: 'Add friends and request a teleport meet-up.' },
+  { tab: 'skins', icon: 'SK', title: 'Skins', desc: 'Glitch skin packs and how to submit your own.' },
+  { tab: 'map', icon: 'MP', title: 'Map', desc: 'Live server map with your dino tracked on it.' },
+  { tab: 'community', icon: 'CM', title: 'Community', desc: 'Staff roster and Discord.' },
+  { tab: 'features', icon: 'FT', title: 'Features', desc: 'What the community can build here.' },
+  { tab: 'submit', icon: 'SB', title: 'Submit', desc: 'Share a feature idea or vote on one.' },
+];
+
+const loadHubOrder = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HUB_ORDER_STORAGE_KEY) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveHubOrder = () => {
+  const order = [...document.querySelectorAll('[data-hub-card]')].map((card) => card.dataset.hubCard);
+  try {
+    localStorage.setItem(HUB_ORDER_STORAGE_KEY, JSON.stringify(order));
+  } catch (error) {
+    console.debug('Saving hub order failed:', error);
+  }
+};
+
+const buildHubCard = (page) => {
+  const card = document.createElement('article');
+  card.className = 'hub-card panel';
+  card.dataset.hubCard = page.tab;
+
+  const top = document.createElement('div');
+  top.className = 'hub-card-top';
+
+  const icon = document.createElement('span');
+  icon.className = 'hub-card-icon';
+  icon.textContent = page.icon;
+
+  const controls = document.createElement('div');
+  controls.className = 'hub-card-controls';
+
+  const moveLeft = document.createElement('button');
+  moveLeft.type = 'button';
+  moveLeft.className = 'hub-card-move';
+  moveLeft.textContent = '‹';
+  moveLeft.setAttribute('aria-label', `Move ${page.title} earlier`);
+  moveLeft.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const prev = card.previousElementSibling;
+    if (prev) {
+      card.parentElement.insertBefore(card, prev);
+      saveHubOrder();
+    }
+  });
+
+  const moveRight = document.createElement('button');
+  moveRight.type = 'button';
+  moveRight.className = 'hub-card-move';
+  moveRight.textContent = '›';
+  moveRight.setAttribute('aria-label', `Move ${page.title} later`);
+  moveRight.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const next = card.nextElementSibling;
+    if (next) {
+      card.parentElement.insertBefore(next, card);
+      saveHubOrder();
+    }
+  });
+
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'hub-card-handle';
+  handle.textContent = '⠿';
+  handle.setAttribute('aria-label', `Drag to reorder ${page.title}`);
+  handle.addEventListener('click', (event) => event.stopPropagation());
+
+  controls.append(moveLeft, handle, moveRight);
+  top.append(icon, controls);
+
+  const title = document.createElement('h3');
+  title.textContent = page.title;
+
+  const desc = document.createElement('p');
+  desc.textContent = page.desc;
+
+  card.append(top, title, desc);
+  // Clicks the REAL tab button rather than calling activateTab(page.tab)
+  // directly — several tabs (Inventory, Friends, Community) load their
+  // data from a listener bound to the button's own click event, not from
+  // activateTab itself, so bypassing the button would land on an empty/
+  // stale tab.
+  card.addEventListener('click', () => {
+    document.querySelector(`.tab-button[data-tab="${page.tab}"]`)?.click();
+  });
+
+  // Pointer events (not native HTML5 drag-and-drop) so this works on touch
+  // as well as mouse — a real requirement for a game community site.
+  // elementFromPoint + a plain DOM insertBefore/after swap is enough for a
+  // grid layout; no need for a library for something this small.
+  handle.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    card.classList.add('is-dragging');
+
+    const onMove = (moveEvent) => {
+      const target = document
+        .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        ?.closest('.hub-card');
+      if (!target || target === card || target.parentElement !== card.parentElement) return;
+      const siblings = [...card.parentElement.children];
+      if (siblings.indexOf(card) < siblings.indexOf(target)) {
+        target.after(card);
+      } else {
+        target.before(card);
+      }
+    };
+
+    const onUp = () => {
+      card.classList.remove('is-dragging');
+      try { handle.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      saveHubOrder();
+    };
+
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+  });
+
+  return card;
+};
+
+const renderHub = () => {
+  const grid = document.querySelector('[data-hub-grid]');
+  if (!grid) return;
+
+  // Admin Panel only ever shows up here once checkAdminPanelAccess has
+  // actually revealed the real tab button for this signed-in admin — a
+  // hub card linking to a hidden tab would be a dead click.
+  const adminButtonVisible = !document.querySelector('.admin-panel-tab-button')?.hidden;
+  const availablePages = HUB_PAGES.concat(
+    adminButtonVisible
+      ? [{ tab: 'admin-panel', icon: 'AD', title: 'Admin Panel', desc: 'Compensation, strikes, and glitch skins.' }]
+      : [],
+  );
+
+  const savedOrder = loadHubOrder();
+  const byTab = new Map(availablePages.map((page) => [page.tab, page]));
+  const ordered = [
+    ...savedOrder.map((tab) => byTab.get(tab)).filter(Boolean),
+    ...availablePages.filter((page) => !savedOrder.includes(page.tab)),
+  ];
+
+  grid.innerHTML = '';
+  ordered.forEach((page) => grid.appendChild(buildHubCard(page)));
+};
+
+renderHub();
 
 document.getElementById('headerSteamBtn')?.addEventListener('click', (event) => {
   if (!getSteamProfile()) return; // not logged in yet, let the link go to /api/steam-login
@@ -2178,7 +2351,13 @@ const checkAdminPanelAccess = async () => {
     const hasAccess = Boolean(data.tier);
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
-    if (hasAccess) loadPlayerDirectory();
+    // renderHub() ran at page load before this async check resolved, so the
+    // Admin Panel card wasn't in the grid yet for an actual admin — add it
+    // in now that we know for sure.
+    if (hasAccess) {
+      loadPlayerDirectory();
+      renderHub();
+    }
   } catch (error) {
     console.debug('Admin panel access check failed:', error);
   }

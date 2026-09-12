@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=c15e8a2" />
+    <link rel="stylesheet" href="styles.css?v=e83a1f9" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -69,7 +69,8 @@
       </header>
 
       <div class="tab-switcher panel" aria-label="Hub categories">
-        <button class="tab-button active" data-tab="gallery" type="button">Slideshow</button>
+        <button class="tab-button hub-tab-button active" data-tab="hub" type="button">Home</button>
+        <button class="tab-button" data-tab="gallery" type="button">Slideshow</button>
         <button class="tab-button" data-tab="overview" type="button">Overview</button>
         <button class="tab-button" data-tab="features" type="button">Features</button>
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
@@ -85,7 +86,16 @@
       </div>
 
       <main class="page-content">
-        <section class="tab-panel is-active" id="overview" data-tab="overview">
+        <section class="tab-panel is-active" id="hub" data-tab="hub" aria-label="Home">
+          <div class="section-header">
+            <p class="eyebrow">WELCOME</p>
+            <h2>Where do you want to go?</h2>
+          </div>
+          <p class="hub-intro">Drag a card to reorder it, or use the arrows — your layout is remembered here on this browser.</p>
+          <div class="hub-grid" data-hub-grid></div>
+        </section>
+
+        <section class="tab-panel" id="overview" data-tab="overview">
           <section class="hero hero-solo panel" id="home">
             <div class="hero-showcase">
               <div class="showcase-card panel-inner">
@@ -1063,6 +1073,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=c15e8a2"></script>
+    <script src="script.js?v=e83a1f9"></script>
   </body>
 </html>
