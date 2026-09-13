@@ -1032,6 +1032,32 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') sendHeartbeat();
 });
 
+// A player's displayed username was only ever set once, at login time,
+// and cached in localStorage from then on — a real reported case: someone
+// renamed on Steam and the site kept showing their old name for days,
+// since nothing ever re-checked it outside of a fresh OAuth login. This
+// re-resolves it straight from Steam periodically and updates the cached
+// profile (+ re-renders) whenever it actually changed. No KV quota
+// concern here at all — this never touches list(), and the one KV write
+// functions/api/steam-username.js does only fires on an actual rename,
+// not on every poll.
+const refreshSteamUsername = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch(`/api/steam-username?steamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (response.ok && data.username && data.username !== profile.username) {
+      setSteamProfile(profile.steamId, data.username, profile.staffRole || '');
+      displaySteamStatus();
+    }
+  } catch (error) {
+    console.debug('Steam username refresh failed:', error);
+  }
+};
+refreshSteamUsername();
+setInterval(refreshSteamUsername, 3 * 60 * 1000);
+
 // Global chat sidebar — a real shared chat (every signed-in player, not
 // just friends), backed by functions/api/chat-messages.js/chat-send.js
 // (direct KV, capped at 200 messages — no Pterodactyl/game-server
