@@ -1100,8 +1100,10 @@ const openChat = () => {
   loadChatMessages();
   // KV reads are far cheaper than writes on Cloudflare's free tier (100k/day
   // vs 1k/day) — polling this fast costs nothing meaningful and makes chat
-  // feel close to real-time without building actual push infrastructure.
-  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 1200);
+  // feel close to real-time without building actual push infrastructure
+  // (a genuinely instant chat would need WebSockets/Durable Objects, a much
+  // bigger change this site's architecture doesn't have yet).
+  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 500);
 };
 
 const closeChat = () => {
@@ -3108,6 +3110,25 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
 let skinLibraryCache = [];
 
 const SKIN_LIBRARY_COLOR_FIELDS = ['BodyColor', 'MarkingsColor', 'FlankColor', 'UnderbellyColor', 'Detail1Color', 'EyesColor', 'MaleDisplayColor'];
+// Pattern/variation get their own dedicated number inputs on both forms
+// (not just the Advanced JSON textarea) — so they don't count as "extra"
+// fields that force a saved skin's load-for-editing to fall back to raw
+// JSON; only genuinely picker-less fields (Teeth/Mouth/Claws) do that.
+const SKIN_LIBRARY_NUMERIC_FIELDS = ['PatternIndex', 'SkinVariation'];
+
+// Non-null when a saved skin is currently loaded into the Skin Library
+// form for editing (via the "Edit an existing skin" dropdown) — toggles
+// which of the two save buttons is visible and whether saving clears the
+// form afterward. Null means "starting a brand new skin."
+let editingSkinName = null;
+
+const setSkinLibraryEditingState = (name) => {
+  editingSkinName = name || null;
+  const saveBtn = document.querySelector('[data-skin-library-form] button[type="submit"]');
+  const saveChangesBtn = document.querySelector('[data-skin-library-save-changes]');
+  if (saveBtn) saveBtn.hidden = !!editingSkinName;
+  if (saveChangesBtn) saveChangesBtn.hidden = !editingSkinName;
+};
 
 const populateSkinLibrarySelect = (skins) => {
   const select = document.querySelector('[data-skin-library-select]');
@@ -3119,6 +3140,20 @@ const populateSkinLibrarySelect = (skins) => {
     option.textContent = skin.name;
     select.appendChild(option);
   });
+};
+
+const populateSkinLibraryEditSelect = (skins) => {
+  const select = document.querySelector('[data-skin-library-edit-select]');
+  if (!select) return;
+  const previousValue = select.value;
+  select.innerHTML = '<option value="">Start a new skin…</option>';
+  skins.forEach((skin) => {
+    const option = document.createElement('option');
+    option.value = skin.name;
+    option.textContent = skin.name;
+    select.appendChild(option);
+  });
+  if ([...select.options].some((opt) => opt.value === previousValue)) select.value = previousValue;
 };
 
 const renderSkinLibraryList = (skins) => {
@@ -3197,6 +3232,7 @@ const loadSkinLibrary = async () => {
     if (response.ok && Array.isArray(data.skins)) {
       skinLibraryCache = data.skins;
       populateSkinLibrarySelect(skinLibraryCache);
+      populateSkinLibraryEditSelect(skinLibraryCache);
       renderSkinLibraryList(skinLibraryCache);
     }
   } catch (error) {
@@ -3214,10 +3250,15 @@ document.querySelector('[data-skin-library-select]')?.addEventListener('change',
   const nameInput = document.querySelector('[data-skin-name]');
   if (nameInput) nameInput.value = skin.name;
 
-  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !SKIN_LIBRARY_COLOR_FIELDS.includes(field));
+  const knownFields = [...SKIN_LIBRARY_COLOR_FIELDS, ...SKIN_LIBRARY_NUMERIC_FIELDS];
+  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !knownFields.includes(field));
   const jsonField = document.querySelector('[data-skin-json]');
+  const patternInput = document.querySelector('[data-skin-pattern-index]');
+  const variationInput = document.querySelector('[data-skin-skin-variation]');
   if (hasExtraFields && jsonField) {
     jsonField.value = JSON.stringify(skin.colors, null, 2);
+    if (patternInput) patternInput.value = '';
+    if (variationInput) variationInput.value = '';
   } else {
     if (jsonField) jsonField.value = '';
     document.querySelectorAll('[data-skin-color]').forEach((input) => {
@@ -3227,7 +3268,59 @@ document.querySelector('[data-skin-library-select]')?.addEventListener('change',
       const toHex = (n) => Math.round((n ?? 0) * 255).toString(16).padStart(2, '0');
       input.value = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
     });
+    if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
+    if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
   }
+});
+
+// The Skin Library form's OWN "load for editing" dropdown — separate from
+// the grant form's dropdown above, since this one loads into the Skin
+// Library's own fields and flips into "editing" mode (see
+// setSkinLibraryEditingState), swapping which save button shows.
+document.querySelector('[data-skin-library-edit-select]')?.addEventListener('change', (event) => {
+  const skinName = event.target.value;
+  const nameInput = document.querySelector('[data-skin-library-name]');
+  const jsonField = document.querySelector('[data-skin-library-json]');
+  const patternInput = document.querySelector('[data-skin-library-pattern-index]');
+  const variationInput = document.querySelector('[data-skin-library-skin-variation]');
+
+  if (!skinName) {
+    if (nameInput) nameInput.value = '';
+    if (jsonField) jsonField.value = '';
+    if (patternInput) patternInput.value = '';
+    if (variationInput) variationInput.value = '';
+    document.querySelectorAll('[data-skin-library-color]').forEach((input) => { input.value = '#808080'; });
+    setSkinLibraryEditingState(null);
+    return;
+  }
+
+  const skin = skinLibraryCache.find((s) => s.name === skinName);
+  if (!skin) return;
+  if (nameInput) nameInput.value = skin.name;
+
+  const knownFields = [...SKIN_LIBRARY_COLOR_FIELDS, ...SKIN_LIBRARY_NUMERIC_FIELDS];
+  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !knownFields.includes(field));
+  if (hasExtraFields && jsonField) {
+    jsonField.value = JSON.stringify(skin.colors, null, 2);
+    if (patternInput) patternInput.value = '';
+    if (variationInput) variationInput.value = '';
+  } else {
+    if (jsonField) jsonField.value = '';
+    document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
+      const field = input.dataset.skinLibraryColor;
+      const color = skin.colors?.[field];
+      if (!color) {
+        input.value = '#808080';
+        return;
+      }
+      const toHex = (n) => Math.round((n ?? 0) * 255).toString(16).padStart(2, '0');
+      input.value = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+    });
+    if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
+    if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
+  }
+
+  setSkinLibraryEditingState(skin.name);
 });
 
 // Shared by the Save-to-library submit and the Test-on-my-live-dino
@@ -3277,8 +3370,12 @@ document.querySelector('[data-skin-library-test]')?.addEventListener('click', (e
   });
 });
 
-document.querySelector('[data-skin-library-form]')?.addEventListener('submit', async (event) => {
-  event.preventDefault();
+// Shared by the "Save to library" submit and the "Save changes" button —
+// both hit the same upsert-by-name endpoint, the only difference is
+// whether an existing skin was loaded for editing (see the edit-select
+// dropdown's change handler below), which controls whether the form
+// clears afterward (starting fresh) or stays as-is (still editing).
+const saveSkinToLibrary = async (buttonEl) => {
   const profile = getSteamProfile();
   if (!profile?.steamId) {
     showToast('Sign in with Steam first.');
@@ -3293,8 +3390,7 @@ document.querySelector('[data-skin-library-form]')?.addEventListener('submit', a
   const colors = collectSkinLibraryColors();
   if (colors === null) return;
 
-  const submitBtn = event.target.querySelector('button[type="submit"]');
-  if (submitBtn) submitBtn.disabled = true;
+  if (buttonEl) buttonEl.disabled = true;
   try {
     const response = await fetch('/api/skin-library-save', {
       method: 'POST',
@@ -3305,17 +3401,28 @@ document.querySelector('[data-skin-library-form]')?.addEventListener('submit', a
     if (!response.ok || !data.ok) {
       showToast(data.error || 'Could not save that skin.');
     } else {
-      showToast(`Saved "${name}" to the library.`);
-      document.querySelector('[data-skin-library-name]').value = '';
-      document.querySelector('[data-skin-library-json]').value = '';
+      showToast(editingSkinName ? `Saved changes to "${name}".` : `Saved "${name}" to the library.`);
+      if (!editingSkinName) {
+        document.querySelector('[data-skin-library-name]').value = '';
+        document.querySelector('[data-skin-library-json]').value = '';
+      }
       loadSkinLibrary();
     }
   } catch (error) {
     console.debug('Skin library save failed:', error);
     showToast('Could not reach the server right now.');
   } finally {
-    if (submitBtn) submitBtn.disabled = false;
+    if (buttonEl) buttonEl.disabled = false;
   }
+};
+
+document.querySelector('[data-skin-library-form]')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveSkinToLibrary(event.target.querySelector('button[type="submit"]'));
+});
+
+document.querySelector('[data-skin-library-save-changes]')?.addEventListener('click', (event) => {
+  saveSkinToLibrary(event.target);
 });
 
 const renderStrikeList = (strikes) => {
