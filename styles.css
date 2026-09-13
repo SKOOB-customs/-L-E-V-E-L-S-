@@ -1239,6 +1239,39 @@ strong.stat-critical {
   color: var(--chrome-1);
 }
 
+.friends-offline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.friends-offline-toggle:hover {
+  color: var(--chrome-1);
+  border-color: var(--line-strong);
+}
+
+.friends-offline-chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.friends-offline-toggle.is-expanded .friends-offline-chevron {
+  transform: rotate(180deg);
+}
+
+.friends-offline-grid {
+  opacity: 0.75;
+}
+
 .friend-card-actions,
 .request-card-actions {
   display: flex;

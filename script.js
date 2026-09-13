@@ -3767,11 +3767,15 @@ const updateFriendCardStatus = (card, friend) => {
 // file read per friend (functions/api/growth-status.js), same as the Live
 // Dino tab already does for the signed-in player's own status — friend
 // lists are small in practice, so N parallel reads here is fine without
-// building new batching infrastructure. Fire-and-forget: friend cards
-// already rendered with a placeholder, this fills them in once ready.
+// building new batching infrastructure.
 const ONLINE_GAME_WINDOW_MS = 15000; // 3s poll tick + a generous buffer for the read round trip
 
-const attachFriendStatus = async (friends) => {
+// Pure data fetch — mutates each friend object's websiteOnline/inGame/
+// playingAs in place but touches no DOM, since loadFriendsTabData now
+// waits on this BEFORE building any cards (needed to sort into the
+// Online/Offline sections up front, rather than building one flat list
+// and re-sorting it after the fact).
+const fetchFriendStatusData = async (friends) => {
   if (!friends.length) return;
   const steamIds = friends.map((f) => f.steamId);
   try {
@@ -3788,13 +3792,52 @@ const attachFriendStatus = async (friends) => {
       const fresh = !!(growth?.updatedAt && (Date.now() - growth.updatedAt) < ONLINE_GAME_WINDOW_MS);
       friend.inGame = fresh;
       friend.playingAs = fresh && growth.hasLivePawn ? growth.species : null;
-      const card = document.querySelector(`[data-friend-card="${friend.steamId}"]`);
-      if (card) updateFriendCardStatus(card, friend);
     });
   } catch (error) {
     console.debug('Friend status load failed:', error);
   }
 };
+
+// Online (website or in-game, either counts) renders in the always-visible
+// grid; everyone else goes in the collapsed-by-default Offline section,
+// expandable via its own dropdown-chevron toggle — keeps a long friends
+// list from being dominated by people who aren't around right now.
+const renderFriendsGrouped = (friends) => {
+  const onlineGrid = document.querySelector('[data-friends-online-grid]');
+  const offlineGrid = document.querySelector('[data-friends-offline-grid]');
+  const offlineToggle = document.querySelector('[data-friends-offline-toggle]');
+  const offlineCount = document.querySelector('[data-friends-offline-count]');
+  if (!onlineGrid || !offlineGrid) return;
+
+  onlineGrid.innerHTML = '';
+  offlineGrid.innerHTML = '';
+
+  const offline = [];
+  friends.forEach((friend) => {
+    const card = buildFriendCard(friend);
+    updateFriendCardStatus(card, friend);
+    if (friend.websiteOnline || friend.inGame) {
+      onlineGrid.appendChild(card);
+    } else {
+      offlineGrid.appendChild(card);
+      offline.push(friend);
+    }
+  });
+
+  if (offlineToggle) offlineToggle.hidden = offline.length === 0;
+  if (offlineCount) offlineCount.textContent = offline.length;
+  if (offline.length === 0) {
+    offlineGrid.hidden = true;
+    offlineToggle?.classList.remove('is-expanded');
+  }
+};
+
+document.querySelector('[data-friends-offline-toggle]')?.addEventListener('click', (event) => {
+  const offlineGrid = document.querySelector('[data-friends-offline-grid]');
+  if (!offlineGrid) return;
+  offlineGrid.hidden = !offlineGrid.hidden;
+  event.currentTarget.classList.toggle('is-expanded', !offlineGrid.hidden);
+});
 
 const buildTeleportRequestCard = (req) => {
   const card = document.createElement('article');
@@ -3896,15 +3939,15 @@ const loadFriendsTabData = async () => {
       teleportReqRes.json(),
     ]);
 
-    const friendsGrid = document.querySelector('[data-friends-grid]');
     const friendsEmpty = document.querySelector('[data-friends-empty]');
     const friends = friendsData.friends || [];
     if (friendsEmpty) friendsEmpty.hidden = friends.length !== 0;
-    if (friendsGrid) {
-      friendsGrid.innerHTML = '';
-      friends.forEach((friend) => friendsGrid.appendChild(buildFriendCard(friend)));
-      attachFriendStatus(friends);
-    }
+    // Status is fetched before rendering (not after, as a fill-in-later
+    // pass) so friends can be sorted into Online/Offline sections up
+    // front, rather than building one flat list and re-sorting it once
+    // status arrives a moment later.
+    await fetchFriendStatusData(friends);
+    renderFriendsGrouped(friends);
 
     const friendReqGrid = document.querySelector('[data-friend-requests-grid]');
     const friendReqEmpty = document.querySelector('[data-friend-requests-empty]');

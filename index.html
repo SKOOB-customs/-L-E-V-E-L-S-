@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=a80b629" />
+    <link rel="stylesheet" href="styles.css?v=ecd200e" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -1044,7 +1044,13 @@
             <h2>Friends list</h2>
           </div>
           <p class="dino-park-note" data-friends-empty hidden>No friends added yet — add one above.</p>
-          <div class="parked-grid" data-friends-grid></div>
+          <div class="parked-grid" data-friends-online-grid></div>
+
+          <button type="button" class="friends-offline-toggle" data-friends-offline-toggle hidden>
+            <span class="friends-offline-chevron">▾</span>
+            <span data-friends-offline-count>0</span> offline
+          </button>
+          <div class="parked-grid friends-offline-grid" data-friends-offline-grid hidden></div>
         </section>
 
         <section class="tab-panel" id="live-dino" data-tab="live-dino">
@@ -1265,6 +1271,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=a80b629"></script>
+    <script src="script.js?v=ecd200e"></script>
   </body>
 </html>
