@@ -576,6 +576,50 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
+// ── Per-player record indexes (friends/friend_requests/teleport_requests/
+// strikes) — replaces env.PARKED_KV.list({prefix:...}) on every single GET
+// request with one cheap get() per player. Confirmed live: a client
+// polling just ONE list()-backed route (player-directory) once a minute
+// alone exhausted Cloudflare's KV *list*-operation quota, a separate and
+// far stricter 1,000/day limit than the 100k/day read quota — that quota
+// is shared account-wide, so exhausting it from one route breaks every
+// other route that also calls list(), which is exactly what happened to
+// /friends, /friend-requests, /teleport-requests, and /strikes-list too.
+//
+// Real existing data (actual friendships, pending requests, strike
+// records) already lives under the old prefix-scanned keys, so simply
+// switching reads to a new index key would make it all vanish until new
+// writes repopulate it. Instead: read the index; if it has NEVER been
+// created for this player (env.PARKED_KV.get returns null, not just an
+// empty array), list() exactly once to backfill it from the old keys,
+// then cache it — every read after that first one is a plain get(), no
+// list() involved ever again for that player. Every write path below
+// also goes through this same read-or-migrate step before appending/
+// removing an entry, so a write landing before a player's first read
+// still preserves their pre-existing (not-yet-migrated) records instead
+// of overwriting the index with just the one new entry.
+const readOrMigrateIndex = async (env, indexKey, listPrefix, parseEntry) => {
+  const raw = await env.PARKED_KV.get(indexKey);
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const list = await env.PARKED_KV.list({ prefix: listPrefix });
+    const migrated = (await Promise.all(list.keys.map(parseEntry))).filter(Boolean);
+    await env.PARKED_KV.put(indexKey, JSON.stringify(migrated));
+    return migrated;
+  } catch {
+    return []; // quota still exhausted (or another failure) — retried on the next read
+  }
+};
+
+const writeIndex = (env, indexKey, array) => env.PARKED_KV.put(indexKey, JSON.stringify(array));
+
 // ── Player directory (admin panel name-search autocomplete) ──
 //
 // The Steam Web API's GetPlayerSummaries can resolve a known steamId to a
@@ -1975,7 +2019,21 @@ export default {
         issuedAt,
       };
       try {
+        // Migrate/read BEFORE writing this new strike's own key below — so
+        // a first-time migration scan can't also pick up this same strike
+        // and double-count it once appended.
+        const index = await readOrMigrateIndex(
+          env,
+          `strikes_index:${targetSteamId}`,
+          `strikes:${targetSteamId}:`,
+          async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(raw); } catch { return null; }
+          },
+        );
         await env.PARKED_KV.put(`strikes:${targetSteamId}:${issuedAt}`, JSON.stringify(strike));
+        index.push(strike);
+        await writeIndex(env, `strikes_index:${targetSteamId}`, index);
         return json({ ok: true, strike });
       } catch (error) {
         return json({ error: error.message || 'Strike issue failed' }, 502);
@@ -1996,16 +2054,14 @@ export default {
       if (!requesterTier) return json({ error: 'Not an admin' }, 403);
 
       try {
-        const list = await env.PARKED_KV.list({ prefix: `strikes:${targetSteamId}:` });
-        const strikes = await Promise.all(
-          list.keys.map(async (key) => {
+        const strikes = await readOrMigrateIndex(
+          env,
+          `strikes_index:${targetSteamId}`,
+          `strikes:${targetSteamId}:`,
+          async (key) => {
             const raw = await env.PARKED_KV.get(key.name);
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return null;
-            }
-          }),
+            try { return JSON.parse(raw); } catch { return null; }
+          },
         );
         const cleaned = strikes.filter(Boolean).sort((a, b) => b.issuedAt - a.issuedAt);
         return json({ ok: true, strikes: cleaned });
@@ -2038,8 +2094,24 @@ export default {
       try {
         const alreadyFriends = await env.PARKED_KV.get(`friends:${fromSteamId}:${toSteamId}`);
         if (alreadyFriends) return json({ error: 'Already friends' }, 400);
+        // Migrate/read before writing this new request's own key below —
+        // same ordering reason as strikes above (avoids double-counting
+        // this request if the recipient's index is migrated right now).
+        const reqIndex = await readOrMigrateIndex(
+          env,
+          `friend_requests_index:${toSteamId}`,
+          `friend_requests:${toSteamId}:`,
+          async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(raw); } catch { return null; }
+          },
+        );
         const requestedAt = Date.now();
         await env.PARKED_KV.put(`friend_requests:${toSteamId}:${fromSteamId}`, JSON.stringify({ fromSteamId, toSteamId, requestedAt }));
+        if (!reqIndex.some((r) => r.fromSteamId === fromSteamId)) {
+          reqIndex.push({ fromSteamId, toSteamId, requestedAt });
+          await writeIndex(env, `friend_requests_index:${toSteamId}`, reqIndex);
+        }
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Friend request failed' }, 502);
@@ -2064,10 +2136,39 @@ export default {
       try {
         const raw = await env.PARKED_KV.get(`friend_requests:${steamId}:${requesterSteamId}`);
         if (!raw) return json({ error: 'No pending request from that player' }, 404);
+
+        // Migrate/read every affected index BEFORE any of the writes below
+        // change the underlying keys, same ordering reason as elsewhere in
+        // this section.
+        const parseRequest = async (key) => {
+          const r = await env.PARKED_KV.get(key.name);
+          try { return JSON.parse(r); } catch { return null; }
+        };
+        const parseFriend = (prefix) => async (key) => {
+          const friendSteamId = key.name.slice(prefix.length);
+          const r = await env.PARKED_KV.get(key.name);
+          let since = null;
+          try { since = JSON.parse(r)?.since ?? null; } catch { /* ignore */ }
+          return { steamId: friendSteamId, since };
+        };
+        const myRequests = await readOrMigrateIndex(env, `friend_requests_index:${steamId}`, `friend_requests:${steamId}:`, parseRequest);
+        const myFriends = await readOrMigrateIndex(env, `friends_index:${steamId}`, `friends:${steamId}:`, parseFriend(`friends:${steamId}:`));
+        const theirFriends = await readOrMigrateIndex(env, `friends_index:${requesterSteamId}`, `friends:${requesterSteamId}:`, parseFriend(`friends:${requesterSteamId}:`));
+
         await env.PARKED_KV.delete(`friend_requests:${steamId}:${requesterSteamId}`);
         const since = Date.now();
         await env.PARKED_KV.put(`friends:${steamId}:${requesterSteamId}`, JSON.stringify({ since }));
         await env.PARKED_KV.put(`friends:${requesterSteamId}:${steamId}`, JSON.stringify({ since }));
+
+        await writeIndex(env, `friend_requests_index:${steamId}`, myRequests.filter((r) => r.fromSteamId !== requesterSteamId));
+        if (!myFriends.some((f) => f.steamId === requesterSteamId)) {
+          myFriends.push({ steamId: requesterSteamId, since });
+          await writeIndex(env, `friends_index:${steamId}`, myFriends);
+        }
+        if (!theirFriends.some((f) => f.steamId === steamId)) {
+          theirFriends.push({ steamId, since });
+          await writeIndex(env, `friends_index:${requesterSteamId}`, theirFriends);
+        }
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Friend accept failed' }, 502);
@@ -2090,7 +2191,17 @@ export default {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
       try {
+        const myRequests = await readOrMigrateIndex(
+          env,
+          `friend_requests_index:${steamId}`,
+          `friend_requests:${steamId}:`,
+          async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(raw); } catch { return null; }
+          },
+        );
         await env.PARKED_KV.delete(`friend_requests:${steamId}:${requesterSteamId}`);
+        await writeIndex(env, `friend_requests_index:${steamId}`, myRequests.filter((r) => r.fromSteamId !== requesterSteamId));
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Friend decline failed' }, 502);
@@ -2113,8 +2224,21 @@ export default {
         return json({ error: 'Missing or invalid friendSteamId' }, 400);
       }
       try {
+        const parseFriend = (prefix) => async (key) => {
+          const fid = key.name.slice(prefix.length);
+          const raw = await env.PARKED_KV.get(key.name);
+          let since = null;
+          try { since = JSON.parse(raw)?.since ?? null; } catch { /* ignore */ }
+          return { steamId: fid, since };
+        };
+        const myFriends = await readOrMigrateIndex(env, `friends_index:${steamId}`, `friends:${steamId}:`, parseFriend(`friends:${steamId}:`));
+        const theirFriends = await readOrMigrateIndex(env, `friends_index:${friendSteamId}`, `friends:${friendSteamId}:`, parseFriend(`friends:${friendSteamId}:`));
+
         await env.PARKED_KV.delete(`friends:${steamId}:${friendSteamId}`);
         await env.PARKED_KV.delete(`friends:${friendSteamId}:${steamId}`);
+
+        await writeIndex(env, `friends_index:${steamId}`, myFriends.filter((f) => f.steamId !== friendSteamId));
+        await writeIndex(env, `friends_index:${friendSteamId}`, theirFriends.filter((f) => f.steamId !== steamId));
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Friend remove failed' }, 502);
@@ -2128,16 +2252,14 @@ export default {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
       try {
-        const list = await env.PARKED_KV.list({ prefix: `friends:${steamId}:` });
-        const friends = await Promise.all(
-          list.keys.map(async (key) => {
-            const friendSteamId = key.name.slice(`friends:${steamId}:`.length);
-            const raw = await env.PARKED_KV.get(key.name);
-            let since = null;
-            try { since = JSON.parse(raw)?.since ?? null; } catch { /* ignore */ }
-            return { steamId: friendSteamId, since };
-          }),
-        );
+        const prefix = `friends:${steamId}:`;
+        const friends = await readOrMigrateIndex(env, `friends_index:${steamId}`, prefix, async (key) => {
+          const friendSteamId = key.name.slice(prefix.length);
+          const raw = await env.PARKED_KV.get(key.name);
+          let since = null;
+          try { since = JSON.parse(raw)?.since ?? null; } catch { /* ignore */ }
+          return { steamId: friendSteamId, since };
+        });
         return json({ ok: true, friends });
       } catch (error) {
         return json({ error: error.message || 'Friends lookup failed' }, 502);
@@ -2151,16 +2273,14 @@ export default {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
       try {
-        const list = await env.PARKED_KV.list({ prefix: `friend_requests:${steamId}:` });
-        const requests = await Promise.all(
-          list.keys.map(async (key) => {
+        const requests = await readOrMigrateIndex(
+          env,
+          `friend_requests_index:${steamId}`,
+          `friend_requests:${steamId}:`,
+          async (key) => {
             const raw = await env.PARKED_KV.get(key.name);
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return null;
-            }
-          }),
+            try { return JSON.parse(raw); } catch { return null; }
+          },
         );
         return json({ ok: true, requests: requests.filter(Boolean) });
       } catch (error) {
@@ -2196,12 +2316,28 @@ export default {
         const onCooldown = await env.PARKED_KV.get(cooldownKey);
         if (onCooldown) return json({ error: 'Wait a bit before sending another teleport request' }, 429);
 
+        // Migrate/read before writing this new request's own key below —
+        // same ordering reason as the friend-request route above.
+        const index = await readOrMigrateIndex(
+          env,
+          `teleport_requests_index:${toSteamId}`,
+          `teleport_requests:${toSteamId}:`,
+          async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(raw); } catch { return null; }
+          },
+        );
+        const requestedAt = Date.now();
         await env.PARKED_KV.put(
           `teleport_requests:${toSteamId}:${fromSteamId}`,
-          JSON.stringify({ fromSteamId, toSteamId, direction, requestedAt: Date.now() }),
+          JSON.stringify({ fromSteamId, toSteamId, direction, requestedAt }),
         );
         // expirationTtl auto-clears the cooldown — no separate cleanup needed.
         await env.PARKED_KV.put(cooldownKey, '1', { expirationTtl: 60 });
+
+        const filtered = index.filter((r) => r.fromSteamId !== fromSteamId);
+        filtered.push({ fromSteamId, toSteamId, direction, requestedAt });
+        await writeIndex(env, `teleport_requests_index:${toSteamId}`, filtered);
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Teleport request failed' }, 502);
@@ -2229,7 +2365,18 @@ export default {
         const raw = await env.PARKED_KV.get(`teleport_requests:${steamId}:${requesterSteamId}`);
         if (!raw) return json({ error: 'No pending teleport request from that player' }, 404);
         const pending = JSON.parse(raw);
+
+        const index = await readOrMigrateIndex(
+          env,
+          `teleport_requests_index:${steamId}`,
+          `teleport_requests:${steamId}:`,
+          async (key) => {
+            const r = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(r); } catch { return null; }
+          },
+        );
         await env.PARKED_KV.delete(`teleport_requests:${steamId}:${requesterSteamId}`);
+        await writeIndex(env, `teleport_requests_index:${steamId}`, index.filter((r) => r.fromSteamId !== requesterSteamId));
 
         // requester_to_friend: the original requester (fromSteamId) moves.
         // friend_to_requester: the accepter (steamId, == toSteamId) moves.
@@ -2259,7 +2406,17 @@ export default {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
       try {
+        const index = await readOrMigrateIndex(
+          env,
+          `teleport_requests_index:${steamId}`,
+          `teleport_requests:${steamId}:`,
+          async (key) => {
+            const raw = await env.PARKED_KV.get(key.name);
+            try { return JSON.parse(raw); } catch { return null; }
+          },
+        );
         await env.PARKED_KV.delete(`teleport_requests:${steamId}:${requesterSteamId}`);
+        await writeIndex(env, `teleport_requests_index:${steamId}`, index.filter((r) => r.fromSteamId !== requesterSteamId));
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Teleport decline failed' }, 502);
@@ -2273,16 +2430,14 @@ export default {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
       try {
-        const list = await env.PARKED_KV.list({ prefix: `teleport_requests:${steamId}:` });
-        const requests = await Promise.all(
-          list.keys.map(async (key) => {
+        const requests = await readOrMigrateIndex(
+          env,
+          `teleport_requests_index:${steamId}`,
+          `teleport_requests:${steamId}:`,
+          async (key) => {
             const raw = await env.PARKED_KV.get(key.name);
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return null;
-            }
-          }),
+            try { return JSON.parse(raw); } catch { return null; }
+          },
         );
         return json({ ok: true, requests: requests.filter(Boolean) });
       } catch (error) {
