@@ -3204,6 +3204,45 @@ document.querySelector('[data-skin-library-select]')?.addEventListener('change',
   }
 });
 
+// Shared by the Save-to-library submit and the Test-on-my-live-dino
+// button — both need "whatever colors are currently in the form," either
+// from the pickers or the Advanced JSON override. Returns null (after
+// showing a toast) on invalid JSON, matching the pre-refactor inline
+// behavior each caller had.
+const collectSkinLibraryColors = () => {
+  const jsonText = document.querySelector('[data-skin-library-json]')?.value.trim() || '';
+  if (jsonText) {
+    try {
+      return JSON.parse(jsonText);
+    } catch (error) {
+      showToast('Advanced JSON is not valid JSON.');
+      return null;
+    }
+  }
+  const colors = {};
+  document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
+    colors[input.dataset.skinLibraryColor] = input.value;
+  });
+  return colors;
+};
+
+document.querySelector('[data-skin-library-test]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const colors = collectSkinLibraryColors();
+  if (colors === null) return;
+  requestActionAndPoll({
+    endpoint: '/api/skin-test',
+    body: { steamId: profile.steamId, colors },
+    buttonEl: event.target,
+    idleLabel: 'Test on my live dino',
+    waitingLabel: 'Waiting for in-game…',
+  });
+});
+
 document.querySelector('[data-skin-library-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const profile = getSteamProfile();
@@ -3217,21 +3256,8 @@ document.querySelector('[data-skin-library-form]')?.addEventListener('submit', a
     return;
   }
 
-  let colors;
-  const jsonText = document.querySelector('[data-skin-library-json]')?.value.trim() || '';
-  if (jsonText) {
-    try {
-      colors = JSON.parse(jsonText);
-    } catch (error) {
-      showToast('Advanced JSON is not valid JSON.');
-      return;
-    }
-  } else {
-    colors = {};
-    document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
-      colors[input.dataset.skinLibraryColor] = input.value;
-    });
-  }
+  const colors = collectSkinLibraryColors();
+  if (colors === null) return;
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
   if (submitBtn) submitBtn.disabled = true;

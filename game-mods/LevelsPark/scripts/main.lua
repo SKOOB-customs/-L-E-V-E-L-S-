@@ -1198,6 +1198,14 @@ local function skinUseResultFilePath(steam)
     return SAVED_DIR .. "/skin_use_result_" .. steam .. ".json"
 end
 
+local function skinTestRequestFilePath(steam)
+    return SAVED_DIR .. "/skin_test_request_" .. steam .. ".json"
+end
+
+local function skinTestResultFilePath(steam)
+    return SAVED_DIR .. "/skin_test_result_" .. steam .. ".json"
+end
+
 local function teleportExecuteRequestFilePath(steam)
     return SAVED_DIR .. "/teleport_execute_request_" .. steam .. ".json"
 end
@@ -1477,6 +1485,60 @@ local function checkWebsiteSkinUseRequest(steam)
     log("Website skin-use request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))
     writeRequestResult(skinUseResultFilePath(steam), requestId, ok, message)
+end
+
+-- Owner-only "Test" button in the Skin Library admin section: applies a
+-- color set straight to the caller's own live dino, same underlying
+-- applyCustomizer call trySkinUse makes — but with no charge ledger
+-- involved at all, since this is a one-shot preview for deciding whether
+-- a color combination is worth saving/granting, not a real grant. Owner-
+-- tier gating happens server-side on the Worker (this mod has no concept
+-- of admin tiers), same trust boundary as every other admin action here.
+local function trySkinTest(steam, colors)
+    if colors == nil then
+        return false, "Skin test failed: missing colors."
+    end
+    local gm = findGameMode()
+    if gm == nil then return false, "Skin test failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Skin test failed: spawn in first, then try again."
+    end
+    if not applyCustomizer(pawn, colors) then
+        return false, "Skin test failed: could not apply."
+    end
+    return true, "Test skin applied to your live dino."
+end
+
+local function checkWebsiteSkinTestRequest(steam)
+    local path = skinTestRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    if requestId == nil then return end
+
+    -- Colors arrive in the same {r,g,b,a}-numeric shape the Worker already
+    -- normalizes to (normalizeSkinColors) before writing this request —
+    -- read with the same jsonReadColorField helper loadParkedDinos already
+    -- uses for a parked dino's attached-skin colors, rather than writing a
+    -- whole new generic JSON-object parser for one field.
+    local colorsSection = body:match('"colors"%s*:%s*(%b{})') or "{}"
+    local colors = {}
+    for _, field in ipairs(SKIN_COLOR_FIELDS) do
+        local color = jsonReadColorField(colorsSection, field)
+        if color ~= nil then colors[field] = color end
+    end
+
+    local ok, message = trySkinTest(steam, colors)
+    safeNotify(steam, message)
+    log("Website skin-test request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(skinTestResultFilePath(steam), requestId, ok, message)
 end
 
 -- ── Website-triggered friend teleport (Friends tab, write direction) ──
@@ -1838,6 +1900,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteParkRequest(steam)
                     checkWebsiteRedeemRequest(steam)
                     checkWebsiteSkinUseRequest(steam)
+                    checkWebsiteSkinTestRequest(steam)
                     checkWebsiteTeleportRequest(steam)
                     checkWebsiteGrowthPauseRequest(steam)
                     checkWebsiteSetPrimeRequest(steam)

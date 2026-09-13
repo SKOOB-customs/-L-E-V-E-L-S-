@@ -477,6 +477,15 @@ const skinUseResultPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_use_result_${st
 // trySkinUse), so a failed live-use (no live pawn, unknown code) never
 // burns one. This just queues the request the same way park/redeem do.
 const requestSkinUse = (env, steamId, skinCode) => writeRequest(env, skinUseRequestPath, steamId, { skinCode });
+
+const skinTestRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_test_request_${steamId}.json`;
+const skinTestResultPath = (steamId) => `${REDEEM_SAVED_DIR}/skin_test_result_${steamId}.json`;
+// Owner-only "Test" button in the Skin Library section — colors are
+// already normalizeSkinColors()'d before this is called (see the
+// /skin-test-request route below), same {r,g,b,a} numeric shape
+// main.lua's jsonReadColorField already knows how to read.
+const requestSkinTest = (env, steamId, colors) => writeRequest(env, skinTestRequestPath, steamId, { colors });
+const readSkinTestResult = (env, steamId, requestId) => readResult(env, skinTestResultPath, steamId, requestId);
 const readSkinUseResult = (env, steamId, requestId) => readResult(env, skinUseResultPath, steamId, requestId);
 
 const teleportExecuteRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/teleport_execute_request_${steamId}.json`;
@@ -1518,6 +1527,60 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Skin use result lookup failed' }, 502);
+      }
+    }
+
+    // Owner-only "Test" button in the Skin Library admin section — applies
+    // a color set straight to the caller's own live dino, no charge ledger
+    // involved (see main.lua's trySkinTest). Same request/poll shape as
+    // /skin-use-live, but gated to owner tier instead of "any signed-in
+    // player applying their own already-granted charge."
+    if (url.pathname === '/skin-test-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, colors } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Can only test a skin on your own live dino' }, 403);
+      }
+      if (!colors || typeof colors !== 'object') {
+        return json({ error: 'Missing or invalid colors' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+
+      const normalized = normalizeSkinColors(colors);
+      if (Object.keys(normalized).length === 0) {
+        return json({ error: 'No valid color fields provided' }, 400);
+      }
+      try {
+        const requestId = await requestSkinTest(env, steamId, normalized);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Skin test request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-test-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readSkinTestResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Skin test result lookup failed' }, 502);
       }
     }
 
