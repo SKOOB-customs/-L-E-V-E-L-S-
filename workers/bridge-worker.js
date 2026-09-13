@@ -682,6 +682,61 @@ const syncPlayerDirectory = async (env) => {
   return { synced: Object.keys(players).length };
 };
 
+// Feeds /player-directory's "friend who never joined the game server, so
+// the join-log directory above has no name for them" gap — see that
+// route's own comment for the full picture. This used to call
+// env.PARKED_KV.list({prefix:'friends:'}) live on every single
+// /player-directory request; Cloudflare's KV *list* operation quota is a
+// separate, much stricter 1,000/day limit than the 100k/day read quota,
+// and even one client polling that route once a minute already exceeds
+// it alone. Confirmed live: this exhausted the account's daily list-op
+// quota and broke /friends (and everything else sharing that quota) with
+// a hard 502 for the rest of the day. Now runs on the existing 1-minute
+// cron instead, throttled internally to actually list at most once every
+// 15 minutes (checked via this cache's own updatedAt) regardless of how
+// often the cron itself ticks or any client polls the read side.
+const FRIENDS_UNNAMED_SCAN_INTERVAL_MS = 15 * 60 * 1000;
+
+const syncUnnamedFriendSteamIds = async (env) => {
+  if (!env.PARKED_KV) return;
+
+  const cacheRaw = await env.PARKED_KV.get('friends_unnamed_ids:index');
+  let cache = null;
+  if (cacheRaw) {
+    try {
+      cache = JSON.parse(cacheRaw);
+    } catch {
+      cache = null;
+    }
+  }
+  if (cache?.updatedAt && Date.now() - cache.updatedAt < FRIENDS_UNNAMED_SCAN_INTERVAL_MS) {
+    return; // scanned recently enough — skip the expensive list() this tick
+  }
+
+  let players = {};
+  const playersRaw = await env.PARKED_KV.get('player_directory:index');
+  if (playersRaw) {
+    try {
+      players = JSON.parse(playersRaw).players || {};
+    } catch {
+      players = {};
+    }
+  }
+
+  const unnamedSteamIds = new Set();
+  const friendKeys = await env.PARKED_KV.list({ prefix: 'friends:' });
+  for (const key of friendKeys.keys) {
+    const parts = key.name.split(':');
+    for (const id of [parts[1], parts[2]]) {
+      if (id && /^\d{17}$/.test(id) && !players[id]) unnamedSteamIds.add(id);
+    }
+  }
+  await env.PARKED_KV.put('friends_unnamed_ids:index', JSON.stringify({
+    steamIds: [...unnamedSteamIds],
+    updatedAt: Date.now(),
+  }));
+};
+
 // Same 22-species roster as Game.ini's current AllowedClasses (see the
 // admin-panel plan doc) — update by hand if that list changes. classPath
 // shape confirmed against real LogTheIsleJoinData log lines this session.
@@ -2274,20 +2329,30 @@ export default {
       // STEAM_API_KEY (that's Pages-only), so it just hands back the raw
       // ids still missing a name — functions/api/player-directory.js
       // resolves them via GetPlayerSummaries and merges the result.
-      const unnamedSteamIds = new Set();
+      //
+      // This used to call env.PARKED_KV.list({prefix:'friends:'}) directly
+      // on every single request here — Cloudflare's KV *list* operation
+      // quota is a separate, much stricter 1,000/day limit (distinct from
+      // the 100k/day read quota), and a client polling this route even
+      // once a minute already exceeds that alone. Confirmed live: this
+      // exhausted the account's daily list-op quota and broke /friends
+      // (and everything else sharing it) with a hard 502 for the rest of
+      // the day. Now reads a cache the cron refreshes on its own throttle
+      // (syncUnnamedFriendSteamIds) instead of listing live per request.
+      let unnamedSteamIds = [];
       try {
-        const friendKeys = await env.PARKED_KV.list({ prefix: 'friends:' });
-        for (const key of friendKeys.keys) {
-          const parts = key.name.split(':');
-          for (const id of [parts[1], parts[2]]) {
-            if (id && /^\d{17}$/.test(id) && !players[id]) unnamedSteamIds.add(id);
+        const cacheRaw = await env.PARKED_KV.get('friends_unnamed_ids:index');
+        if (cacheRaw) {
+          const cached = JSON.parse(cacheRaw);
+          if (Array.isArray(cached.steamIds)) {
+            unnamedSteamIds = cached.steamIds.filter((id) => !players[id]);
           }
         }
       } catch {
         // best-effort — the join-log directory above still returns fine either way
       }
 
-      return json({ ok: true, players: list, unnamedSteamIds: [...unnamedSteamIds] });
+      return json({ ok: true, players: list, unnamedSteamIds });
     }
 
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
@@ -2378,6 +2443,9 @@ export default {
     );
     ctx.waitUntil(
       syncDinoHistory(env).catch((error) => console.error('syncDinoHistory failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncUnnamedFriendSteamIds(env).catch((error) => console.error('syncUnnamedFriendSteamIds failed:', error.message)),
     );
   },
 };

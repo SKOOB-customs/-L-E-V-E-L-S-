@@ -2857,9 +2857,19 @@ loadPlayerDirectory();
 // taken (a real reported bug — a connected, even staff-perm'd player was
 // "not searchable" simply because their directory entry didn't exist yet
 // when the page first loaded). Refreshed periodically so it eventually
-// catches up without needing a manual page reload — same 30s-class
-// polling interval already used for the currency balance.
-setInterval(loadPlayerDirectory, 60000);
+// catches up without needing a manual page reload.
+//
+// This was originally set to 60s, which — combined with the Worker's
+// /player-directory route calling env.PARKED_KV.list() live on every
+// request at the time — guaranteed exceeding Cloudflare's separate,
+// much stricter 1,000/day KV *list*-operation quota from a SINGLE open
+// tab alone, taking /friends (and everything else sharing that quota)
+// down with a hard 502 for the rest of the day (confirmed live). The
+// Worker route no longer lists live (see syncUnnamedFriendSteamIds,
+// throttled to its own 15-minute cron cycle), so this is safe again at
+// a much longer interval — there's no benefit to polling faster than the
+// underlying data actually refreshes anyway.
+setInterval(loadPlayerDirectory, 5 * 60 * 1000);
 
 // Compensation form: entombment level + the mutation slots it unlocks.
 // Read-only catalog (no admin gate — see functions/api/mutations-catalog.js),
