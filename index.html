@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=c7382ae" />
+    <link rel="stylesheet" href="styles.css?v=2b5276e" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -73,9 +73,6 @@
 
       <div class="tab-switcher panel" aria-label="Hub categories">
         <button class="tab-button hub-tab-button active" data-tab="hub" type="button">Home</button>
-        <button class="tab-button" data-tab="gallery" type="button">Slideshow</button>
-        <button class="tab-button" data-tab="overview" type="button">Overview</button>
-        <button class="tab-button" data-tab="features" type="button">Features</button>
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="map" type="button">Map</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
@@ -85,8 +82,14 @@
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="friends" type="button">Friends</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
-        <button class="tab-button" data-tab="submit" type="button">Submit</button>
         <button class="tab-button" data-tab="tickets" type="button">Support</button>
+        <!-- Still real tabs, reachable via their Home-hub cards (which
+             .click() these buttons directly) — just removed from this
+             bar's visible row to cut down on clutter, per request. -->
+        <button class="tab-button" data-tab="gallery" type="button" hidden>Slideshow</button>
+        <button class="tab-button" data-tab="overview" type="button" hidden>Overview</button>
+        <button class="tab-button" data-tab="features" type="button" hidden>Features</button>
+        <button class="tab-button" data-tab="submit" type="button" hidden>Submit</button>
       </div>
 
       <main class="page-content">
@@ -1271,6 +1274,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=c7382ae"></script>
+    <script src="script.js?v=2b5276e"></script>
   </body>
 </html>
