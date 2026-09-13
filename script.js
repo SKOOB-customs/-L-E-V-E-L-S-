@@ -3841,7 +3841,73 @@ const buildFriendCard = (friend) => {
     }
   });
 
-  actions.append(toThemBtn, bringBtn, removeBtn);
+  // Gift a parked dino: same select+button shape as the skin-attach row on
+  // the Inventory tab, sourced from the same parkedEntries the Inventory
+  // tab already loads — filtered to the viewer's own dinos so nobody can
+  // gift a dino they don't own.
+  const giftRow = document.createElement('div');
+  giftRow.className = 'skin-attach-row';
+  const giftSelect = document.createElement('select');
+  const rebuildGiftOptions = () => {
+    const viewerSteamId = getSteamProfile()?.steamId;
+    const ownDinos = parkedEntries.filter((entry) => entry.steam === viewerSteamId);
+    giftSelect.innerHTML = '';
+    if (ownDinos.length === 0) {
+      const option = document.createElement('option');
+      option.textContent = 'No parked dinos to gift';
+      option.disabled = true;
+      giftSelect.appendChild(option);
+      giftBtn.disabled = true;
+    } else {
+      ownDinos.forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = String(entry.capturedAt);
+        option.textContent = entry.name ? `${entry.name} (${entry.species})` : entry.species;
+        giftSelect.appendChild(option);
+      });
+      giftBtn.disabled = false;
+    }
+  };
+
+  const giftBtn = document.createElement('button');
+  giftBtn.type = 'button';
+  giftBtn.className = 'action-button small';
+  giftBtn.textContent = 'Gift';
+  giftBtn.addEventListener('click', async () => {
+    const steamId = getSteamProfile()?.steamId;
+    if (!steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    const capturedAt = Number(giftSelect.value);
+    if (!capturedAt) return;
+    if (!window.confirm(`Gift this dino to ${friend.name || friend.steamId}? This can't be undone.`)) return;
+    giftBtn.disabled = true;
+    try {
+      const response = await fetch('/api/gift-dino', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromSteamId: steamId, toSteamId: friend.steamId, capturedAt }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not gift that dino.');
+        giftBtn.disabled = false;
+        return;
+      }
+      showToast(`Gifted to ${friend.name || friend.steamId}.`);
+      await loadParkedList();
+      rebuildGiftOptions();
+    } catch (error) {
+      console.debug('Gift dino failed:', error);
+      showToast('Could not reach the server right now.');
+      giftBtn.disabled = false;
+    }
+  });
+  rebuildGiftOptions();
+  giftRow.append(giftSelect, giftBtn);
+
+  actions.append(toThemBtn, bringBtn, giftRow, removeBtn);
   card.append(name, meta, status, actions);
   return card;
 };

@@ -1993,6 +1993,67 @@ export default {
       }
     }
 
+    // Inventory: gift one parked dino to a friend — moves the whole
+    // snapshot (colors, mutations, entombments, growth, attached skin,
+    // everything) from the sender's parked_<steamid>.json to the
+    // recipient's, using the same read-modify-write helpers every other
+    // parked-dino action already shares. Friend-only, checked via the
+    // same cheap get() the teleport-request route already uses (no
+    // list() involved — see the KV list-quota incident this session
+    // already worked through for why that matters).
+    if (url.pathname === '/gift-dino' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { fromSteamId, toSteamId, capturedAt } = body || {};
+      if (typeof fromSteamId !== 'string' || !/^\d{17}$/.test(fromSteamId)) {
+        return json({ error: 'Missing or invalid fromSteamId' }, 400);
+      }
+      if (typeof toSteamId !== 'string' || !/^\d{17}$/.test(toSteamId)) {
+        return json({ error: 'Missing or invalid toSteamId' }, 400);
+      }
+      if (fromSteamId === toSteamId) return json({ error: "You can't gift a dino to yourself" }, 400);
+      if (typeof capturedAt !== 'number') {
+        return json({ error: 'Missing or invalid capturedAt' }, 400);
+      }
+      try {
+        const areFriends = await env.PARKED_KV.get(`friends:${fromSteamId}:${toSteamId}`);
+        if (!areFriends) return json({ error: 'You can only gift dinos to friends' }, 403);
+
+        const fromDinos = await readParkedDinosArray(env, fromSteamId);
+        const dinoIndex = fromDinos.findIndex((d) => d.capturedAt === capturedAt);
+        if (dinoIndex === -1) return json({ error: 'Dino not found in your inventory' }, 404);
+        const [dino] = fromDinos.splice(dinoIndex, 1);
+
+        // capturedAt doubles as that file's per-dino id (see
+        // loadParkedDinos in main.lua) — re-stamped so it can't collide
+        // with something already in the recipient's own inventory.
+        // dinoId (the persistent Dino History lineage id) is tied to the
+        // ORIGINAL owner's steamId string and would never resolve to
+        // anything in the recipient's own history file, so it's dropped
+        // rather than left as a dead, foreign-looking identifier — the
+        // gifted dino's stats/skin/mutations all still transfer intact,
+        // just as a fresh lineage for its new owner.
+        dino.capturedAt = Date.now();
+        delete dino.dinoId;
+
+        const toDinos = await readParkedDinosArray(env, toSteamId);
+        toDinos.push(dino);
+
+        await writeParkedDinosArray(env, fromSteamId, fromDinos);
+        await writeParkedDinosArray(env, toSteamId, toDinos);
+        return json({ ok: true, dino });
+      } catch (error) {
+        return json({ error: error.message || 'Gift failed' }, 502);
+      }
+    }
+
     // Inventory: a player renames one of their own parked dinos. Same
     // read-modify-write as compensation, but on an existing entry (matched
     // by capturedAt, which doubles as its snapshot id — see main.lua) and

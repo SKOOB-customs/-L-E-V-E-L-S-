@@ -1286,6 +1286,12 @@ strong.stat-critical {
   font-size: 0.82rem;
 }
 
+/* The gift dropdown+button gets its own full-width row rather than being
+   squeezed to min-content next to the teleport/remove buttons above. */
+.friend-card-actions .skin-attach-row {
+  flex: 1 1 100%;
+}
+
 .skin-card {
   gap: 12px;
 }
