@@ -876,6 +876,7 @@ const displaySteamStatus = async () => {
   }
   loadDinoHistory();
   initTicketForm();
+  updateChatSignInState();
 
   if (!statusDiv || !statusMessage) return;
 
@@ -1008,37 +1009,54 @@ displaySteamStatus();
 // an admin grant.
 setInterval(loadCurrencyBalance, 30000);
 
-// Global chat sidebar (local-only: no backend yet, so messages persist per browser)
+// ── Website presence (for the Friends tab's online indicator) ──
+//
+// A lightweight heartbeat: while this tab is open and visible, ping every
+// 3 minutes so functions/api/presence.js can tell friends "online" from
+// "not." A single shared presence:index KV entry per player (overwritten,
+// not appended) keeps this off the per-event write-quota problem the
+// currency/dino-history systems had to design around — this never grows
+// with heartbeat frequency, only with total distinct players ever seen.
+const sendHeartbeat = () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId || document.visibilityState !== 'visible') return;
+  fetch('/api/heartbeat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ steamId: profile.steamId }),
+  }).catch((error) => console.debug('Heartbeat failed:', error));
+};
+sendHeartbeat();
+setInterval(sendHeartbeat, 180000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') sendHeartbeat();
+});
+
+// Global chat sidebar — a real shared chat (every signed-in player, not
+// just friends), backed by functions/api/chat-messages.js/chat-send.js
+// (direct KV, capped at 200 messages — no Pterodactyl/game-server
+// involvement needed, this never touches the mod). Previously local-only
+// (each browser's own localStorage), which meant no one ever actually saw
+// anyone else's messages — a real reported bug, not a design choice.
 const chatToggle = document.getElementById('chatToggle');
 const chatSidebar = document.getElementById('chatSidebar');
 const chatClose = document.getElementById('chatClose');
 const chatMessages = document.getElementById('chatMessages');
 const chatForm = document.getElementById('chatForm');
-const chatNameInput = document.getElementById('chatName');
 const chatTextInput = document.getElementById('chatText');
 const chatHoneypot = document.getElementById('chatWebsite');
 
-const chatMessagesKey = 'levelsChatMessages';
-const chatNameKey = 'levelsChatName';
-const chatMaxStored = 100;
 const chatMinIntervalMs = 1500;
 let lastChatSendAt = 0;
-
-const getChatMessages = () => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(chatMessagesKey) || '[]');
-    return Array.isArray(saved) ? saved : [];
-  } catch {
-    return [];
-  }
-};
+let cachedChatMessages = [];
+let chatPollTimer = null;
 
 const renderChatMessages = () => {
   if (!chatMessages) return;
-  const messages = getChatMessages();
+  const wasScrolledToBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 40;
   chatMessages.innerHTML = '';
 
-  messages.forEach((message) => {
+  cachedChatMessages.forEach((message) => {
     const item = document.createElement('div');
     item.className = 'chat-message';
 
@@ -1048,7 +1066,7 @@ const renderChatMessages = () => {
 
     const time = document.createElement('span');
     time.className = 'chat-message-time';
-    time.textContent = new Date(message.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    time.textContent = new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const text = document.createElement('span');
     text.className = 'chat-message-text';
@@ -1058,27 +1076,39 @@ const renderChatMessages = () => {
     chatMessages.appendChild(item);
   });
 
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  if (wasScrolledToBottom) chatMessages.scrollTop = chatMessages.scrollHeight;
 };
 
-const addChatMessage = (name, text) => {
-  const messages = getChatMessages();
-  messages.push({ name, text, ts: Date.now() });
-  localStorage.setItem(chatMessagesKey, JSON.stringify(messages.slice(-chatMaxStored)));
-  renderChatMessages();
-  renderWebsiteChatLog();
+const loadChatMessages = async () => {
+  try {
+    const response = await fetch('/api/chat-messages');
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.messages)) {
+      cachedChatMessages = data.messages;
+      renderChatMessages();
+      renderWebsiteChatLog();
+    }
+  } catch (error) {
+    console.debug('Chat load failed:', error);
+  }
 };
 
 const openChat = () => {
   chatSidebar?.classList.add('is-open');
   chatSidebar?.setAttribute('aria-hidden', 'false');
   chatToggle?.setAttribute('aria-expanded', 'true');
+  loadChatMessages();
+  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 4000);
 };
 
 const closeChat = () => {
   chatSidebar?.classList.remove('is-open');
   chatSidebar?.setAttribute('aria-hidden', 'true');
   chatToggle?.setAttribute('aria-expanded', 'false');
+  if (chatPollTimer) {
+    clearInterval(chatPollTimer);
+    chatPollTimer = null;
+  }
 };
 
 chatToggle?.addEventListener('click', () => {
@@ -1092,15 +1122,25 @@ chatToggle?.addEventListener('click', () => {
 
 chatClose?.addEventListener('click', closeChat);
 
-if (chatNameInput) {
-  chatNameInput.value = localStorage.getItem(chatNameKey) || '';
-}
+const updateChatSignInState = () => {
+  const profile = getSteamProfile();
+  const signedOut = document.querySelector('[data-chat-signed-out]');
+  const signedIn = document.querySelector('[data-chat-signed-in]');
+  if (signedOut) signedOut.hidden = !!profile;
+  if (signedIn) signedIn.hidden = !profile;
+};
 
-chatForm?.addEventListener('submit', (event) => {
+chatForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
 
   // Bots tend to fill every field, including the hidden honeypot; humans never see it
   if (chatHoneypot && chatHoneypot.value) {
+    return;
+  }
+
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
     return;
   }
 
@@ -1110,22 +1150,33 @@ chatForm?.addEventListener('submit', (event) => {
     return;
   }
 
-  const name = chatNameInput?.value.trim().slice(0, 24);
   const text = chatTextInput?.value.trim().slice(0, 240);
-
-  if (!name || !text) return;
-
-  localStorage.setItem(chatNameKey, name);
-  addChatMessage(name, text);
+  if (!text) return;
 
   lastChatSendAt = now;
-  if (chatTextInput) {
-    chatTextInput.value = '';
-    chatTextInput.focus();
+  if (chatTextInput) chatTextInput.value = '';
+  try {
+    const response = await fetch('/api/chat-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steamId: profile.steamId, name: profile.username, text }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not send that message.');
+    } else {
+      loadChatMessages();
+    }
+  } catch (error) {
+    console.debug('Chat send failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    chatTextInput?.focus();
   }
 });
 
-renderChatMessages();
+updateChatSignInState();
+loadChatMessages();
 
 const ticketStorageKey = 'levelsStaffTickets';
 let selectedTicketId = null;
@@ -1153,18 +1204,17 @@ const renderWebsiteChatLog = () => {
   const chatLog = document.getElementById('websiteChatLog');
   if (!chatLog || !hasDevToolsAccess()) return;
 
-  const messages = getChatMessages();
   chatLog.replaceChildren();
-  if (!messages.length) {
-    chatLog.textContent = 'No website chat messages have been recorded on this device.';
+  if (!cachedChatMessages.length) {
+    chatLog.textContent = 'No website chat messages yet.';
     return;
   }
 
-  messages.slice(-20).reverse().forEach((message) => {
+  cachedChatMessages.slice(-20).reverse().forEach((message) => {
     const entry = document.createElement('div');
     entry.className = 'ticket-log-entry';
     const meta = document.createElement('span');
-    meta.textContent = `${message.name} - ${formatLogTime(message.ts)}`;
+    meta.textContent = `${message.name} - ${formatLogTime(message.at)}`;
     const text = document.createElement('div');
     text.textContent = message.text;
     entry.append(meta, text);
@@ -3443,6 +3493,7 @@ const buildFriendRequestCard = (req) => {
 const buildFriendCard = (friend) => {
   const card = document.createElement('article');
   card.className = 'parked-card friend-card';
+  card.dataset.friendCard = friend.steamId;
 
   const name = document.createElement('h3');
   name.className = 'friend-card-name';
@@ -3451,6 +3502,10 @@ const buildFriendCard = (friend) => {
   const meta = document.createElement('p');
   meta.className = 'friend-card-meta';
   meta.textContent = friend.since ? `Friends since ${new Date(friend.since).toLocaleDateString()}` : 'Friends';
+
+  const status = document.createElement('p');
+  status.className = 'friend-card-status';
+  status.textContent = 'Checking status…';
 
   const actions = document.createElement('div');
   actions.className = 'friend-card-actions';
@@ -3521,8 +3576,57 @@ const buildFriendCard = (friend) => {
   });
 
   actions.append(toThemBtn, bringBtn, removeBtn);
-  card.append(name, meta, actions);
+  card.append(name, meta, status, actions);
   return card;
+};
+
+// Fills in a friend card's "Checking status…" placeholder once presence +
+// in-game data comes back — separate from buildFriendCard itself since
+// that data arrives slightly later (a batched presence read plus one
+// growth-status read per friend) than the friend list itself.
+const updateFriendCardStatus = (card, friend) => {
+  const status = card.querySelector('.friend-card-status');
+  if (!status) return;
+  const parts = [friend.websiteOnline ? '🌐 Online' : '🌐 Offline'];
+  if (friend.inGame) {
+    parts.push(friend.playingAs ? `🎮 Playing as ${friend.playingAs}` : '🎮 In-game');
+  } else {
+    parts.push('🎮 Not in-game');
+  }
+  status.textContent = parts.join(' · ');
+};
+
+// Presence is one batched read; in-game status needs one live Pterodactyl
+// file read per friend (functions/api/growth-status.js), same as the Live
+// Dino tab already does for the signed-in player's own status — friend
+// lists are small in practice, so N parallel reads here is fine without
+// building new batching infrastructure. Fire-and-forget: friend cards
+// already rendered with a placeholder, this fills them in once ready.
+const ONLINE_GAME_WINDOW_MS = 15000; // 3s poll tick + a generous buffer for the read round trip
+
+const attachFriendStatus = async (friends) => {
+  if (!friends.length) return;
+  const steamIds = friends.map((f) => f.steamId);
+  try {
+    const [presenceResponse, ...growthResponses] = await Promise.all([
+      fetch(`/api/presence?steamIds=${encodeURIComponent(steamIds.join(','))}`),
+      ...steamIds.map((id) => fetch(`/api/growth-status?steamId=${encodeURIComponent(id)}`)),
+    ]);
+    const presenceData = await presenceResponse.json();
+    const growthDataList = await Promise.all(growthResponses.map((r) => r.json()));
+
+    friends.forEach((friend, i) => {
+      friend.websiteOnline = !!presenceData.presence?.[friend.steamId]?.online;
+      const growth = growthDataList[i];
+      const fresh = !!(growth?.updatedAt && (Date.now() - growth.updatedAt) < ONLINE_GAME_WINDOW_MS);
+      friend.inGame = fresh;
+      friend.playingAs = fresh && growth.hasLivePawn ? growth.species : null;
+      const card = document.querySelector(`[data-friend-card="${friend.steamId}"]`);
+      if (card) updateFriendCardStatus(card, friend);
+    });
+  } catch (error) {
+    console.debug('Friend status load failed:', error);
+  }
 };
 
 const buildTeleportRequestCard = (req) => {
@@ -3632,6 +3736,7 @@ const loadFriendsTabData = async () => {
     if (friendsGrid) {
       friendsGrid.innerHTML = '';
       friends.forEach((friend) => friendsGrid.appendChild(buildFriendCard(friend)));
+      attachFriendStatus(friends);
     }
 
     const friendReqGrid = document.querySelector('[data-friend-requests-grid]');

@@ -1605,9 +1605,15 @@ export default {
     }
 
     // Live Dino tab: current paused/growth snapshot, refreshed every poll
-    // tick by main.lua for online+spawned players. Not found yet (no file
-    // written since the last restart, or the player has never been
-    // spawned) just reads back as "not paused" rather than an error.
+    // tick by main.lua for EVERY online player (not just spawned ones,
+    // since main.lua's writeGrowthStatus now runs unconditionally — see
+    // its comment) — hasLivePawn/species let the Friends tab distinguish
+    // "connected but not spawned" from "playing as X", and updatedAt's
+    // freshness (checked client-side) is what actually signals "currently
+    // connected" at all, since this file is never deleted on disconnect,
+    // only stops being refreshed. Not found yet (no file written since the
+    // last restart, or the player has never connected) just reads back as
+    // offline rather than an error.
     if (url.pathname === '/growth-status' && request.method === 'GET') {
       const steamId = url.searchParams.get('steamId');
       if (!steamId || !/^\d{17}$/.test(steamId)) {
@@ -1620,10 +1626,12 @@ export default {
           ok: true,
           paused: Boolean(data.paused),
           growth: typeof data.growth === 'number' ? data.growth : null,
+          hasLivePawn: Boolean(data.hasLivePawn),
+          species: typeof data.species === 'string' && data.species ? data.species : null,
           updatedAt: data.updatedAt || null,
         });
       } catch {
-        return json({ ok: true, paused: false, growth: null, updatedAt: null });
+        return json({ ok: true, paused: false, growth: null, hasLivePawn: false, species: null, updatedAt: null });
       }
     }
 

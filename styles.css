@@ -1232,6 +1232,13 @@ strong.stat-critical {
   color: var(--muted);
 }
 
+.friend-card-status {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--chrome-1);
+}
+
 .friend-card-actions,
 .request-card-actions {
   display: flex;

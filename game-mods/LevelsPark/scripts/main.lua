@@ -1719,15 +1719,27 @@ local function checkWebsiteSetPrimeRequest(steam)
 end
 
 -- Opportunistic status write, not request-driven — see growthStatusFilePath
--- above for why the website needs this at all.
+-- above for why the website needs this at all. Now called unconditionally
+-- for every online controller each poll tick (pawn may be nil), not just
+-- ones with a live pawn — this is also the website's only signal for
+-- "friend is currently connected to the game server at all" (Friends tab
+-- online status): the file is never deleted on disconnect, only stops
+-- being refreshed, so the website infers "offline" from updatedAt going
+-- stale rather than from this file's mere existence.
 local function writeGrowthStatus(steam, pawn)
+    local hasLivePawn = pawn ~= nil
     local paused = false
-    pcall(function() paused = pawn.bIsGrowthPaused and true or false end)
     local growth = 0
-    pcall(function() growth = pawn:GetGrowth() or 0 end)
+    local classPath = nil
+    if hasLivePawn then
+        pcall(function() paused = pawn.bIsGrowthPaused and true or false end)
+        pcall(function() growth = pawn:GetGrowth() or 0 end)
+        pcall(function() classPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
+    end
     local body = string.format(
-        '{"paused":%s,"growth":%f,"updatedAt":%d}',
-        paused and "true" or "false", growth, os.time() * 1000
+        '{"online":true,"hasLivePawn":%s,"paused":%s,"growth":%f,"species":"%s","updatedAt":%d}',
+        hasLivePawn and "true" or "false", paused and "true" or "false", growth,
+        jsonEscape(hasLivePawn and speciesFromClassPath(classPath) or ""), os.time() * 1000
     )
     writeAll(growthStatusFilePath(steam), body)
 end
@@ -1830,8 +1842,8 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteGrowthPauseRequest(steam)
                     checkWebsiteSetPrimeRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
+                    writeGrowthStatus(steam, pawn)
                     if pawn ~= nil then
-                        writeGrowthStatus(steam, pawn)
                         tryMutationDumpOnce(pawn)
 
                         -- Dino history: detect a genuinely new pawn instance
