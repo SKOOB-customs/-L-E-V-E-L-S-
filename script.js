@@ -111,6 +111,26 @@ const activateTab = (tabName) => {
     panel.classList.toggle('is-active', isActive);
     panel.style.display = isActive ? 'grid' : 'none';
   });
+
+  // Persists the active tab into the URL hash so a plain page reload
+  // restores whatever page you were actually on (see the bootstrap
+  // below), instead of always dropping back to Home — a real reported
+  // case: reloading kept landing somewhere unrelated to what was being
+  // viewed, since nothing synced the hash on ordinary tab switches
+  // before this (only a couple of special-cased flows, like clicking the
+  // header username, ever touched it). Skipped while the hash still
+  // carries unconsumed OAuth redirect params (e.g.
+  // "#profile?steam_id=...&steam_name=...") — consumeSteamRedirect()
+  // (called later at module load) needs to read those first, and
+  // overwriting the hash here would destroy them before it gets the
+  // chance.
+  if (!window.location.hash.includes('?')) {
+    try {
+      history.replaceState(null, '', `${window.location.pathname}#${tabName}`);
+    } catch {
+      // ignore — worst case this one tab switch doesn't persist
+    }
+  }
 };
 
 if (tabButtons.length) {
@@ -121,7 +141,10 @@ if (tabButtons.length) {
   });
 
   const hashTab = window.location.hash.replace('#', '').split('?')[0];
-  const hasHashTab = [...tabButtons].some((button) => button.dataset.tab === hashTab);
+  // Checked against every real tab-panel, not just ones with a visible
+  // button — Profile (reached via the header username, no top-bar button
+  // of its own) is still a real page that should survive a reload too.
+  const hasHashTab = [...tabPanels].some((panel) => panel.dataset.tab === hashTab);
   // "hub" (not "gallery") is the landing view on every plain load/refresh —
   // the hash special-case (set by the Steam-login redirect flow below, e.g.
   // #profile) still takes priority when present.
