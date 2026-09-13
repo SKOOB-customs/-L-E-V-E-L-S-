@@ -1075,9 +1075,128 @@ const generateReferenceCode = (prefix) => {
 const generateCompCode = () => generateReferenceCode('COMP');
 const generateSkinCode = () => generateReferenceCode('SKIN');
 
+// ── Global chat, real-time (Durable Object + WebSocket) ──
+//
+// The original chat was polling functions/api/chat-messages.js against a
+// single KV key — 500ms polling costs nothing on KV's generous 100k/day
+// read quota, but that was never the bottleneck: KV writes aren't
+// instantly visible everywhere, and a message could take several seconds
+// to actually propagate to whichever edge served someone else's poll,
+// no matter how often they checked. Confirmed live: ~7 second delivery
+// lag with a player base of just a few people, which only gets worse as
+// more people chat at once. A Durable Object gives one single
+// authoritative in-memory instance for the whole chat room that pushes
+// new messages to every connected client over a live WebSocket the
+// instant they're sent — no polling, no KV read-after-write lag.
+//
+// One global room (idFromName('global') in the /chat-ws route below) —
+// this site doesn't have per-channel chat, just the one sitewide sidebar.
+export class ChatRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sessions = [];
+    this.messages = null; // lazily hydrated from storage on first connection
+  }
+
+  async fetch(request) {
+    if (request.headers.get('Upgrade') !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 });
+    }
+    const url = new URL(request.url);
+    const steamId = url.searchParams.get('steamId') || '';
+    if (!/^\d{17}$/.test(steamId)) {
+      return new Response('Missing or invalid steamId', { status: 400 });
+    }
+    const name = (url.searchParams.get('name') || steamId).slice(0, 32);
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    // Deliberately not awaited: the 101 response below has to go back
+    // immediately to actually complete the upgrade handshake. Awaiting
+    // session setup (which calls webSocket.accept() then does an async
+    // storage read + send) before returning it left the connecting
+    // client stuck — confirmed live as a 1006 abnormal-closure failure on
+    // every connection attempt.
+    this.handleSession(server, steamId, name).catch((error) => {
+      console.error('Chat session setup failed:', error.message);
+    });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async handleSession(webSocket, steamId, name) {
+    webSocket.accept();
+
+    if (this.messages === null) {
+      const stored = await this.state.storage.get('messages');
+      this.messages = Array.isArray(stored) ? stored : [];
+    }
+
+    const session = { webSocket, steamId, name };
+    this.sessions.push(session);
+    this.send(webSocket, { type: 'history', messages: this.messages });
+
+    webSocket.addEventListener('message', async (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const text = typeof data?.text === 'string' ? data.text.trim().slice(0, 240) : '';
+      if (!text) return;
+
+      const message = { id: crypto.randomUUID(), steamId, name, text, at: Date.now() };
+      this.messages.push(message);
+      if (this.messages.length > 200) this.messages = this.messages.slice(-200);
+      // Durable Object storage, not KV — no shared quota with the rest of
+      // the site, and reads/writes here are local to this one instance.
+      await this.state.storage.put('messages', this.messages);
+      this.broadcast({ type: 'message', message });
+    });
+
+    const dropSession = () => {
+      this.sessions = this.sessions.filter((s) => s !== session);
+    };
+    webSocket.addEventListener('close', dropSession);
+    webSocket.addEventListener('error', dropSession);
+  }
+
+  send(webSocket, payload) {
+    try {
+      webSocket.send(JSON.stringify(payload));
+    } catch {
+      // socket already gone — its close/error listener will clean it up
+    }
+  }
+
+  broadcast(payload) {
+    const json = JSON.stringify(payload);
+    this.sessions = this.sessions.filter((session) => {
+      try {
+        session.webSocket.send(json);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Global chat WebSocket — routed here from the site's own domain (see
+    // wrangler.jsonc's routes) so the client connects same-origin. One
+    // shared room for the whole site; the Durable Object itself enforces
+    // the steamId/name validation and message handling (see ChatRoom).
+    if (url.pathname === '/chat-ws') {
+      if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
+      const id = env.CHAT_ROOM.idFromName('global');
+      const stub = env.CHAT_ROOM.get(id);
+      return stub.fetch(request);
+    }
 
     // Manual trigger for testing the bridge without waiting for the cron
     // schedule — same bearer-token gate as the RCON routes below.

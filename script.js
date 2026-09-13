@@ -1082,11 +1082,14 @@ refreshSteamUsername();
 setInterval(refreshSteamUsername, 3 * 60 * 1000);
 
 // Global chat sidebar — a real shared chat (every signed-in player, not
-// just friends), backed by functions/api/chat-messages.js/chat-send.js
-// (direct KV, capped at 200 messages — no Pterodactyl/game-server
-// involvement needed, this never touches the mod). Previously local-only
-// (each browser's own localStorage), which meant no one ever actually saw
-// anyone else's messages — a real reported bug, not a design choice.
+// just friends), backed by a Durable Object WebSocket room (see
+// workers/bridge-worker.js's ChatRoom): one live connection per open
+// sidebar, pushed new messages the instant anyone sends one. Previously
+// polled a KV key every 500ms — polling frequency was never the problem,
+// KV writes simply aren't instantly visible everywhere, so messages still
+// took several real seconds to show up for anyone but the sender no
+// matter how often the poll ran. A Durable Object is one single
+// authoritative in-memory room with no such lag.
 const chatToggle = document.getElementById('chatToggle');
 const chatSidebar = document.getElementById('chatSidebar');
 const chatClose = document.getElementById('chatClose');
@@ -1098,7 +1101,9 @@ const chatHoneypot = document.getElementById('chatWebsite');
 const chatMinIntervalMs = 1500;
 let lastChatSendAt = 0;
 let cachedChatMessages = [];
-let chatPollTimer = null;
+let chatSocket = null;
+let chatReconnectTimer = null;
+let chatSocketSteamId = null;
 
 const renderChatMessages = () => {
   if (!chatMessages) return;
@@ -1128,17 +1133,75 @@ const renderChatMessages = () => {
   if (wasScrolledToBottom) chatMessages.scrollTop = chatMessages.scrollHeight;
 };
 
-const loadChatMessages = async () => {
+// Connects only while the sidebar is actually open, rather than holding a
+// socket open for every visitor site-wide regardless of whether they ever
+// look at chat.
+const connectChatSocket = () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  if (chatSocket && (chatSocket.readyState === WebSocket.OPEN || chatSocket.readyState === WebSocket.CONNECTING)) return;
+
+  // Connects straight to the Worker's own workers.dev subdomain rather
+  // than l-e-v-e-l-s.app's own routed path — confirmed live: the exact
+  // same Durable Object code completes the WebSocket handshake perfectly
+  // on workers.dev but gets an abnormal 1006 closure specifically via the
+  // custom-domain route (a Cloudflare zone/route quirk, not a code bug —
+  // the zone's WebSockets setting is already confirmed on). WebSocket
+  // connections aren't subject to the same-origin restrictions fetch()
+  // has, so connecting cross-origin like this is normal and safe.
+  const chatWorkerOrigin = 'wss://l-e-v-e-l-s.conlan-schlaeppi.workers.dev';
+  const url = `${chatWorkerOrigin}/chat-ws?steamId=${encodeURIComponent(profile.steamId)}&name=${encodeURIComponent(profile.username || profile.steamId)}`;
+
+  let socket;
   try {
-    const response = await fetch('/api/chat-messages');
-    const data = await response.json();
-    if (response.ok && Array.isArray(data.messages)) {
+    socket = new WebSocket(url);
+  } catch (error) {
+    console.debug('Chat socket creation failed:', error);
+    return;
+  }
+  chatSocket = socket;
+  chatSocketSteamId = profile.steamId;
+
+  socket.addEventListener('message', (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (data.type === 'history' && Array.isArray(data.messages)) {
       cachedChatMessages = data.messages;
       renderChatMessages();
       renderWebsiteChatLog();
+    } else if (data.type === 'message' && data.message) {
+      cachedChatMessages = [...cachedChatMessages, data.message].slice(-200);
+      renderChatMessages();
+      renderWebsiteChatLog();
     }
-  } catch (error) {
-    console.debug('Chat load failed:', error);
+  });
+
+  const scheduleReconnect = () => {
+    if (chatSocket === socket) chatSocket = null;
+    if (chatReconnectTimer || !chatSidebar?.classList.contains('is-open')) return;
+    chatReconnectTimer = setTimeout(() => {
+      chatReconnectTimer = null;
+      if (chatSidebar?.classList.contains('is-open')) connectChatSocket();
+    }, 2000);
+  };
+  socket.addEventListener('close', scheduleReconnect);
+  socket.addEventListener('error', () => socket.close());
+};
+
+const disconnectChatSocket = () => {
+  if (chatReconnectTimer) {
+    clearTimeout(chatReconnectTimer);
+    chatReconnectTimer = null;
+  }
+  chatSocketSteamId = null;
+  if (chatSocket) {
+    const socket = chatSocket;
+    chatSocket = null;
+    socket.close();
   }
 };
 
@@ -1146,23 +1209,14 @@ const openChat = () => {
   chatSidebar?.classList.add('is-open');
   chatSidebar?.setAttribute('aria-hidden', 'false');
   chatToggle?.setAttribute('aria-expanded', 'true');
-  loadChatMessages();
-  // KV reads are far cheaper than writes on Cloudflare's free tier (100k/day
-  // vs 1k/day) — polling this fast costs nothing meaningful and makes chat
-  // feel close to real-time without building actual push infrastructure
-  // (a genuinely instant chat would need WebSockets/Durable Objects, a much
-  // bigger change this site's architecture doesn't have yet).
-  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 500);
+  connectChatSocket();
 };
 
 const closeChat = () => {
   chatSidebar?.classList.remove('is-open');
   chatSidebar?.setAttribute('aria-hidden', 'true');
   chatToggle?.setAttribute('aria-expanded', 'false');
-  if (chatPollTimer) {
-    clearInterval(chatPollTimer);
-    chatPollTimer = null;
-  }
+  disconnectChatSocket();
 };
 
 chatToggle?.addEventListener('click', () => {
@@ -1182,9 +1236,17 @@ const updateChatSignInState = () => {
   const signedIn = document.querySelector('[data-chat-signed-in]');
   if (signedOut) signedOut.hidden = !!profile;
   if (signedIn) signedIn.hidden = !profile;
+  // Only touches the socket when the identity actually changed — this
+  // runs after lots of unrelated actions (any displaySteamStatus() call),
+  // so reconnecting unconditionally every time would drop and re-fetch
+  // history on a live connection for no reason.
+  if (chatSidebar?.classList.contains('is-open') && profile?.steamId !== chatSocketSteamId) {
+    disconnectChatSocket();
+    if (profile) connectChatSocket();
+  }
 };
 
-chatForm?.addEventListener('submit', async (event) => {
+chatForm?.addEventListener('submit', (event) => {
   event.preventDefault();
 
   // Bots tend to fill every field, including the hidden honeypot; humans never see it
@@ -1207,45 +1269,23 @@ chatForm?.addEventListener('submit', async (event) => {
   const text = chatTextInput?.value.trim().slice(0, 240);
   if (!text) return;
 
+  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+    showToast('Reconnecting to chat — try again in a moment.');
+    connectChatSocket();
+    return;
+  }
+
   lastChatSendAt = now;
   if (chatTextInput) chatTextInput.value = '';
-
-  // Optimistic: show it the instant it's sent rather than waiting on the
-  // round trip plus the next poll tick — reconciled a moment later when
-  // loadChatMessages() replaces this with the server's real copy.
-  const optimisticId = `local-${now}`;
-  cachedChatMessages = [...cachedChatMessages, { id: optimisticId, steamId: profile.steamId, name: profile.username, text, at: now }];
-  renderChatMessages();
-
-  const rollBackOptimisticMessage = () => {
-    cachedChatMessages = cachedChatMessages.filter((m) => m.id !== optimisticId);
-    renderChatMessages();
-  };
-
-  try {
-    const response = await fetch('/api/chat-send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steamId: profile.steamId, name: profile.username, text }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      showToast(data.error || 'Could not send that message.');
-      rollBackOptimisticMessage();
-    } else {
-      loadChatMessages();
-    }
-  } catch (error) {
-    console.debug('Chat send failed:', error);
-    showToast('Could not reach the server right now.');
-    rollBackOptimisticMessage();
-  } finally {
-    chatTextInput?.focus();
-  }
+  // No optimistic local echo needed — the room broadcasts back to every
+  // connected socket, sender included, fast enough that a separate
+  // local-first render would just be a redundant extra one, not a real
+  // latency win like it was under the old polling design.
+  chatSocket.send(JSON.stringify({ text }));
+  chatTextInput?.focus();
 });
 
 updateChatSignInState();
-loadChatMessages();
 
 const ticketStorageKey = 'levelsStaffTickets';
 let selectedTicketId = null;

@@ -39,5 +39,31 @@
   "routes": [
     { "pattern": "l-e-v-e-l-s.app/server-status", "zone_name": "l-e-v-e-l-s.app" },
     { "pattern": "l-e-v-e-l-s.app/status", "zone_name": "l-e-v-e-l-s.app" }
+  ],
+  // Real-time global chat — one shared ChatRoom instance for the whole
+  // site (see bridge-worker.js), replacing the old KV-polling chat whose
+  // multi-second write-propagation lag couldn't be fixed by polling
+  // faster. Durable Object storage here is local to the instance, not
+  // KV, so it doesn't share KV's account-wide read/write/list quotas.
+  // The client connects straight to this Worker's own workers.dev
+  // subdomain for /chat-ws (see script.js) rather than a l-e-v-e-l-s.app
+  // route — confirmed live: the identical code completes the WebSocket
+  // handshake perfectly on workers.dev but gets an abnormal 1006 closure
+  // specifically via a zone route on this domain (a Cloudflare zone/route
+  // quirk with Pages sharing the same zone, not a code bug — the zone's
+  // own WebSockets setting is already confirmed on). No route needed
+  // here for it as a result.
+  "durable_objects": {
+    "bindings": [
+      { "name": "CHAT_ROOM", "class_name": "ChatRoom" }
+    ]
+  },
+  // Free-plan Durable Objects require SQLite-backed storage specifically
+  // (new_sqlite_classes, not new_classes — confirmed live: "In order to
+  // use Durable Objects with a free plan, you must create a namespace
+  // using a new_sqlite_classes migration"). The classic get()/put()
+  // storage API ChatRoom uses works the same on either backend.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }
   ]
 }
