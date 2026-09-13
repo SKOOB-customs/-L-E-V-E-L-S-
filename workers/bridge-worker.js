@@ -753,9 +753,24 @@ const syncUnnamedFriendSteamIds = async (env) => {
       cache = null;
     }
   }
-  if (cache?.updatedAt && Date.now() - cache.updatedAt < FRIENDS_UNNAMED_SCAN_INTERVAL_MS) {
-    return; // scanned recently enough — skip the expensive list() this tick
+  // Throttle on the last ATTEMPT, not just the last success. Confirmed
+  // live: this originally only recorded a timestamp after a successful
+  // list() — so while the quota stayed exhausted, this cron (which ticks
+  // every 1 minute) retried the list() call every single minute, all day,
+  // up to 1,440 times — itself the dominant cause of the quota staying
+  // exhausted rather than ever getting a chance to recover. Recording the
+  // attempt BEFORE calling list() enforces the 15-minute backoff even
+  // when the call fails.
+  if (cache?.lastAttemptAt && Date.now() - cache.lastAttemptAt < FRIENDS_UNNAMED_SCAN_INTERVAL_MS) {
+    return; // attempted recently enough — skip the expensive list() this tick
   }
+
+  const attemptedAt = Date.now();
+  await env.PARKED_KV.put('friends_unnamed_ids:index', JSON.stringify({
+    steamIds: cache?.steamIds || [],
+    updatedAt: cache?.updatedAt || null,
+    lastAttemptAt: attemptedAt,
+  }));
 
   let players = {};
   const playersRaw = await env.PARKED_KV.get('player_directory:index');
@@ -778,6 +793,7 @@ const syncUnnamedFriendSteamIds = async (env) => {
   await env.PARKED_KV.put('friends_unnamed_ids:index', JSON.stringify({
     steamIds: [...unnamedSteamIds],
     updatedAt: Date.now(),
+    lastAttemptAt: attemptedAt,
   }));
 };
 
