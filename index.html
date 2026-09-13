@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=588f83f" />
+    <link rel="stylesheet" href="styles.css?v=4a03f79" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -764,7 +764,7 @@
                     Overrides the color pickers above if filled in. One field per color, e.g.
                     <code>{"BodyColor": {"r":0.9,"g":0.1,"b":0.5,"a":1}, "TeethColor": "#ff00ff"}</code>
                     — hex strings and <code>{r,g,b,a}</code> objects both work, mixed freely.
-                    <textarea rows="4" placeholder="Leave empty to use the color pickers above" data-skin-json></textarea>
+                    <textarea rows="14" class="skin-json-editor" placeholder="Leave empty to use the color pickers above" data-skin-json></textarea>
                   </label>
                 </div>
               </details>
@@ -821,7 +821,7 @@
                 <div class="field-row">
                   <label>
                     Overrides the color pickers above if filled in — same shape as the grant form's Advanced JSON.
-                    <textarea rows="4" placeholder="Leave empty to use the color pickers above" data-skin-library-json></textarea>
+                    <textarea rows="14" class="skin-json-editor" placeholder="Leave empty to use the color pickers above" data-skin-library-json></textarea>
                   </label>
                 </div>
               </details>
@@ -1234,6 +1234,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=588f83f"></script>
+    <script src="script.js?v=4a03f79"></script>
   </body>
 </html>

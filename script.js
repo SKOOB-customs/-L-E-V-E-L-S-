@@ -1098,7 +1098,10 @@ const openChat = () => {
   chatSidebar?.setAttribute('aria-hidden', 'false');
   chatToggle?.setAttribute('aria-expanded', 'true');
   loadChatMessages();
-  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 4000);
+  // KV reads are far cheaper than writes on Cloudflare's free tier (100k/day
+  // vs 1k/day) — polling this fast costs nothing meaningful and makes chat
+  // feel close to real-time without building actual push infrastructure.
+  if (!chatPollTimer) chatPollTimer = setInterval(loadChatMessages, 1200);
 };
 
 const closeChat = () => {
@@ -1155,6 +1158,19 @@ chatForm?.addEventListener('submit', async (event) => {
 
   lastChatSendAt = now;
   if (chatTextInput) chatTextInput.value = '';
+
+  // Optimistic: show it the instant it's sent rather than waiting on the
+  // round trip plus the next poll tick — reconciled a moment later when
+  // loadChatMessages() replaces this with the server's real copy.
+  const optimisticId = `local-${now}`;
+  cachedChatMessages = [...cachedChatMessages, { id: optimisticId, steamId: profile.steamId, name: profile.username, text, at: now }];
+  renderChatMessages();
+
+  const rollBackOptimisticMessage = () => {
+    cachedChatMessages = cachedChatMessages.filter((m) => m.id !== optimisticId);
+    renderChatMessages();
+  };
+
   try {
     const response = await fetch('/api/chat-send', {
       method: 'POST',
@@ -1164,12 +1180,14 @@ chatForm?.addEventListener('submit', async (event) => {
     const data = await response.json();
     if (!response.ok || !data.ok) {
       showToast(data.error || 'Could not send that message.');
+      rollBackOptimisticMessage();
     } else {
       loadChatMessages();
     }
   } catch (error) {
     console.debug('Chat send failed:', error);
     showToast('Could not reach the server right now.');
+    rollBackOptimisticMessage();
   } finally {
     chatTextInput?.focus();
   }

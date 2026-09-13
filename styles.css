@@ -2112,6 +2112,17 @@ strong.stat-critical {
   font-size: 0.75rem;
 }
 
+.skin-json-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .strike-entry {
   padding: 14px 16px;
   border-radius: 10px;
