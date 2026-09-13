@@ -240,18 +240,31 @@ end
 -- never renders). The working recipe is a direct write on the live
 -- pawn.CustomizerData property (never the GetCustomizerData() wrapper —
 -- same reasoning capturePawnState below uses for reads) followed by
--- pawn:ForceNetUpdate() to push replication. Deliberately does NOT touch
--- PatternIndex or SkinVariation — PatternIndex is strictly per-species
--- range-validated and an out-of-range value silently drops the ENTIRE
--- apply (every color field too), and we don't have each species' valid
--- pattern-count table. Every other customizer field is an unvalidated POD
--- write, which this mod's own safety notes already prove safe for
--- BodyColor specifically (writing all seven original color fields,
--- verified live, server stable for hours afterward) — this just extends
--- that same proven pattern to the three new 0.21.720 regions (Teeth/
--- Mouth/Claws) and adds the ForceNetUpdate the overhaul now requires for
--- it to actually be visible. Declared up here (not in the glitch-skins
--- section further down) because tryRedeem needs it and comes first.
+-- pawn:ForceNetUpdate() to push replication. Every color field is an
+-- unvalidated POD write, which this mod's own safety notes already prove
+-- safe for BodyColor specifically (writing all seven original color
+-- fields, verified live, server stable for hours afterward) — this just
+-- extends that same proven pattern to the three new 0.21.720 regions
+-- (Teeth/Mouth/Claws) and adds the ForceNetUpdate the overhaul now
+-- requires for it to actually be visible. Declared up here (not in the
+-- glitch-skins section further down) because tryRedeem needs it and
+-- comes first.
+--
+-- SkinVariation and PatternIndex are separate CustomizerData members
+-- (confirmed via EVRIMA_Customizer_Field_Map.md), handled very
+-- differently:
+-- - SkinVariation is completely unvalidated (every tested value applied,
+--   including -833/-1/100000) — floored and written unconditionally.
+-- - PatternIndex IS strictly validated against the species' own pattern
+--   table client-side, and an out-of-table value makes the client abort
+--   the ENTIRE skin rebuild — every color in the same apply silently
+--   drops too, with no error/crash, while the server keeps holding the
+--   (invisible) replicated value. There is no known universal per-species
+--   pattern-count table (confirmed T-Rex has exactly 3: indices 0-2 work,
+--   -1/3/7 don't) — only a loose sanity ceiling is enforced here, NOT a
+--   per-species one. An admin discovers each species' real cap
+--   empirically via the Skin Library's "Test on my live dino" button:
+--   try 0, 1, 2, 3... on that species until colors stop rendering.
 local function applyCustomizer(pawn, colors)
     if pawn == nil or colors == nil then return false end
     local okCd, cd = pcall(function() return pawn.CustomizerData end)
@@ -267,6 +280,21 @@ local function applyCustomizer(pawn, colors)
                 cd[field].A = color.A or 1.0
             end)
             if not ok then log("Skin apply: " .. field .. " write failed: " .. tostring(err)) end
+        end
+    end
+
+    local skinVariation = tonumber(colors.SkinVariation)
+    if skinVariation ~= nil then
+        pcall(function() cd.SkinVariation = math.floor(skinVariation) end)
+    end
+
+    local patternIndex = tonumber(colors.PatternIndex)
+    if patternIndex ~= nil then
+        patternIndex = math.floor(patternIndex)
+        if patternIndex >= 0 and patternIndex <= 9 then
+            pcall(function() cd.PatternIndex = patternIndex end)
+        else
+            log("Skin apply: PatternIndex " .. tostring(patternIndex) .. " outside sanity range 0-9, skipped")
         end
     end
 
@@ -379,6 +407,8 @@ local function loadParkedDinos(steam)
                 local color = jsonReadColorField(colorsSection, field)
                 if color ~= nil then colors[field] = color end
             end
+            colors.PatternIndex = jsonReadNumber(colorsSection, "PatternIndex")
+            colors.SkinVariation = jsonReadNumber(colorsSection, "SkinVariation")
             skin = { name = jsonReadString(skinSection, "name"), colors = colors }
         end
         -- Admin-granted (or naturally captured, via !park on an
@@ -1388,6 +1418,8 @@ local function loadSkinCharges(steam)
             local color = jsonReadColorField(colorsSection, field)
             if color ~= nil then colors[field] = color end
         end
+        colors.PatternIndex = jsonReadNumber(colorsSection, "PatternIndex")
+        colors.SkinVariation = jsonReadNumber(colorsSection, "SkinVariation")
         table.insert(skins, {
             name = jsonReadString(objStr, "name"),
             code = jsonReadString(objStr, "code"),
@@ -1406,6 +1438,12 @@ local function skinChargeEntryToJson(entry)
             table.insert(colorParts, string.format('"%s":{"r":%f,"g":%f,"b":%f,"a":%f}',
                 field, c.R, c.G, c.B, c.A or 1.0))
         end
+    end
+    if entry.colors.PatternIndex ~= nil then
+        table.insert(colorParts, string.format('"PatternIndex":%d', entry.colors.PatternIndex))
+    end
+    if entry.colors.SkinVariation ~= nil then
+        table.insert(colorParts, string.format('"SkinVariation":%d', entry.colors.SkinVariation))
     end
     return string.format('{"name":"%s","code":"%s","colors":{%s},"charges":%d}',
         jsonEscape(entry.name or ""), jsonEscape(entry.code or ""),

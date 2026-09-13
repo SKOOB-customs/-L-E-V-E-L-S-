@@ -3059,6 +3059,14 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
       colors[input.dataset.skinColor] = input.value;
     });
   }
+  // Plain pattern/variation inputs apply on top regardless of which color
+  // source was used, unless left blank — lets someone use the Advanced
+  // JSON for colors while still picking a pattern from the dedicated
+  // field, without needing to duplicate it into the JSON blob too.
+  const patternIndexValue = document.querySelector('[data-skin-pattern-index]')?.value;
+  if (patternIndexValue !== '' && patternIndexValue != null) colors.PatternIndex = Number(patternIndexValue);
+  const skinVariationValue = document.querySelector('[data-skin-skin-variation]')?.value;
+  if (skinVariationValue !== '' && skinVariationValue != null) colors.SkinVariation = Number(skinVariationValue);
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
   if (submitBtn) submitBtn.disabled = true;
@@ -3228,19 +3236,27 @@ document.querySelector('[data-skin-library-select]')?.addEventListener('change',
 // showing a toast) on invalid JSON, matching the pre-refactor inline
 // behavior each caller had.
 const collectSkinLibraryColors = () => {
+  let colors;
   const jsonText = document.querySelector('[data-skin-library-json]')?.value.trim() || '';
   if (jsonText) {
     try {
-      return JSON.parse(jsonText);
+      colors = JSON.parse(jsonText);
     } catch (error) {
       showToast('Advanced JSON is not valid JSON.');
       return null;
     }
+  } else {
+    colors = {};
+    document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
+      colors[input.dataset.skinLibraryColor] = input.value;
+    });
   }
-  const colors = {};
-  document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
-    colors[input.dataset.skinLibraryColor] = input.value;
-  });
+  // Plain pattern/variation inputs apply on top regardless of color
+  // source, unless left blank — same reasoning as the grant form.
+  const patternIndexValue = document.querySelector('[data-skin-library-pattern-index]')?.value;
+  if (patternIndexValue !== '' && patternIndexValue != null) colors.PatternIndex = Number(patternIndexValue);
+  const skinVariationValue = document.querySelector('[data-skin-library-skin-variation]')?.value;
+  if (skinVariationValue !== '' && skinVariationValue != null) colors.SkinVariation = Number(skinVariationValue);
   return colors;
 };
 

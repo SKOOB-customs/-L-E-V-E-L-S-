@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=4a03f79" />
+    <link rel="stylesheet" href="styles.css?v=a8c8e69" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -756,13 +756,24 @@
                   <input type="color" value="#808080" data-skin-color="MaleDisplayColor" />
                 </label>
               </div>
+              <div class="field-row two-up">
+                <label>
+                  Pattern index
+                  <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-pattern-index />
+                </label>
+                <label>
+                  Skin variation
+                  <input type="number" step="1" placeholder="optional" data-skin-skin-variation />
+                </label>
+              </div>
+              <p class="dino-park-note">Pattern index picks which built-in pattern layout the species uses (most dinos have several). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
 
               <details class="skin-advanced">
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
                 <div class="field-row">
                   <label>
                     Overrides the color pickers above if filled in. One field per color, e.g.
-                    <code>{"BodyColor": {"r":0.9,"g":0.1,"b":0.5,"a":1}, "TeethColor": "#ff00ff"}</code>
+                    <code>{"BodyColor": {"r":0.9,"g":0.1,"b":0.5,"a":1}, "TeethColor": "#ff00ff", "PatternIndex": 2}</code>
                     — hex strings and <code>{r,g,b,a}</code> objects both work, mixed freely.
                     <textarea rows="14" class="skin-json-editor" placeholder="Leave empty to use the color pickers above" data-skin-json></textarea>
                   </label>
@@ -815,6 +826,17 @@
                   <input type="color" value="#808080" data-skin-library-color="MaleDisplayColor" />
                 </label>
               </div>
+              <div class="field-row two-up">
+                <label>
+                  Pattern index
+                  <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-library-pattern-index />
+                </label>
+                <label>
+                  Skin variation
+                  <input type="number" step="1" placeholder="optional" data-skin-library-skin-variation />
+                </label>
+              </div>
+              <p class="dino-park-note">Each species has its own valid pattern range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>. Use "Test on my live dino" to find each species' real range: try 0, 1, 2, 3… until colors stop showing up.</p>
 
               <details class="skin-advanced">
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
@@ -1234,6 +1256,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=4a03f79"></script>
+    <script src="script.js?v=a8c8e69"></script>
   </body>
 </html>

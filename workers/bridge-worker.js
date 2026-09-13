@@ -870,6 +870,17 @@ const normalizeSkinColors = (colors) => {
       }
     }
   }
+  // Separate CustomizerData members, not colors — passed through as plain
+  // integers. PatternIndex is strictly per-species range-validated by the
+  // client (main.lua's applyCustomizer only enforces a loose 0-9 sanity
+  // ceiling, not a per-species one — see its own comment for why no
+  // universal table exists); SkinVariation is confirmed unvalidated.
+  if (colors?.PatternIndex != null && Number.isFinite(Number(colors.PatternIndex))) {
+    normalized.PatternIndex = Math.floor(Number(colors.PatternIndex));
+  }
+  if (colors?.SkinVariation != null && Number.isFinite(Number(colors.SkinVariation))) {
+    normalized.SkinVariation = Math.floor(Number(colors.SkinVariation));
+  }
   return normalized;
 };
 
