@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=9a8c2a9" />
+    <link rel="stylesheet" href="styles.css?v=3b017ad" />
     <link rel="icon" type="image/png" href="assets/logo/LL.png" />
   </head>
   <body>
@@ -715,10 +715,16 @@
                   <input type="text" maxlength="40" placeholder="Neon Glitch" data-skin-name required />
                 </label>
               </div>
-              <div class="field-row">
+              <div class="field-row two-up">
                 <label>
                   Charges to grant
                   <input type="number" min="1" value="1" data-skin-charge-count />
+                </label>
+                <label>
+                  Load from library
+                  <select data-skin-library-select>
+                    <option value="">Pick a saved skin…</option>
+                  </select>
                 </label>
               </div>
               <div class="field-row skin-color-grid">
@@ -768,6 +774,67 @@
                 <button class="action-button" type="submit">Apply skin</button>
               </div>
             </form>
+          </section>
+
+          <section class="panel content-box" data-owner-only hidden>
+            <div class="mini-heading">Skin Library (Owner only)</div>
+            <p class="dino-park-note">Save a reusable named skin here — it shows up in the "Load from library" dropdown above for any admin to grant, without re-entering colors by hand.</p>
+            <form class="submit-form" data-skin-library-form>
+              <div class="field-row">
+                <label>
+                  Skin name
+                  <input type="text" maxlength="40" placeholder="Neon Glitch" data-skin-library-name required />
+                </label>
+              </div>
+              <div class="field-row skin-color-grid">
+                <label>
+                  Body
+                  <input type="color" value="#808080" data-skin-library-color="BodyColor" />
+                </label>
+                <label>
+                  Pattern / Markings
+                  <input type="color" value="#808080" data-skin-library-color="MarkingsColor" />
+                </label>
+                <label>
+                  Flank / Sides
+                  <input type="color" value="#808080" data-skin-library-color="FlankColor" />
+                </label>
+                <label>
+                  Belly
+                  <input type="color" value="#808080" data-skin-library-color="UnderbellyColor" />
+                </label>
+                <label>
+                  Detail
+                  <input type="color" value="#808080" data-skin-library-color="Detail1Color" />
+                </label>
+                <label>
+                  Eyes
+                  <input type="color" value="#808080" data-skin-library-color="EyesColor" />
+                </label>
+                <label>
+                  Breed / Male display
+                  <input type="color" value="#808080" data-skin-library-color="MaleDisplayColor" />
+                </label>
+              </div>
+
+              <details class="skin-advanced">
+                <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
+                <div class="field-row">
+                  <label>
+                    Overrides the color pickers above if filled in — same shape as the grant form's Advanced JSON.
+                    <textarea rows="4" placeholder="Leave empty to use the color pickers above" data-skin-library-json></textarea>
+                  </label>
+                </div>
+              </details>
+
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Save to library</button>
+              </div>
+            </form>
+
+            <div class="dino-history-list" data-skin-library-list>
+              <p class="empty-state">No saved skins yet.</p>
+            </div>
           </section>
 
           <section class="panel content-box">
@@ -1167,6 +1234,6 @@
          hash) whenever script.js or styles.css changes, so browsers with the
          long Cache-Control lifetime on those files (see wrangler/Pages asset
          headers) fetch the new version instead of serving a stale cached copy. -->
-    <script src="script.js?v=9a8c2a9"></script>
+    <script src="script.js?v=3b017ad"></script>
   </body>
 </html>

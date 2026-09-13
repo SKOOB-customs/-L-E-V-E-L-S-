@@ -2749,6 +2749,7 @@ const checkAdminPanelAccess = async () => {
   if (!profile?.steamId) {
     if (adminPanelTabButton) adminPanelTabButton.hidden = true;
     if (adminPanelPanel) adminPanelPanel.hidden = true;
+    document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
     return;
   }
   try {
@@ -2757,10 +2758,18 @@ const checkAdminPanelAccess = async () => {
     const hasAccess = Boolean(data.tier);
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
+    // Skin Library management (save/delete) is owner-tier only — the
+    // grant form's "Load from library" dropdown is separate and works for
+    // any admin tier, wired up unconditionally in loadSkinLibrary().
+    const isOwner = data.tier === 'owner';
+    document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = !isOwner; });
     // renderHub() ran at page load before this async check resolved, so the
     // Admin Panel card wasn't in the grid yet for an actual admin — add it
     // in now that we know for sure.
-    if (hasAccess) renderHub();
+    if (hasAccess) {
+      renderHub();
+      loadSkinLibrary();
+    }
   } catch (error) {
     console.debug('Admin panel access check failed:', error);
   }
@@ -3007,6 +3016,192 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
     }
   } catch (error) {
     console.debug('Skin grant failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+// ── Skin Library (owner-tier save area + grant-form dropdown) ──
+//
+// Saving/deleting is owner-tier only (enforced server-side regardless of
+// what this UI shows — checkAdminPanelAccess only reveals the [data-owner-
+// only] section for tier === 'owner'), but the resulting dropdown on the
+// Glitch Skins grant form above is populated for every admin tier, since
+// granting itself was never owner-restricted.
+let skinLibraryCache = [];
+
+const SKIN_LIBRARY_COLOR_FIELDS = ['BodyColor', 'MarkingsColor', 'FlankColor', 'UnderbellyColor', 'Detail1Color', 'EyesColor', 'MaleDisplayColor'];
+
+const populateSkinLibrarySelect = (skins) => {
+  const select = document.querySelector('[data-skin-library-select]');
+  if (!select) return;
+  select.innerHTML = '<option value="">Pick a saved skin…</option>';
+  skins.forEach((skin) => {
+    const option = document.createElement('option');
+    option.value = skin.name;
+    option.textContent = skin.name;
+    select.appendChild(option);
+  });
+};
+
+const renderSkinLibraryList = (skins) => {
+  const list = document.querySelector('[data-skin-library-list]');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!skins.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No saved skins yet.';
+    list.appendChild(empty);
+    return;
+  }
+  skins.forEach((skin) => {
+    const card = document.createElement('div');
+    card.className = 'panel dino-history-card';
+
+    const header = document.createElement('div');
+    header.className = 'dino-history-card-header';
+    const title = document.createElement('strong');
+    title.textContent = skin.name;
+    const swatch = document.createElement('span');
+    swatch.className = 'badge';
+    const bodyColor = skin.colors?.BodyColor;
+    if (bodyColor) {
+      const r = Math.round((bodyColor.r ?? 0.5) * 255);
+      const g = Math.round((bodyColor.g ?? 0.5) * 255);
+      const b = Math.round((bodyColor.b ?? 0.5) * 255);
+      swatch.style.background = `rgb(${r}, ${g}, ${b})`;
+      swatch.textContent = ' ';
+    } else {
+      swatch.textContent = 'No preview';
+    }
+    header.append(title, swatch);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'secondary-button';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      const profile = getSteamProfile();
+      if (!profile?.steamId) return;
+      deleteBtn.disabled = true;
+      try {
+        const response = await fetch('/api/skin-library-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ granterSteamId: profile.steamId, name: skin.name }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          showToast(data.error || 'Could not delete that skin.');
+          deleteBtn.disabled = false;
+        } else {
+          showToast(`Deleted "${skin.name}" from the library.`);
+          loadSkinLibrary();
+        }
+      } catch (error) {
+        console.debug('Skin library delete failed:', error);
+        showToast('Could not reach the server right now.');
+        deleteBtn.disabled = false;
+      }
+    });
+
+    card.append(header, deleteBtn);
+    list.appendChild(card);
+  });
+};
+
+const loadSkinLibrary = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch(`/api/skin-library?requesterSteamId=${encodeURIComponent(profile.steamId)}`);
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.skins)) {
+      skinLibraryCache = data.skins;
+      populateSkinLibrarySelect(skinLibraryCache);
+      renderSkinLibraryList(skinLibraryCache);
+    }
+  } catch (error) {
+    console.debug('Skin library load failed:', error);
+  }
+};
+
+// Picking a saved skin from the grant form's dropdown auto-fills the name
+// + color pickers (or the Advanced JSON field, if the saved skin has any
+// non-picker fields like Teeth/Mouth/Claws) — pure client-side
+// convenience, the actual grant submission is unchanged.
+document.querySelector('[data-skin-library-select]')?.addEventListener('change', (event) => {
+  const skin = skinLibraryCache.find((s) => s.name === event.target.value);
+  if (!skin) return;
+  const nameInput = document.querySelector('[data-skin-name]');
+  if (nameInput) nameInput.value = skin.name;
+
+  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !SKIN_LIBRARY_COLOR_FIELDS.includes(field));
+  const jsonField = document.querySelector('[data-skin-json]');
+  if (hasExtraFields && jsonField) {
+    jsonField.value = JSON.stringify(skin.colors, null, 2);
+  } else {
+    if (jsonField) jsonField.value = '';
+    document.querySelectorAll('[data-skin-color]').forEach((input) => {
+      const field = input.dataset.skinColor;
+      const color = skin.colors?.[field];
+      if (!color) return;
+      const toHex = (n) => Math.round((n ?? 0) * 255).toString(16).padStart(2, '0');
+      input.value = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+    });
+  }
+});
+
+document.querySelector('[data-skin-library-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const name = document.querySelector('[data-skin-library-name]')?.value.trim() || '';
+  if (!name) {
+    showToast('Enter a skin name.');
+    return;
+  }
+
+  let colors;
+  const jsonText = document.querySelector('[data-skin-library-json]')?.value.trim() || '';
+  if (jsonText) {
+    try {
+      colors = JSON.parse(jsonText);
+    } catch (error) {
+      showToast('Advanced JSON is not valid JSON.');
+      return;
+    }
+  } else {
+    colors = {};
+    document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
+      colors[input.dataset.skinLibraryColor] = input.value;
+    });
+  }
+
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/skin-library-save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ granterSteamId: profile.steamId, name, colors }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not save that skin.');
+    } else {
+      showToast(`Saved "${name}" to the library.`);
+      document.querySelector('[data-skin-library-name]').value = '';
+      document.querySelector('[data-skin-library-json]').value = '';
+      loadSkinLibrary();
+    }
+  } catch (error) {
+    console.debug('Skin library save failed:', error);
     showToast('Could not reach the server right now.');
   } finally {
     if (submitBtn) submitBtn.disabled = false;

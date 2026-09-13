@@ -1360,6 +1360,106 @@ export default {
       }
     }
 
+    // ── Skin Library (owner-tier only) ──
+    //
+    // A named catalog of reusable skin color sets, separate from any
+    // specific player's granted charges — lets an owner build up a
+    // library once (by name + color palette or raw JSON) so every admin
+    // can pick from a dropdown on the Glitch Skins grant form above
+    // instead of re-entering colors by hand every time. Saving/deleting
+    // is owner-tier only; reading the list (for that dropdown) is open to
+    // any admin tier, same as the grant form itself.
+    if (url.pathname === '/skin-library-save' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, name, colors } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json({ error: 'Skin name is required' }, 400);
+      }
+      if (!colors || typeof colors !== 'object') {
+        return json({ error: 'Missing or invalid colors' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+
+      const normalized = normalizeSkinColors(colors);
+      if (Object.keys(normalized).length === 0) {
+        return json({ error: 'No valid color fields provided' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (raw) {
+          try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+        }
+        const trimmedName = name.trim().slice(0, 40);
+        library[trimmedName] = { colors: normalized, savedAt: Date.now(), savedBy: granterSteamId };
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        return json({ ok: true, skin: { name: trimmedName, colors: normalized } });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library save failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-library-delete' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, name } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json({ error: 'Skin name is required' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+
+      try {
+        const raw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (raw) {
+          try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+        }
+        delete library[name.trim()];
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library delete failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-library' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, skins: [] });
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+      const raw = await env.PARKED_KV.get('skin_library:index');
+      let library = {};
+      if (raw) {
+        try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+      }
+      const skins = Object.entries(library)
+        .map(([name, entry]) => ({ name, colors: entry.colors }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return json({ ok: true, skins });
+    }
+
     // Inventory: a player's own skin-charge ledger. Same trust model as
     // /api/parked-list — client-supplied steamId, no separate requester
     // check (read-only, their own data, not a new gap on this site).
