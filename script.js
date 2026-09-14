@@ -1039,15 +1039,22 @@ setInterval(loadCurrencyBalance, 30000);
 
 // ── Website presence (for the Friends tab's online indicator) ──
 //
-// A lightweight heartbeat: while this tab is open and visible, ping every
-// 3 minutes so functions/api/presence.js can tell friends "online" from
-// "not." A single shared presence:index KV entry per player (overwritten,
-// not appended) keeps this off the per-event write-quota problem the
-// currency/dino-history systems had to design around — this never grows
-// with heartbeat frequency, only with total distinct players ever seen.
+// A lightweight heartbeat: while this tab is open, ping every 3 minutes so
+// functions/api/presence.js can tell friends "online" from "not." A single
+// shared presence:index KV entry per player (overwritten, not appended)
+// keeps this off the per-event write-quota problem the currency/dino-
+// history systems had to design around — this never grows with heartbeat
+// frequency, only with total distinct players ever seen.
+//
+// Deliberately does NOT gate on document.visibilityState — a real reported
+// case: a player's tab was open but backgrounded (not the focused tab)
+// while they were off doing something else, heartbeats stopped firing
+// entirely, and they read as offline to friends within 5 minutes even
+// though the site was genuinely still open. "Online on website" means the
+// tab is open, not that it's the one currently in focus.
 const sendHeartbeat = () => {
   const profile = getSteamProfile();
-  if (!profile?.steamId || document.visibilityState !== 'visible') return;
+  if (!profile?.steamId) return;
   fetch('/api/heartbeat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
