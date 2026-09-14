@@ -35,6 +35,7 @@ export async function onRequestPost(context) {
 
   const issuerSteamId = data.authedSteamId;
   if (!issuerSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
+  if (!data.adminUnlocked) return json({ error: 'Enter your admin passkey to use the Admin Panel.' }, 403);
 
   let body;
   try {
@@ -66,6 +67,7 @@ export async function onRequestGet(context) {
 
   const requesterSteamId = data.authedSteamId;
   if (!isValidSteamId(requesterSteamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
+  if (!data.adminUnlocked) return json({ error: 'Enter your admin passkey to use the Admin Panel.' }, 403);
 
   const url = new URL(request.url);
   const targetSteamId = url.searchParams.get('targetSteamId');

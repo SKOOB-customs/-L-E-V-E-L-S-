@@ -30,6 +30,7 @@ export async function onRequestGet(context) {
 
   const requesterSteamId = data.authedSteamId;
   if (!requesterSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
+  if (!data.adminUnlocked) return json({ error: 'Enter your admin passkey to use the Admin Panel.' }, 403);
 
   try {
     const target = new URL(`${origin}/skin-library`);

@@ -3011,10 +3011,30 @@ const attachPlayerAutocomplete = (inputEl) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
+// Second factor gating the Admin Panel specifically (no other tab):
+// each admin sets their own passkey the first time they open the panel,
+// then re-enters it each session — unlocked for 35 minutes at a time
+// (functions/_lib/session.js's ADMIN_UNLOCK_TTL_MS is the real,
+// server-enforced cutoff; this timer just keeps the UI in sync with it
+// rather than sitting there looking unlocked after it no longer is).
+let adminUnlockExpiryTimer = null;
+
+const setAdminPanelGateState = (state) => {
+  // 'hidden' (not an admin at all) | 'locked' (needs the passkey) | 'unlocked'
+  const gate = document.querySelector('[data-admin-passkey-gate]');
+  const content = document.querySelector('[data-admin-panel-content]');
+  if (gate) gate.hidden = state !== 'locked';
+  if (content) content.hidden = state !== 'unlocked';
+};
+
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
   const profile = getSteamProfile();
+  if (adminUnlockExpiryTimer) {
+    clearTimeout(adminUnlockExpiryTimer);
+    adminUnlockExpiryTimer = null;
+  }
   if (!profile?.steamId) {
     if (adminPanelTabButton) adminPanelTabButton.hidden = true;
     if (adminPanelPanel) adminPanelPanel.hidden = true;
@@ -3022,7 +3042,7 @@ const checkAdminPanelAccess = async () => {
     return;
   }
   try {
-    const response = await fetch(`/api/admin-status?steam_id=${encodeURIComponent(profile.steamId)}`);
+    const response = await fetch('/api/admin-status');
     const data = await response.json();
     const hasAccess = Boolean(data.tier);
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
@@ -3035,14 +3055,104 @@ const checkAdminPanelAccess = async () => {
     // renderHub() ran at page load before this async check resolved, so the
     // Admin Panel card wasn't in the grid yet for an actual admin — add it
     // in now that we know for sure.
-    if (hasAccess) {
-      renderHub();
+    if (!hasAccess) {
+      setAdminPanelGateState('hidden');
+      return;
+    }
+    renderHub();
+
+    if (data.unlocked) {
+      setAdminPanelGateState('unlocked');
       loadSkinLibrary();
+      const statusEl = document.querySelector('[data-admin-unlock-status]');
+      if (statusEl) {
+        if (data.unlockExpiresAt) {
+          statusEl.hidden = false;
+          const until = new Date(data.unlockExpiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+          statusEl.textContent = `Admin Panel unlocked — locks again at ${until}.`;
+          const delay = data.unlockExpiresAt - Date.now();
+          if (delay > 0) adminUnlockExpiryTimer = setTimeout(checkAdminPanelAccess, delay);
+        } else {
+          statusEl.hidden = true;
+        }
+      }
+    } else {
+      setAdminPanelGateState('locked');
+      const form = document.querySelector('[data-admin-passkey-form]');
+      const note = document.querySelector('[data-admin-passkey-note]');
+      const submitBtn = document.querySelector('[data-admin-passkey-submit]');
+      if (form) form.dataset.mode = data.hasPasskey ? 'unlock' : 'set';
+      if (note) {
+        note.textContent = data.hasPasskey
+          ? 'Enter your admin passkey to use the Admin Panel.'
+          : "Set a passkey to protect the Admin Panel — you'll enter it each time you use it, and it stays unlocked for 35 minutes.";
+      }
+      if (submitBtn) submitBtn.textContent = data.hasPasskey ? 'Unlock' : 'Set passkey';
     }
   } catch (error) {
     console.debug('Admin panel access check failed:', error);
   }
 };
+
+document.querySelector('[data-admin-passkey-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = document.querySelector('[data-admin-passkey-input]');
+  const passkey = input?.value || '';
+  const mode = event.target.dataset.mode === 'set' ? 'set' : 'verify';
+  const submitBtn = document.querySelector('[data-admin-passkey-submit]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch(`/api/admin-passkey-${mode}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkey }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not verify that passkey.');
+      return;
+    }
+    if (input) input.value = '';
+    showToast(mode === 'set' ? 'Admin passkey set — Admin Panel unlocked.' : 'Admin Panel unlocked.');
+    checkAdminPanelAccess();
+  } catch (error) {
+    console.debug('Admin passkey submit failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+document.querySelector('[data-admin-passkey-reset-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const targetInput = document.querySelector('[data-admin-passkey-reset-target]');
+  const targetSteamId = extractSteamId(targetInput?.value);
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/admin-passkey-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetSteamId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not reset that passkey.');
+      return;
+    }
+    showToast('Passkey reset — they can set a new one next time they open the Admin Panel.');
+    if (targetInput) targetInput.value = '';
+  } catch (error) {
+    console.debug('Admin passkey reset failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
 
 checkAdminPanelAccess();
 // Now open to any signed-in player (not admin-gated server-side anymore)

@@ -21,6 +21,8 @@ const decoder = new TextDecoder();
 const SESSION_COOKIE_NAME = 'levels_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TICKET_TTL_MS = 60 * 1000; // 60 seconds — just long enough to open the chat socket
+const ADMIN_UNLOCK_COOKIE_NAME = 'levels_admin_unlock';
+const ADMIN_UNLOCK_TTL_MS = 35 * 60 * 1000; // 35 minutes, per the Admin Panel passkey feature
 
 const base64UrlEncode = (bytes) => {
   let binary = '';
@@ -132,4 +134,41 @@ export async function verifyTicket(env, ticket) {
   const payload = await verifyToken(env.SESSION_SECRET, ticket);
   if (typeof payload?.steamId !== 'string') return null;
   return { steamId: payload.steamId, name: typeof payload.name === 'string' ? payload.name : payload.steamId };
+}
+
+// Admin Panel passkey unlock — a second, separate secret from the site
+// session above, gating only the Admin Panel. Issued by
+// admin-passkey-set.js/admin-passkey-verify.js once an admin's passkey
+// checks out; read by functions/api/_middleware.js on every request
+// alongside the session cookie so admin-gated routes can require it.
+// Never needs to reach the Worker directly — the Worker already fully
+// trusts Pages as its only caller (the STATUS_API_TOKEN gate), so Pages
+// enforcing this here is the real boundary, same as it already is for
+// steamId itself.
+// Returns both the token and its expiry so callers (admin-passkey-set.js/
+// admin-passkey-verify.js) never have to duplicate ADMIN_UNLOCK_TTL_MS
+// themselves — one place controls the actual unlock duration.
+export async function signAdminUnlock(env, steamId) {
+  const now = Date.now();
+  const exp = now + ADMIN_UNLOCK_TTL_MS;
+  const token = await signPayload(env.SESSION_SECRET, { steamId, iat: now, exp });
+  return { token, expiresAt: exp };
+}
+
+export function adminUnlockCookieHeader(token) {
+  const maxAgeSeconds = Math.floor(ADMIN_UNLOCK_TTL_MS / 1000);
+  return `${ADMIN_UNLOCK_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}`;
+}
+
+// Returns { steamId, expiresAt } (not just a boolean/steamId) so
+// admin-status.js can tell the client exactly when the unlock ends —
+// needed on an ordinary page load where the cookie already existed, not
+// just right after a fresh verify/set call.
+export async function verifyAdminUnlock(env, request) {
+  if (!env.SESSION_SECRET) return null;
+  const token = parseCookie(request.headers.get('Cookie'), ADMIN_UNLOCK_COOKIE_NAME);
+  if (!token) return null;
+  const payload = await verifyToken(env.SESSION_SECRET, token);
+  if (typeof payload?.steamId !== 'string') return null;
+  return { steamId: payload.steamId, expiresAt: payload.exp };
 }

@@ -30,6 +30,7 @@ export async function onRequestPost(context) {
 
   const granterSteamId = data.authedSteamId;
   if (!granterSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
+  if (!data.adminUnlocked) return json({ error: 'Enter your admin passkey to use the Admin Panel.' }, 403);
 
   let body;
   try {
