@@ -250,11 +250,16 @@ const buildHubCard = (page) => {
 
   card.append(top, title, desc);
   // Clicks the REAL tab button rather than calling activateTab(page.tab)
-  // directly — several tabs (Inventory, Friends, Community) load their
-  // data from a listener bound to the button's own click event, not from
-  // activateTab itself, so bypassing the button would land on an empty/
-  // stale tab.
+  // directly — several tabs (Inventory, Community) load their data from a
+  // listener bound to the button's own click event, not from activateTab
+  // itself, so bypassing the button would land on an empty/stale tab.
+  // Friends has no tab button at all anymore (it's the slide-out sidebar),
+  // so its card opens that instead.
   card.addEventListener('click', () => {
+    if (page.tab === 'friends') {
+      openFriends();
+      return;
+    }
     document.querySelector(`.tab-button[data-tab="${page.tab}"]`)?.click();
   });
 
@@ -4176,6 +4181,36 @@ document.querySelector('[data-friend-request-form]')?.addEventListener('submit',
   }
 });
 
-document.querySelector('[data-tab="friends"]')?.addEventListener('click', loadFriendsTabData);
+// Friends is a slide-out sidebar (same toggle mechanics as the chat
+// sidebar, mirrored to the opposite edge) rather than a top-bar tab, so
+// its data loads whenever it's opened instead of on a tab-button click.
+const friendsToggle = document.getElementById('friendsToggle');
+const friendsSidebar = document.getElementById('friendsSidebar');
+const friendsClose = document.getElementById('friendsClose');
+
+const openFriends = () => {
+  friendsSidebar?.classList.add('is-open');
+  friendsSidebar?.setAttribute('aria-hidden', 'false');
+  friendsToggle?.setAttribute('aria-expanded', 'true');
+  loadFriendsTabData();
+};
+
+const closeFriends = () => {
+  friendsSidebar?.classList.remove('is-open');
+  friendsSidebar?.setAttribute('aria-hidden', 'true');
+  friendsToggle?.setAttribute('aria-expanded', 'false');
+};
+
+friendsToggle?.addEventListener('click', () => {
+  const isOpen = friendsSidebar?.classList.contains('is-open');
+  if (isOpen) {
+    closeFriends();
+  } else {
+    openFriends();
+  }
+});
+
+friendsClose?.addEventListener('click', closeFriends);
+
 loadFriendsTabData();
 

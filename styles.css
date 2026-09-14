@@ -200,6 +200,64 @@ body::before {
   font-family: var(--logo-font);
 }
 
+/* Friends sidebar — same slide-out toggle mechanics as the chat sidebar
+   above, mirrored to the left edge so the two don't collide. */
+.friends-toggle {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 30;
+  transform: translateY(-50%);
+  padding: 0.7rem 0.5rem;
+  border: none;
+  border-radius: 0 10px 10px 0;
+  background: var(--chat-bg-solid);
+  color: var(--chrome-1);
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.1em;
+  font-family: var(--logo-font);
+  box-shadow: 4px 0 14px rgba(0, 0, 0, 0.28);
+}
+
+.friends-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 88vw);
+  height: 100vh;
+  padding: 16px;
+  gap: 10px;
+  background: var(--chat-bg-solid);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35);
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  font-family: var(--logo-font);
+}
+
+.friends-sidebar.is-open {
+  transform: translateX(0);
+}
+
+.friends-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 4px;
+}
+
+/* The add-friend field+button row is a fixed 2-up grid everywhere else on
+   the site (room to spare on a full-width tab) — too cramped at the
+   sidebar's ~330px content width, so it stacks here instead. */
+.friends-sidebar-body .field-row.two-up {
+  grid-template-columns: 1fr;
+}
+
 /* Honeypot field: hidden from sighted users and screen readers, catches simple bots */
 .chat-honeypot {
   position: absolute;

@@ -51,6 +51,76 @@
       </form>
     </aside>
 
+    <button id="friendsToggle" class="friends-toggle" type="button" aria-expanded="false" aria-controls="friendsSidebar">
+      Friends
+    </button>
+
+    <aside id="friendsSidebar" class="friends-sidebar" aria-hidden="true">
+      <div class="chat-header">
+        <span>Friends</span>
+        <button id="friendsClose" class="chat-close" type="button" aria-label="Close friends">×</button>
+      </div>
+
+      <div class="friends-sidebar-body">
+        <div class="panel content-box" data-friends-signed-out hidden>
+          <div class="mini-heading">Sign in required</div>
+          <div class="info-list">
+            <div>
+              <strong>!</strong>
+              <span>Connect with Steam to add friends.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel content-box" data-friends-signed-in-only>
+          <div class="mini-heading">Add a friend</div>
+          <form class="submit-form" data-friend-request-form>
+            <div class="field-row two-up">
+              <label>
+                Friend's Steam ID or name
+                <div class="player-search">
+                  <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-friend-target required />
+                </div>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="submit">Send request</button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel content-box" data-friends-signed-in-only>
+          <div class="mini-heading">Friend requests</div>
+          <p class="dino-park-note" data-friend-requests-empty hidden>No pending friend requests.</p>
+          <div class="parked-grid" data-friend-requests-grid></div>
+        </div>
+
+        <div class="panel content-box" data-friends-signed-in-only>
+          <div class="mini-heading">Teleport requests</div>
+          <p class="dino-park-note" data-teleport-requests-empty hidden>No pending teleport requests.</p>
+          <div class="parked-grid" data-teleport-requests-grid></div>
+        </div>
+
+        <div class="section-header friends-section-header" data-friends-signed-in-only>
+          <p class="eyebrow">YOUR FRIENDS</p>
+          <h2>Friends list</h2>
+        </div>
+        <p class="dino-park-note" data-friends-empty hidden>No friends added yet — add one above.</p>
+
+        <button type="button" class="friends-group-toggle is-expanded" data-friends-online-toggle>
+          <span class="friends-group-chevron">▾</span>
+          Online (<span data-friends-online-count>0</span>)
+        </button>
+        <div class="parked-grid" data-friends-online-grid></div>
+
+        <button type="button" class="friends-group-toggle" data-friends-offline-toggle>
+          <span class="friends-group-chevron">▾</span>
+          Offline (<span data-friends-offline-count>0</span>)
+        </button>
+        <div class="parked-grid friends-offline-grid" data-friends-offline-grid hidden></div>
+      </div>
+    </aside>
+
     <div class="site-shell">
       <header class="site-header panel">
         <button class="brand-wrap profile-access" type="button" aria-label="Open profile">
@@ -80,7 +150,6 @@
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
-        <button class="tab-button" data-tab="friends" type="button">Friends</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
         <button class="tab-button" data-tab="tickets" type="button">Support</button>
         <!-- Still real tabs, reachable via their Home-hub cards (which
@@ -996,70 +1065,6 @@
             <div data-parked-modal-content></div>
           </div>
         </div>
-
-        <section class="tab-panel" id="friends" data-tab="friends">
-          <div class="section-header">
-            <p class="eyebrow">FRIENDS</p>
-            <h2>Add friends and meet up</h2>
-          </div>
-
-          <div class="panel content-box" data-friends-signed-out hidden>
-            <div class="mini-heading">Sign in required</div>
-            <div class="info-list">
-              <div>
-                <strong>!</strong>
-                <span>Connect with Steam to add friends.</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel content-box" data-friends-signed-in-only>
-            <div class="mini-heading">Add a friend</div>
-            <form class="submit-form" data-friend-request-form>
-              <div class="field-row two-up">
-                <label>
-                  Friend's Steam ID or name
-                  <div class="player-search">
-                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-friend-target required />
-                  </div>
-                </label>
-                <div class="submit-actions field-inline-action">
-                  <button class="action-button" type="submit">Send request</button>
-                </div>
-              </div>
-            </form>
-          </div>
-
-          <div class="panel content-box" data-friends-signed-in-only>
-            <div class="mini-heading">Friend requests</div>
-            <p class="dino-park-note" data-friend-requests-empty hidden>No pending friend requests.</p>
-            <div class="parked-grid" data-friend-requests-grid></div>
-          </div>
-
-          <div class="panel content-box" data-friends-signed-in-only>
-            <div class="mini-heading">Teleport requests</div>
-            <p class="dino-park-note" data-teleport-requests-empty hidden>No pending teleport requests.</p>
-            <div class="parked-grid" data-teleport-requests-grid></div>
-          </div>
-
-          <div class="section-header friends-section-header" data-friends-signed-in-only>
-            <p class="eyebrow">YOUR FRIENDS</p>
-            <h2>Friends list</h2>
-          </div>
-          <p class="dino-park-note" data-friends-empty hidden>No friends added yet — add one above.</p>
-
-          <button type="button" class="friends-group-toggle is-expanded" data-friends-online-toggle>
-            <span class="friends-group-chevron">▾</span>
-            Online (<span data-friends-online-count>0</span>)
-          </button>
-          <div class="parked-grid" data-friends-online-grid></div>
-
-          <button type="button" class="friends-group-toggle" data-friends-offline-toggle>
-            <span class="friends-group-chevron">▾</span>
-            Offline (<span data-friends-offline-count>0</span>)
-          </button>
-          <div class="parked-grid friends-offline-grid" data-friends-offline-grid hidden></div>
-        </section>
 
         <section class="tab-panel" id="live-dino" data-tab="live-dino">
           <div class="section-header">
