@@ -912,18 +912,21 @@ const displaySteamStatus = async () => {
       loadCurrencyBalance();
     }
   }
-  if (connectSteamBtn) connectSteamBtn.hidden = !!profile;
+  if (connectSteamBtn) {
+    connectSteamBtn.textContent = profile ? 'Connected (Steam)' : 'Login with Steam';
+    connectSteamBtn.classList.toggle('is-connected', !!profile);
+  }
   // The Profile page's plain "Login with Discord" button previously never
   // carried a steamId, so using it (instead of the Support tab's dedicated
   // "Link Discord" button) never actually persisted a link — a player
   // could go through the whole Discord OAuth flow and see a success toast
   // with no real link ever recorded. Any Discord login now links, as long
-  // as they're already signed in with Steam at the time.
+  // as they're already signed in with Steam at the time (the caller's
+  // verified session, not a client-supplied steamId param).
   const connectDiscordBtn = document.getElementById('connectDiscordBtn');
   if (connectDiscordBtn) {
-    connectDiscordBtn.href = profile?.steamId
-      ? `/api/discord-login?steamId=${encodeURIComponent(profile.steamId)}`
-      : '/api/discord-login';
+    connectDiscordBtn.textContent = discordProfile ? 'Connected (Discord)' : 'Login with Discord';
+    connectDiscordBtn.classList.toggle('is-connected', !!discordProfile);
   }
   loadDinoHistory();
   initTicketForm();

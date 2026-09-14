@@ -568,6 +568,18 @@ h6,
   box-shadow: 0 10px 18px rgba(255, 255, 255, 0.05);
 }
 
+/* Profile page's account-connect buttons once already linked — stays
+   visible (rather than disappearing) so both connection states are
+   always legible at a glance, just visually muted instead of the bright
+   call-to-action look. */
+.action-button.is-connected,
+.secondary-button.is-connected {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--chrome-2);
+  box-shadow: none;
+  border: 1px solid var(--line-strong);
+}
+
 #headerSteamBtn {
   max-width: 220px;
   overflow: hidden;
