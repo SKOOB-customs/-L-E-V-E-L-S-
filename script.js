@@ -3816,10 +3816,16 @@ document.querySelector('[data-skin-library-select]')?.addEventListener('change',
   const jsonField = document.querySelector('[data-skin-json]');
   if (jsonField) jsonField.value = JSON.stringify(skin.colors, null, 2);
   document.querySelectorAll('[data-skin-color]').forEach((input) => { input.value = '#808080'; });
+  // Shows the skin's actual current value, not blank — leaving these
+  // blank made it look like there was no pattern set at all (it was just
+  // sitting inside the JSON, invisible), and easy to miss when trying to
+  // change it. Still always an explicit, correct value for THIS skin
+  // specifically (never a leftover from whatever was last selected),
+  // which is the part that actually mattered for the original bug.
   const patternInput = document.querySelector('[data-skin-pattern-index]');
-  if (patternInput) patternInput.value = '';
+  if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
   const variationInput = document.querySelector('[data-skin-skin-variation]');
-  if (variationInput) variationInput.value = '';
+  if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
 });
 
 // The Skin Library form's OWN "load for editing" dropdown — separate from
@@ -3855,8 +3861,10 @@ document.querySelector('[data-skin-library-edit-select]')?.addEventListener('cha
   // it rather than left showing stale, now-redundant values.
   if (jsonField) jsonField.value = JSON.stringify(skin.colors, null, 2);
   document.querySelectorAll('[data-skin-library-color]').forEach((input) => { input.value = '#808080'; });
-  if (patternInput) patternInput.value = '';
-  if (variationInput) variationInput.value = '';
+  // Shows the skin's actual current value, not blank — see the identical
+  // comment on the grant-form dropdown's handler above for why.
+  if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
+  if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
 
   setSkinLibraryEditingState(skin.name);
 });
