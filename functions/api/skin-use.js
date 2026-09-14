@@ -3,10 +3,11 @@
  * one-shot, does not persist past that pawn's life (no auto-restore
  * exists for this path). Same request/poll shape as park.js/redeem.js.
  *
- * POST { steamId, skinCode } -> asks the bridge Worker to write a
+ * POST { skinCode } -> asks the bridge Worker to write a
  *   skin_use_request_<steamid>.json file the mod's poll loop will pick
  *   up. Returns { requestId } for polling.
- * GET  ?steamId=&requestId= -> polls for the mod's real result.
+ * GET  ?requestId= -> polls for the mod's real result. Both derive
+ *   steamId from the verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -26,9 +27,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -37,8 +41,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { steamId, skinCode } = body || {};
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
+  const { skinCode } = body || {};
   if (typeof skinCode !== 'string' || skinCode === '') return json({ error: 'Missing or invalid skinCode' }, 400);
 
   try {
@@ -58,15 +61,17 @@ export async function onRequestPost(context) {
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
+
   const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
   const requestId = url.searchParams.get('requestId');
-  if (!isValidSteamId(steamId) || !requestId) {
-    return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+  if (!requestId) {
+    return json({ error: 'Missing or invalid requestId' }, 400);
   }
 
   try {

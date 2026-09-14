@@ -5,7 +5,8 @@
  * delete, enforced server-side by the Worker regardless of what this UI
  * shows).
  *
- * GET ?requesterSteamId= -> proxied to the bridge Worker's /skin-library route.
+ * GET -> proxied to the bridge Worker's /skin-library route using the
+ * caller's verified session steamId.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -23,15 +24,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  const url = new URL(request.url);
-  const requesterSteamId = url.searchParams.get('requesterSteamId');
-  if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
-    return json({ error: 'Missing or invalid requesterSteamId' }, 400);
-  }
+  const requesterSteamId = data.authedSteamId;
+  if (!requesterSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
     const target = new URL(`${origin}/skin-library`);

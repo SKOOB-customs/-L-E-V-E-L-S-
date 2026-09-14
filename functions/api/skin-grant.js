@@ -4,12 +4,13 @@
  * spends themselves, either on their live dino or attached to one
  * specific parked dino — see functions/api/skin-use.js and skin-attach.js).
  *
- * POST { granterSteamId, targetSteamId, name, count, colors } -> proxied
- * to the bridge Worker's /skin-grant-charges route, which re-validates
- * admin tier server-side. `colors` is a map of the 10 FCustomizerDataBase
- * color field names to either a "#RRGGBB" hex string (the picker UI) or a
+ * POST { targetSteamId, name, count, colors } -> proxied to the bridge
+ * Worker's /skin-grant-charges route, which re-validates admin tier
+ * server-side. `colors` is a map of the 10 FCustomizerDataBase color field
+ * names to either a "#RRGGBB" hex string (the picker UI) or a
  * {r,g,b,a}/{R,G,B,A} object (the Advanced JSON path) — the Worker
- * normalizes either shape the same way.
+ * normalizes either shape the same way. granterSteamId comes from the
+ * verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -27,9 +28,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const granterSteamId = data.authedSteamId;
+  if (!granterSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -45,7 +49,7 @@ export async function onRequestPost(context) {
         'Content-Type': 'application/json',
         ...(env.STATUS_API_TOKEN ? { Authorization: `Bearer ${env.STATUS_API_TOKEN}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, granterSteamId }),
     });
     const data = await response.json();
     return json(data, response.status);

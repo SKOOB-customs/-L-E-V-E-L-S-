@@ -2,7 +2,8 @@
  * Inventory: the caller's own skin-charge ledger — the named skins they
  * have any charges of, for the "Skins" subsection of the Inventory tab.
  *
- * GET ?steamId= -> proxied to the bridge Worker's /skin-charges route.
+ * GET -> proxied to the bridge Worker's /skin-charges route using the
+ * caller's verified session steamId.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -20,15 +21,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
-  if (!steamId || !/^\d{17}$/.test(steamId)) {
-    return json({ error: 'Missing or invalid steamId' }, 400);
-  }
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
     const target = new URL(`${origin}/skin-charges`);

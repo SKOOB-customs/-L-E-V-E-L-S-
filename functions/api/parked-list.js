@@ -3,11 +3,12 @@
  * workers/bridge-worker.js's `scheduled` handler (a Cron Trigger polling
  * Bropanel's Pterodactyl Client API for Mods/LevelsPark/Saved/
  * parked_<steamid>.json files). KV holds every player's data aggregated
- * together, but this endpoint requires steam_id and only ever returns that
- * one player's entries — players should only see and be able to redeem
- * their own parked dinos, never anyone else's (matching the trust model
- * the rest of this site already uses: steam_id is client-supplied, same as
- * /api/live-dino and the old inventory API — not a new gap introduced here).
+ * together, but this endpoint only ever returns the caller's own entries
+ * — players should only see and be able to redeem their own parked
+ * dinos, never anyone else's. steamId comes from the verified session,
+ * not a client-supplied query param (this used to accept ?steam_id=
+ * directly, which meant anyone could view anyone else's private
+ * parked-dino inventory just by knowing their steamId).
  *
  * The cron only runs once a minute (Cloudflare's floor), which is a
  * noticeable "why isn't my dino showing up yet" gap right after
@@ -16,7 +17,7 @@
  * back to whatever's already cached in KV if that live sync fails or times
  * out, rather than making the page wait indefinitely.
  *
- * GET ?steam_id=X -> { updatedAt: number | null, parked: { [snapshotKey]: {...} } }
+ * GET -> { updatedAt: number | null, parked: { [snapshotKey]: {...} } }
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -38,11 +39,11 @@ const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 const SYNC_TIMEOUT_MS = 8000;
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   if (!env.PARKED_KV) return json({ error: 'Parked storage is not configured' }, 503);
 
-  const steamId = new URL(request.url).searchParams.get('steam_id');
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steam_id' }, 400);
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   const origin = workerOrigin(env);
   if (origin) {

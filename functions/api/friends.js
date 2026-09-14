@@ -1,7 +1,10 @@
 /**
  * Friends: the caller's own friend list.
  *
- * GET ?steamId= -> proxied to the bridge Worker's /friends route, then
+ * GET -> proxied to the bridge Worker's /friends route using the caller's
+ * verified session steamId (not a client-supplied query param — this used
+ * to accept ?steamId= directly, which meant anyone could view anyone
+ * else's friend list just by knowing their id), then
  * enriched with each friend's real Steam display name via
  * GetPlayerSummaries — same call staff-roster.js already makes. The
  * Worker's own KV records only ever hold a steamId, and a join-log-derived
@@ -27,15 +30,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
-  if (!steamId || !/^\d{17}$/.test(steamId)) {
-    return json({ error: 'Missing or invalid steamId' }, 400);
-  }
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
     const target = new URL(`${origin}/friends`);

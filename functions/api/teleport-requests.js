@@ -1,10 +1,10 @@
 /**
  * Friends: the caller's own pending incoming teleport requests.
  *
- * GET ?steamId= -> proxied to the bridge Worker's /teleport-requests
- * route, enriched with the requester's real Steam display name (fromName)
- * via GetPlayerSummaries — see friends.js for why this can't just use the
- * join-log-derived directory.
+ * GET -> proxied to the bridge Worker's /teleport-requests route using
+ * the caller's verified session steamId, enriched with the requester's
+ * real Steam display name (fromName) via GetPlayerSummaries — see
+ * friends.js for why this can't just use the join-log-derived directory.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -22,15 +22,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
-  if (!steamId || !/^\d{17}$/.test(steamId)) {
-    return json({ error: 'Missing or invalid steamId' }, 400);
-  }
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
     const target = new URL(`${origin}/teleport-requests`);

@@ -6,7 +6,9 @@
  * discord_name/discord_role redirect params, which are a local-only login
  * that doesn't persist anywhere server-side.
  *
- * GET ?steamId=X -> { linked: boolean, discordName: string | null }
+ * GET -> { linked: boolean, discordName: string | null }
+ * steamId comes from the verified session, not a client-supplied query
+ * param.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -14,13 +16,11 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
   headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
 });
 
-export async function onRequestGet({ request, env }) {
+export async function onRequestGet({ env, data }) {
   if (!env.PARKED_KV) return json({ error: 'Discord link storage is not configured' }, 503);
 
-  const steamId = new URL(request.url).searchParams.get('steamId');
-  if (!steamId || !/^\d{17}$/.test(steamId)) {
-    return json({ error: 'Missing or invalid steamId' }, 400);
-  }
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ linked: false, discordName: null });
 
   const link = await env.PARKED_KV.get(`discord_link:${steamId}`, 'json');
   return json({ linked: !!link, discordName: link?.discordName || null });

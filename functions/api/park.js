@@ -1,11 +1,12 @@
 /**
  * Website-triggered park (mod <-> website bridge, write direction).
  *
- * POST { steamId, name? } -> asks the bridge Worker to write a park request
- *   file the mod's poll loop will pick up (see main.lua's
+ * POST { name? } -> asks the bridge Worker to write a park request file
+ *   the mod's poll loop will pick up (see main.lua's
  *   gm.AllPlayerControllers-based poller). Returns { requestId } for polling.
- * GET  ?steamId=&requestId= -> polls for the mod's real result, same as
- *   functions/api/redeem.js's GET.
+ * GET  ?requestId= -> polls for the mod's real result, same as
+ *   functions/api/redeem.js's GET. Both derive steamId from the verified
+ *   session, not a client-supplied field.
  *
  * Both proxy to the Worker's /park-request and /park-result routes — same
  * cross-service indirection functions/api/live-dino.js already uses
@@ -30,9 +31,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -41,8 +45,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { steamId, name } = body || {};
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
+  const { name } = body || {};
   if (name !== undefined && typeof name !== 'string') return json({ error: 'Invalid name' }, 400);
 
   try {
@@ -62,15 +65,17 @@ export async function onRequestPost(context) {
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
+
   const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
   const requestId = url.searchParams.get('requestId');
-  if (!isValidSteamId(steamId) || !requestId) {
-    return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+  if (!requestId) {
+    return json({ error: 'Missing or invalid requestId' }, 400);
   }
 
   try {

@@ -1,9 +1,9 @@
 /**
  * Inventory: rename one of the caller's own parked dinos.
  *
- * POST { steamId, requesterSteamId, snapshotId, name } -> proxied to the
- * bridge Worker's /rename-parked-dino route, which re-validates
- * requesterSteamId === steamId server-side before touching the file.
+ * POST { snapshotId, name } -> proxied to the bridge Worker's
+ * /rename-parked-dino route. steamId/requesterSteamId are both set here
+ * from the verified session, not trusted from the client.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -21,9 +21,12 @@ const workerOrigin = (env) => {
 };
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -39,7 +42,7 @@ export async function onRequestPost(context) {
         'Content-Type': 'application/json',
         ...(env.STATUS_API_TOKEN ? { Authorization: `Bearer ${env.STATUS_API_TOKEN}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, steamId, requesterSteamId: steamId }),
     });
     const data = await response.json();
     return json(data, response.status);

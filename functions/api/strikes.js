@@ -3,11 +3,13 @@
  * game server — these records don't need to exist anywhere an admin's
  * file-system access could reach, unlike the game-server-side audit log).
  *
- * POST { issuerSteamId, targetSteamId, reason, evidence? } -> issues a new
- *   strike, proxied to the Worker's /strikes-issue route.
- * GET  ?targetSteamId=&requesterSteamId= -> that player's strike history
- *   (newest first), proxied to the Worker's /strikes-list route. Both ends
- *   re-validate the caller's admin tier server-side on the Worker.
+ * POST { targetSteamId, reason, evidence? } -> issues a new strike,
+ *   proxied to the Worker's /strikes-issue route.
+ * GET  ?targetSteamId= -> that player's strike history (newest first),
+ *   proxied to the Worker's /strikes-list route. Both ends re-validate the
+ *   caller's admin tier server-side on the Worker; issuerSteamId/
+ *   requesterSteamId (the caller's own identity) come from the verified
+ *   session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -27,9 +29,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const issuerSteamId = data.authedSteamId;
+  if (!issuerSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -45,7 +50,7 @@ export async function onRequestPost(context) {
         'Content-Type': 'application/json',
         ...(env.STATUS_API_TOKEN ? { Authorization: `Bearer ${env.STATUS_API_TOKEN}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, issuerSteamId }),
     });
     const data = await response.json();
     return json(data, response.status);
@@ -55,15 +60,17 @@ export async function onRequestPost(context) {
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
+  const requesterSteamId = data.authedSteamId;
+  if (!isValidSteamId(requesterSteamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
+
   const url = new URL(request.url);
   const targetSteamId = url.searchParams.get('targetSteamId');
-  const requesterSteamId = url.searchParams.get('requesterSteamId');
-  if (!isValidSteamId(targetSteamId) || !isValidSteamId(requesterSteamId)) {
-    return json({ error: 'Missing or invalid targetSteamId/requesterSteamId' }, 400);
+  if (!isValidSteamId(targetSteamId)) {
+    return json({ error: 'Missing or invalid targetSteamId' }, 400);
   }
 
   try {

@@ -1,4 +1,5 @@
 import { connect } from 'cloudflare:sockets';
+import { verifyTicket } from '../functions/_lib/session.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
@@ -1104,11 +1105,19 @@ export class ChatRoom {
       return new Response('Expected WebSocket', { status: 426 });
     }
     const url = new URL(request.url);
-    const steamId = url.searchParams.get('steamId') || '';
-    if (!/^\d{17}$/.test(steamId)) {
-      return new Response('Missing or invalid steamId', { status: 400 });
+    // A raw steamId/name query param here used to be trusted outright —
+    // anyone could open a WebSocket claiming to be any player, including
+    // staff. functions/api/chat-ticket.js mints a short-lived signed
+    // ticket (same-origin, where the levels_session cookie is actually
+    // visible — this Worker's own origin is a different one, so the
+    // cookie itself never reaches here) that this verifies instead.
+    const ticket = url.searchParams.get('ticket') || '';
+    const verified = await verifyTicket(this.env, ticket);
+    if (!verified) {
+      return new Response('Missing or invalid ticket', { status: 401 });
     }
-    const name = (url.searchParams.get('name') || steamId).slice(0, 32);
+    const { steamId, name: verifiedName } = verified;
+    const name = verifiedName.slice(0, 32);
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -1198,13 +1207,28 @@ export default {
       return stub.fetch(request);
     }
 
-    // Manual trigger for testing the bridge without waiting for the cron
-    // schedule — same bearer-token gate as the RCON routes below.
-    if (url.pathname === '/sync-parked') {
+    // Every other route requires the shared secret proving this request
+    // came from our own Pages layer (which independently verifies the
+    // real caller via the levels_session cookie before ever reaching
+    // here) — not from someone hitting this Worker's public workers.dev
+    // origin directly. This used to be checked ad hoc on only 6 of the
+    // ~40 routes below (confirmed live via investigation); every
+    // admin-gated route (compensation-grant, currency-grant, strikes,
+    // skin-library-save/delete, etc.) had NO gate at all beyond a
+    // plausible-looking client-supplied steamId. One check, up front, for
+    // everything except /chat-ws (which can't carry a custom header on a
+    // WebSocket upgrade — it verifies a short-lived ticket instead, see
+    // ChatRoom below).
+    {
       const token = request.headers.get('Authorization')?.replace('Bearer ', '');
       if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
         return json({ error: 'Unauthorized' }, 401);
       }
+    }
+
+    // Manual trigger for testing the bridge without waiting for the cron
+    // schedule.
+    if (url.pathname === '/sync-parked') {
       if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
         return json({
           error: 'Pterodactyl bridge is not configured',
@@ -1230,10 +1254,6 @@ export default {
     // tab. Called by functions/api/park.js, not directly by the browser
     // (same indirection as the read-path bridge).
     if (url.pathname === '/park-request' && request.method === 'POST') {
-      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
       if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
         return json({ error: 'Pterodactyl bridge is not configured' }, 503);
       }
@@ -1261,10 +1281,6 @@ export default {
     // Polled by the website after a park request to find out whether the
     // mod actually processed it (and whether it succeeded).
     if (url.pathname === '/park-result' && request.method === 'GET') {
-      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
       const steamId = url.searchParams.get('steamId');
       const requestId = url.searchParams.get('requestId');
       if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
@@ -1282,10 +1298,6 @@ export default {
     // parked-dino card. Called by functions/api/redeem.js, not directly by
     // the browser (same indirection as the read-path bridge).
     if (url.pathname === '/redeem-request' && request.method === 'POST') {
-      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
       if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
         return json({ error: 'Pterodactyl bridge is not configured' }, 503);
       }
@@ -1313,10 +1325,6 @@ export default {
     // Polled by the website after a redeem request to find out whether the
     // mod actually processed it (and whether it succeeded).
     if (url.pathname === '/redeem-result' && request.method === 'GET') {
-      const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-      if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
       const steamId = url.searchParams.get('steamId');
       const requestId = url.searchParams.get('requestId');
       if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
@@ -2708,10 +2716,6 @@ export default {
 
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
 
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
-      return json({ error: 'Unauthorized' }, 401);
-    }
     if (!env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD) {
       return json({
         error: 'RCON secrets are not configured',

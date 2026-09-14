@@ -6,12 +6,14 @@
  * direct-PARKED_KV-access precedent as parked-list.js/player-directory.js —
  * rather than round-tripping through the Worker.
  *
- * Only ever returns the requester's own steamId's entries, matching the
- * trust model the rest of this site already uses (steamId is client-
- * supplied, e.g. currency-balance's ?steamId=). Up to a minute of lag after
- * an in-game event is expected and accepted, same as the currency balance.
+ * Only ever returns the caller's own entries — steamId comes from the
+ * verified session, not a client-supplied query param (this used to
+ * accept ?steamId= directly, which meant anyone could view anyone else's
+ * dino history just by knowing their steamId). Up to a minute of lag
+ * after an in-game event is expected and accepted, same as the currency
+ * balance.
  *
- * GET ?steamId=X -> { updatedAt: number | null, entries: [...] }
+ * GET -> { updatedAt: number | null, entries: [...] }
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -20,13 +22,11 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 });
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   if (!env.PARKED_KV) return json({ error: 'Dino history storage is not configured' }, 503);
 
-  const steamId = new URL(request.url).searchParams.get('steamId');
-  if (!steamId || !/^\d{17}$/.test(steamId)) {
-    return json({ error: 'Missing or invalid steamId' }, 400);
-  }
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   const index = await env.PARKED_KV.get('dino_history:index', 'json');
   const entries = index?.histories?.[steamId] || [];

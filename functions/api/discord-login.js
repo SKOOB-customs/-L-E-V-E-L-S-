@@ -1,22 +1,25 @@
 const stateCookieName = 'levels_discord_oauth_state';
 
-// An optional ?steamId= turns this from a plain "verify my Discord roles"
-// login into a persistent link between that Steam account and whichever
-// Discord account completes this OAuth flow (see discord-callback.js) —
-// e.g. the ticket form sends the signed-in player's steamId here so a
-// ticket submission can later require a real linked Discord identity.
-// Riding it through the state/CSRF cookie (rather than a second cookie)
-// is safe: the uuid portion still has to match exactly for the callback to
+// When the caller has a verified Steam session, this turns a plain
+// "verify my Discord roles" login into a persistent link between that
+// Steam account and whichever Discord account completes this OAuth flow
+// (see discord-callback.js) — e.g. the ticket form uses this so a ticket
+// submission can later require a real linked Discord identity. Riding it
+// through the state/CSRF cookie (rather than a second cookie) is safe:
+// the uuid portion still has to match exactly for the callback to
 // proceed, and a steamId is just a public 17-digit number, not a secret.
-export async function onRequestGet({ request, env }) {
+// The steamId itself comes from the verified session (context.data.authedSteamId,
+// set by _middleware.js) rather than a client-supplied ?steamId= query
+// param — that used to let anyone link an arbitrary steamId's Discord
+// identity to their own Discord account.
+export async function onRequestGet({ request, env, data }) {
   if (!env.DISCORD_CLIENT_ID) {
     return new Response('Discord login is not configured.', { status: 503 });
   }
 
-  const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId') || '';
+  const steamId = data.authedSteamId || '';
   const state = /^\d{17}$/.test(steamId) ? `${crypto.randomUUID()}:${steamId}` : crypto.randomUUID();
-  const redirectUri = `${url.origin}/api/discord-callback`;
+  const redirectUri = `${new URL(request.url).origin}/api/discord-callback`;
   const params = new URLSearchParams({
     client_id: env.DISCORD_CLIENT_ID,
     redirect_uri: redirectUri,

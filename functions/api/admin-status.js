@@ -1,11 +1,15 @@
 /**
  * Admin-tier lookup for the website's Admin Panel tab.
  *
- * GET ?steam_id= -> { tier: "owner"|"senior"|"admin"|null }, proxied to the
- * bridge Worker's /admin-tier route (same cross-service indirection every
- * other functions/api/*.js file uses — see park.js for the full rationale).
- * Purely a UI-reveal check; the actual write routes (compensation, strikes)
- * re-validate tier server-side on the Worker regardless of what this says.
+ * GET -> { tier: "owner"|"senior"|"admin"|null } for the caller's verified
+ * session steamId, proxied to the bridge Worker's /admin-tier route (same
+ * cross-service indirection every other functions/api/*.js file uses —
+ * see park.js for the full rationale). Purely a UI-reveal check; the
+ * actual write routes (compensation, strikes) re-validate tier
+ * server-side on the Worker regardless of what this says — but this now
+ * checks the REAL caller too, not a client-supplied steam_id, since
+ * nothing stopped someone from asking "what's this OTHER steamId's admin
+ * tier" before.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -25,13 +29,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  const url = new URL(request.url);
-  const steamId = url.searchParams.get('steam_id');
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steam_id' }, 400);
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ tier: null });
 
   try {
     const target = new URL(`${origin}/admin-tier`);

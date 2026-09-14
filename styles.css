@@ -187,6 +187,24 @@ body::before {
   font-size: 0.7rem;
 }
 
+.chat-message-add-friend {
+  display: block;
+  margin: 0 0 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--chrome-2);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.chat-message-add-friend:hover {
+  color: var(--chrome-1);
+  border-color: var(--line-strong);
+}
+
 .chat-form {
   display: flex;
   flex-direction: column;

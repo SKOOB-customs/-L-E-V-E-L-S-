@@ -4,6 +4,12 @@
  * like growth-pause.js — this just reads back whatever main.lua last wrote.
  *
  * GET ?steamId= -> proxied to the bridge Worker's /growth-status route.
+ * Deliberately NOT locked to the caller's own session steamId, unlike
+ * most other routes in this pass — this is read by the Friends sidebar to
+ * show each friend's live in-game status (script.js's
+ * fetchFriendStatusData), so it has to accept an arbitrary target. The
+ * data returned (growth %, in-game or not) isn't sensitive the way a
+ * private inventory/history read is.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {

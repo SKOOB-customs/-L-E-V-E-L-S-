@@ -6,15 +6,16 @@
  * "My Tickets" status view both have something to read.
  *
  * Requires a linked Discord account (functions/api/discord-callback.js
- * writes discord_link:<steamId> when discord-login.js was started with
- * ?steamId=) — enforced here server-side, not just as a client-side UI
+ * writes discord_link:<steamId> using the caller's verified session
+ * steamId) — enforced here server-side, not just as a client-side UI
  * gate, since claiming/notifying depends on a real Discord identity.
  *
  * Tickets are low-volume (nothing like the currency/park polling cadence),
  * so direct KV writes per submission are fine — no local-file+cron
  * aggregation needed here, unlike the high-frequency per-player syncs.
  *
- * POST { steamId, username?, reason, incidentTime, dinoLabel? } -> {ok:true, ticketId}
+ * POST { username?, reason, incidentTime, dinoLabel? } -> {ok:true, ticketId}
+ * steamId comes from the verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -26,11 +27,14 @@ const MAX_REASON_LENGTH = 1500;
 const MAX_TICKET_INDEX_ENTRIES = 500;
 const DISCORD_API = 'https://discord.com/api/v10';
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, data }) {
   if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_TICKET_CHANNEL_ID) {
     return json({ error: 'Ticket submission is not configured' }, 503);
   }
   if (!env.PARKED_KV) return json({ error: 'Ticket storage is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!steamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -38,9 +42,6 @@ export async function onRequestPost({ request, env }) {
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
-
-  const steamId = typeof body.steamId === 'string' ? body.steamId : '';
-  if (!/^\d{17}$/.test(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
 
   const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
   if (!reason) return json({ error: 'Reason is required' }, 400);

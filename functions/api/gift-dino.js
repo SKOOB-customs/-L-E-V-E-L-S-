@@ -1,11 +1,11 @@
 /**
  * Friends: gift one parked dino to a friend.
  *
- * POST { fromSteamId, toSteamId, capturedAt } -> proxied to the bridge
- * Worker's /gift-dino route (fromSteamId is always the caller's own
- * steamId; capturedAt identifies which of the caller's parked dinos to
- * transfer). The Worker enforces that the two are actually friends before
- * moving anything.
+ * POST { toSteamId, capturedAt } -> proxied to the bridge Worker's
+ * /gift-dino route. fromSteamId comes from the verified session, not a
+ * client-supplied field — capturedAt identifies which of the caller's
+ * parked dinos to transfer. The Worker enforces that the two are actually
+ * friends before moving anything.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -25,9 +25,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const fromSteamId = data.authedSteamId;
+  if (!isValidSteamId(fromSteamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -36,8 +39,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { fromSteamId, toSteamId, capturedAt } = body || {};
-  if (!isValidSteamId(fromSteamId)) return json({ error: 'Missing or invalid fromSteamId' }, 400);
+  const { toSteamId, capturedAt } = body || {};
   if (!isValidSteamId(toSteamId)) return json({ error: 'Missing or invalid toSteamId' }, 400);
   if (typeof capturedAt !== 'number') return json({ error: 'Missing or invalid capturedAt' }, 400);
 

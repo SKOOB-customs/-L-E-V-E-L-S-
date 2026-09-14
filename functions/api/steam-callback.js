@@ -1,4 +1,6 @@
 // Verifies the Steam OpenID response, looks up the public profile server-side, then redirects back
+import { signSession, sessionCookieHeader } from '../_lib/session.js';
+
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
   const origin = url.origin;
@@ -87,5 +89,22 @@ export async function onRequestGet({ request, env }) {
     steam_name: username,
     ...(staffRole ? { staff_role: staffRole } : {}),
   });
-  return Response.redirect(`${origin}/#profile?${redirectParams.toString()}`, 302);
+
+  const headers = new Headers({ Location: `${origin}/#profile?${redirectParams.toString()}` });
+  // The one moment a steamId is actually proven (OpenID check_authentication
+  // above) — everything from here on (every API route, the chat socket)
+  // derives "who is calling this" from this cookie instead of trusting a
+  // client-supplied field. Never blocks login if SESSION_SECRET isn't set
+  // yet; the site just falls back to the old unauthenticated behavior for
+  // routes that require it (they'll 401 instead of silently misbehaving).
+  if (env.SESSION_SECRET) {
+    try {
+      const token = await signSession(env, steamId);
+      headers.append('Set-Cookie', sessionCookieHeader(token));
+    } catch {
+      // best-effort — a failed cookie sign still lets the player see their
+      // profile; they'll just need to re-login before anything write-side works
+    }
+  }
+  return new Response(null, { status: 302, headers });
 }

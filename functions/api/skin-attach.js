@@ -3,8 +3,9 @@
  * read-modify-write on the Worker (no live pawn needed) — the skin bakes
  * into that snapshot and applies once, at redeem time.
  *
- * POST { steamId, snapshotId, skinCode } -> proxied to the bridge Worker's
+ * POST { snapshotId, skinCode } -> proxied to the bridge Worker's
  * /skin-attach-parked route, which re-validates ownership server-side.
+ * steamId comes from the verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -24,9 +25,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -35,8 +39,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { steamId, snapshotId, skinCode } = body || {};
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
+  const { snapshotId, skinCode } = body || {};
   if (typeof snapshotId !== 'number') return json({ error: 'Missing or invalid snapshotId' }, 400);
   if (typeof skinCode !== 'string' || skinCode === '') return json({ error: 'Missing or invalid skinCode' }, 400);
 

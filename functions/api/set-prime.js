@@ -4,10 +4,11 @@
  * (no admin tier) — gated below 75% growth server-side by main.lua's
  * trySetPrime. Same request/poll shape as growth-pause.js.
  *
- * POST { steamId } -> asks the bridge Worker to write a
+ * POST -> asks the bridge Worker to write a
  *   set_prime_request_<steamid>.json file the mod's poll loop will pick
  *   up. Returns { requestId } for polling.
- * GET  ?steamId=&requestId= -> polls for the mod's real result.
+ * GET  ?requestId= -> polls for the mod's real result. Both derive
+ *   steamId from the verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -27,19 +28,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const { steamId } = body || {};
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
     const response = await fetch(`${origin}/set-prime-request`, {
@@ -58,15 +52,17 @@ export async function onRequestPost(context) {
 }
 
 export async function onRequestGet(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
 
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
+
   const url = new URL(request.url);
-  const steamId = url.searchParams.get('steamId');
   const requestId = url.searchParams.get('requestId');
-  if (!isValidSteamId(steamId) || !requestId) {
-    return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+  if (!requestId) {
+    return json({ error: 'Missing or invalid requestId' }, 400);
   }
 
   try {

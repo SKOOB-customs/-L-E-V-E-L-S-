@@ -1116,15 +1116,62 @@ let cachedChatMessages = [];
 let chatSocket = null;
 let chatReconnectTimer = null;
 let chatSocketSteamId = null;
+let chatConnectInFlight = false;
+// Tracks steamIds already friend-requested from chat this page load, so
+// the "+ Add" button doesn't offer to re-send across the frequent full
+// re-renders renderChatMessages does on every incoming message (chat
+// doesn't wait for lastLoadedFriends — populated by the Friends sidebar's
+// own load — to catch up before hiding it).
+const chatFriendRequestsSentTo = new Set();
 
 const renderChatMessages = () => {
   if (!chatMessages) return;
   const wasScrolledToBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 40;
   chatMessages.innerHTML = '';
 
+  const viewerSteamId = getSteamProfile()?.steamId;
+  const friendIds = new Set(lastLoadedFriends.map((f) => f.steamId));
+
   cachedChatMessages.forEach((message) => {
     const item = document.createElement('div');
     item.className = 'chat-message';
+
+    if (
+      viewerSteamId
+      && message.steamId
+      && message.steamId !== viewerSteamId
+      && !friendIds.has(message.steamId)
+      && !chatFriendRequestsSentTo.has(message.steamId)
+    ) {
+      const addFriendBtn = document.createElement('button');
+      addFriendBtn.type = 'button';
+      addFriendBtn.className = 'chat-message-add-friend';
+      addFriendBtn.textContent = '+ Add';
+      addFriendBtn.addEventListener('click', async () => {
+        addFriendBtn.disabled = true;
+        try {
+          const response = await fetch('/api/friend-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ toSteamId: message.steamId }),
+          });
+          const responseData = await response.json();
+          if (!response.ok || !responseData.ok) {
+            showToast(responseData.error || 'Could not send that friend request.');
+            addFriendBtn.disabled = false;
+            return;
+          }
+          showToast(`Friend request sent to ${message.name}.`);
+          chatFriendRequestsSentTo.add(message.steamId);
+          renderChatMessages();
+        } catch (error) {
+          console.debug('Chat add-friend failed:', error);
+          showToast('Could not reach the server right now.');
+          addFriendBtn.disabled = false;
+        }
+      });
+      item.appendChild(addFriendBtn);
+    }
 
     const user = document.createElement('span');
     user.className = 'chat-message-user';
@@ -1148,10 +1195,35 @@ const renderChatMessages = () => {
 // Connects only while the sidebar is actually open, rather than holding a
 // socket open for every visitor site-wide regardless of whether they ever
 // look at chat.
-const connectChatSocket = () => {
+const connectChatSocket = async () => {
   const profile = getSteamProfile();
   if (!profile?.steamId) return;
   if (chatSocket && (chatSocket.readyState === WebSocket.OPEN || chatSocket.readyState === WebSocket.CONNECTING)) return;
+  // The ticket fetch below is async, unlike the rest of this check — this
+  // guard keeps two overlapping calls (e.g. the sidebar toggle firing
+  // right as a visibilitychange reconnect kicks in) from both slipping
+  // past the readyState check above and opening two sockets.
+  if (chatConnectInFlight) return;
+  chatConnectInFlight = true;
+
+  // A raw steamId/name in the URL used to be trusted outright by the
+  // Worker — anyone could open this socket claiming to be any player.
+  // The cookie that actually proves who's signed in is scoped to this
+  // site's own domain and never reaches the Worker's separate
+  // workers.dev origin below, so this fetches a short-lived signed
+  // ticket same-origin first (where the cookie IS visible) instead.
+  let ticket;
+  try {
+    const ticketResponse = await fetch(`/api/chat-ticket?name=${encodeURIComponent(profile.username || profile.steamId)}`);
+    const ticketData = await ticketResponse.json();
+    if (!ticketResponse.ok || !ticketData.ticket) return;
+    ticket = ticketData.ticket;
+  } catch (error) {
+    console.debug('Chat ticket fetch failed:', error);
+    return;
+  } finally {
+    chatConnectInFlight = false;
+  }
 
   // Connects straight to the Worker's own workers.dev subdomain rather
   // than l-e-v-e-l-s.app's own routed path — confirmed live: the exact
@@ -1162,7 +1234,7 @@ const connectChatSocket = () => {
   // connections aren't subject to the same-origin restrictions fetch()
   // has, so connecting cross-origin like this is normal and safe.
   const chatWorkerOrigin = 'wss://l-e-v-e-l-s.conlan-schlaeppi.workers.dev';
-  const url = `${chatWorkerOrigin}/chat-ws?steamId=${encodeURIComponent(profile.steamId)}&name=${encodeURIComponent(profile.username || profile.steamId)}`;
+  const url = `${chatWorkerOrigin}/chat-ws?ticket=${encodeURIComponent(ticket)}`;
 
   let socket;
   try {

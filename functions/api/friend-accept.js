@@ -2,8 +2,8 @@
  * Friends: accept a pending friend request.
  *
  * POST { requesterSteamId } -> proxied to the bridge Worker's
- * /friend-accept route (steamId is always the caller's own signed-in
- * steamId — the one accepting).
+ * /friend-accept route. steamId (the one accepting) comes from the
+ * verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -23,9 +23,12 @@ const workerOrigin = (env) => {
 const isValidSteamId = (id) => typeof id === 'string' && /^\d{17}$/.test(id);
 
 export async function onRequestPost(context) {
-  const { request, env } = context;
+  const { request, env, data } = context;
   const origin = workerOrigin(env);
   if (!origin) return json({ error: 'Bridge is not configured' }, 503);
+
+  const steamId = data.authedSteamId;
+  if (!isValidSteamId(steamId)) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   let body;
   try {
@@ -34,8 +37,7 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { steamId, requesterSteamId } = body || {};
-  if (!isValidSteamId(steamId)) return json({ error: 'Missing or invalid steamId' }, 400);
+  const { requesterSteamId } = body || {};
   if (!isValidSteamId(requesterSteamId)) return json({ error: 'Missing or invalid requesterSteamId' }, 400);
 
   try {
