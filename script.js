@@ -495,6 +495,25 @@ const setDiscordProfile = (discordId, username, staffRole) => {
   return profile;
 };
 
+// Clears both accounts, not just Steam — a real reported case: logging
+// out and back in with Steam alone still showed Discord as connected,
+// since Discord's login is entirely separate client-side state with no
+// cookie tied to the Steam session at all. /api/logout clears the two
+// HttpOnly cookies (session + admin-unlock) that JS can't touch directly;
+// everything else is local to this browser.
+const logoutPlayer = async () => {
+  try {
+    await fetch('/api/logout', { method: 'POST' });
+  } catch (error) {
+    console.debug('Logout request failed:', error);
+  }
+  localStorage.removeItem(steamStorageKey);
+  localStorage.removeItem(discordStorageKey);
+  window.location.reload();
+};
+
+document.getElementById('logoutBtn')?.addEventListener('click', logoutPlayer);
+
 const roleDetailsMap = {
   Owner: { badge: '👑 Owner', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn', 'manage_permissions'] },
   Admin: { badge: '🛡️ Admin', perms: ['admin', 'cheat', 'kick', 'ban', 'teleport', 'spawn'] },
@@ -928,6 +947,8 @@ const displaySteamStatus = async () => {
     connectDiscordBtn.textContent = discordProfile ? 'Connected (Discord)' : 'Login with Discord';
     connectDiscordBtn.classList.toggle('is-connected', !!discordProfile);
   }
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) logoutBtn.hidden = !profile && !discordProfile;
   loadDinoHistory();
   initTicketForm();
   updateChatSignInState();
