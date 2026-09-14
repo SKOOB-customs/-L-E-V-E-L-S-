@@ -1239,7 +1239,7 @@ strong.stat-critical {
   color: var(--chrome-1);
 }
 
-.friends-offline-toggle {
+.friends-group-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1254,17 +1254,17 @@ strong.stat-critical {
   cursor: pointer;
 }
 
-.friends-offline-toggle:hover {
+.friends-group-toggle:hover {
   color: var(--chrome-1);
   border-color: var(--line-strong);
 }
 
-.friends-offline-chevron {
+.friends-group-chevron {
   display: inline-block;
   transition: transform 0.15s ease;
 }
 
-.friends-offline-toggle.is-expanded .friends-offline-chevron {
+.friends-group-toggle.is-expanded .friends-group-chevron {
   transform: rotate(180deg);
 }
 

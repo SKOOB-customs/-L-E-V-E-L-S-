@@ -3963,46 +3963,50 @@ const fetchFriendStatusData = async (friends) => {
   }
 };
 
-// Online (website or in-game, either counts) renders in the always-visible
-// grid; everyone else goes in the collapsed-by-default Offline section,
-// expandable via its own dropdown-chevron toggle — keeps a long friends
-// list from being dominated by people who aren't around right now.
+// Online (website or in-game, either counts) and Offline each get their own
+// dropdown section with a live "(N)" count in the toggle label — both start
+// collapsible; only the expand/collapse state of the grids themselves is
+// left untouched by a re-render (whatever the player last chose stays put
+// across friend-list refreshes), so accepting/removing/gifting doesn't
+// snap either section back to its default state mid-session.
 const renderFriendsGrouped = (friends) => {
   const onlineGrid = document.querySelector('[data-friends-online-grid]');
   const offlineGrid = document.querySelector('[data-friends-offline-grid]');
-  const offlineToggle = document.querySelector('[data-friends-offline-toggle]');
+  const onlineCount = document.querySelector('[data-friends-online-count]');
   const offlineCount = document.querySelector('[data-friends-offline-count]');
   if (!onlineGrid || !offlineGrid) return;
 
   onlineGrid.innerHTML = '';
   offlineGrid.innerHTML = '';
 
-  const offline = [];
+  let onlineTotal = 0;
+  let offlineTotal = 0;
   friends.forEach((friend) => {
     const card = buildFriendCard(friend);
     updateFriendCardStatus(card, friend);
     if (friend.websiteOnline || friend.inGame) {
       onlineGrid.appendChild(card);
+      onlineTotal += 1;
     } else {
       offlineGrid.appendChild(card);
-      offline.push(friend);
+      offlineTotal += 1;
     }
   });
 
-  if (offlineToggle) offlineToggle.hidden = offline.length === 0;
-  if (offlineCount) offlineCount.textContent = offline.length;
-  if (offline.length === 0) {
-    offlineGrid.hidden = true;
-    offlineToggle?.classList.remove('is-expanded');
-  }
+  if (onlineCount) onlineCount.textContent = onlineTotal;
+  if (offlineCount) offlineCount.textContent = offlineTotal;
 };
 
-document.querySelector('[data-friends-offline-toggle]')?.addEventListener('click', (event) => {
-  const offlineGrid = document.querySelector('[data-friends-offline-grid]');
-  if (!offlineGrid) return;
-  offlineGrid.hidden = !offlineGrid.hidden;
-  event.currentTarget.classList.toggle('is-expanded', !offlineGrid.hidden);
-});
+const bindFriendsGroupToggle = (toggleSelector, gridSelector) => {
+  document.querySelector(toggleSelector)?.addEventListener('click', (event) => {
+    const grid = document.querySelector(gridSelector);
+    if (!grid) return;
+    grid.hidden = !grid.hidden;
+    event.currentTarget.classList.toggle('is-expanded', !grid.hidden);
+  });
+};
+bindFriendsGroupToggle('[data-friends-online-toggle]', '[data-friends-online-grid]');
+bindFriendsGroupToggle('[data-friends-offline-toggle]', '[data-friends-offline-grid]');
 
 const buildTeleportRequestCard = (req) => {
   const card = document.createElement('article');

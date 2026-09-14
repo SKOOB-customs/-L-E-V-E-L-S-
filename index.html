@@ -1047,11 +1047,16 @@
             <h2>Friends list</h2>
           </div>
           <p class="dino-park-note" data-friends-empty hidden>No friends added yet — add one above.</p>
+
+          <button type="button" class="friends-group-toggle is-expanded" data-friends-online-toggle>
+            <span class="friends-group-chevron">▾</span>
+            Online (<span data-friends-online-count>0</span>)
+          </button>
           <div class="parked-grid" data-friends-online-grid></div>
 
-          <button type="button" class="friends-offline-toggle" data-friends-offline-toggle hidden>
-            <span class="friends-offline-chevron">▾</span>
-            <span data-friends-offline-count>0</span> offline
+          <button type="button" class="friends-group-toggle" data-friends-offline-toggle>
+            <span class="friends-group-chevron">▾</span>
+            Offline (<span data-friends-offline-count>0</span>)
           </button>
           <div class="parked-grid friends-offline-grid" data-friends-offline-grid hidden></div>
         </section>
