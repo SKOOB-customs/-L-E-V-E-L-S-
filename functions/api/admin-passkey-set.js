@@ -81,6 +81,7 @@ export async function onRequestPost(context) {
     const { token, expiresAt } = await signAdminUnlock(env, steamId);
     return json({ ok: true, expiresAt }, 200, { 'Set-Cookie': adminUnlockCookieHeader(token) });
   } catch (error) {
+    console.error('admin-passkey-set failed:', error?.message, error?.stack);
     return json({ error: error.message || 'Setting the passkey failed' }, 502);
   }
 }
