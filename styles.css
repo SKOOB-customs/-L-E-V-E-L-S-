@@ -21,6 +21,17 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute only hides an element via the browser's default
+   [hidden]{display:none} stylesheet rule — any author rule that sets
+   `display` on the same element (e.g. .parked-grid's `display: grid`)
+   silently overrides it regardless of selector specificity, since author
+   rules always beat user-agent rules. Toggling `.hidden = true` on the
+   friends Offline grid did nothing visible because of exactly this, even
+   though the toggle button's own expand/collapse state looked correct. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
