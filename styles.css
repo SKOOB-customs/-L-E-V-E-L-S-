@@ -215,7 +215,7 @@ body::before {
    above, mirrored to the left edge so the two don't collide. */
 .friends-toggle {
   position: fixed;
-  top: 50%;
+  top: 75%;
   left: 0;
   z-index: 30;
   transform: translateY(-50%);
