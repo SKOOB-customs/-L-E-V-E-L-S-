@@ -457,6 +457,29 @@ const setSteamProfile = (steamId, username, staffRole = '') => {
   return profile;
 };
 
+// One-time migration check: every player who was already "signed in"
+// (this localStorage profile) before the site switched from trusting a
+// client-supplied steamId to a real signed session cookie has no such
+// cookie yet, and every write action would otherwise start failing with
+// a confusing "please sign in again" error while the header still shows
+// them as logged in. Runs once per load and forces a clean client-side
+// logout + reload the moment it detects that mismatch, so they land on
+// the normal signed-out page and know to log back in, rather than
+// discovering it action-by-action.
+(async () => {
+  if (!getSteamProfile()?.steamId) return;
+  try {
+    const response = await fetch('/api/session-status');
+    const data = await response.json();
+    if (!data.authed) {
+      localStorage.removeItem(steamStorageKey);
+      window.location.reload();
+    }
+  } catch (error) {
+    console.debug('Session status check failed:', error);
+  }
+})();
+
 const getDiscordProfile = () => {
   try {
     const saved = localStorage.getItem(discordStorageKey);
