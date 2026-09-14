@@ -11,7 +11,7 @@
   // and PTERODACTYL_API_KEY stay as dashboard/CLI secrets since those are
   // meant to be sensitive).
   "vars": {
-    "RCON_HOST": "168.100.160.159",
+    "RCON_HOST": "208.115.234.226",
     // Bropanel (Game Host Bros) is Pterodactyl-based and exposes the standard
     // Client API for scripting file read/write over plain HTTPS — this is
     // the "external process with filesystem access" the mod's park/unpark
