@@ -95,7 +95,7 @@ body::before {
 /* Global chat sidebar */
 .chat-toggle {
   position: fixed;
-  top: 50%;
+  top: 75%;
   right: 0;
   z-index: 30;
   transform: translateY(-50%);
@@ -1292,6 +1292,27 @@ strong.stat-critical {
 .request-card-name {
   margin: 0;
   font-size: 1rem;
+}
+
+.friend-card-name {
+  padding-right: 22px;
+}
+
+.friend-card-favorite {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 1.15rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.friend-card-favorite.is-favorite {
+  color: var(--chrome-1);
 }
 
 .friend-card-meta,

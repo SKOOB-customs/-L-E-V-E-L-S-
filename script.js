@@ -3761,10 +3761,62 @@ const buildFriendRequestCard = (req) => {
   return card;
 };
 
+// Favoriting is a per-viewer display preference (which of your own
+// friends you want pinned to the top of Online/Offline), not gameplay
+// state — same reasoning as the Home hub's drag-reorder, which is also
+// localStorage-only. Keyed by the viewer's own steamId since a shared
+// browser could have more than one account sign in over time.
+const FAVORITE_FRIENDS_STORAGE_KEY_PREFIX = 'levelsFavoriteFriends:';
+
+const getFavoriteFriendIds = () => {
+  const steamId = getSteamProfile()?.steamId;
+  if (!steamId) return new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem(FAVORITE_FRIENDS_STORAGE_KEY_PREFIX + steamId) || '[]');
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const toggleFavoriteFriend = (friendSteamId) => {
+  const steamId = getSteamProfile()?.steamId;
+  if (!steamId) return;
+  const ids = getFavoriteFriendIds();
+  if (ids.has(friendSteamId)) {
+    ids.delete(friendSteamId);
+  } else {
+    ids.add(friendSteamId);
+  }
+  try {
+    localStorage.setItem(FAVORITE_FRIENDS_STORAGE_KEY_PREFIX + steamId, JSON.stringify([...ids]));
+  } catch (error) {
+    console.debug('Saving favorite friends failed:', error);
+  }
+};
+
+// Set by loadFriendsTabData so a favorite click can re-render immediately
+// without a fresh network round trip — the friend objects already carry
+// their websiteOnline/inGame fields from fetchFriendStatusData by then.
+let lastLoadedFriends = [];
+
 const buildFriendCard = (friend) => {
   const card = document.createElement('article');
   card.className = 'parked-card friend-card';
   card.dataset.friendCard = friend.steamId;
+
+  const isFavorite = getFavoriteFriendIds().has(friend.steamId);
+  const favoriteBtn = document.createElement('button');
+  favoriteBtn.type = 'button';
+  favoriteBtn.className = 'friend-card-favorite';
+  favoriteBtn.classList.toggle('is-favorite', isFavorite);
+  favoriteBtn.textContent = isFavorite ? '★' : '☆';
+  favoriteBtn.setAttribute('aria-label', isFavorite ? 'Unfavorite this friend' : 'Favorite this friend');
+  favoriteBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleFavoriteFriend(friend.steamId);
+    renderFriendsGrouped(lastLoadedFriends);
+  });
 
   const name = document.createElement('h3');
   name.className = 'friend-card-name';
@@ -3913,7 +3965,7 @@ const buildFriendCard = (friend) => {
   giftRow.append(giftSelect, giftBtn);
 
   actions.append(toThemBtn, bringBtn, giftRow, removeBtn);
-  card.append(name, meta, status, actions);
+  card.append(favoriteBtn, name, meta, status, actions);
   return card;
 };
 
@@ -3974,6 +4026,11 @@ const fetchFriendStatusData = async (friends) => {
 // left untouched by a re-render (whatever the player last chose stays put
 // across friend-list refreshes), so accepting/removing/gifting doesn't
 // snap either section back to its default state mid-session.
+//
+// Favorited friends sort to the top of whichever section (Online or
+// Offline) they're already in — a favorite never moves a friend between
+// sections, it just reorders within one. Array.prototype.sort is stable,
+// so friends tied on favorite status keep whatever order they arrived in.
 const renderFriendsGrouped = (friends) => {
   const onlineGrid = document.querySelector('[data-friends-online-grid]');
   const offlineGrid = document.querySelector('[data-friends-offline-grid]');
@@ -3984,9 +4041,12 @@ const renderFriendsGrouped = (friends) => {
   onlineGrid.innerHTML = '';
   offlineGrid.innerHTML = '';
 
+  const favorites = getFavoriteFriendIds();
+  const sorted = [...friends].sort((a, b) => (favorites.has(b.steamId) ? 1 : 0) - (favorites.has(a.steamId) ? 1 : 0));
+
   let onlineTotal = 0;
   let offlineTotal = 0;
-  friends.forEach((friend) => {
+  sorted.forEach((friend) => {
     const card = buildFriendCard(friend);
     updateFriendCardStatus(card, friend);
     if (friend.websiteOnline || friend.inGame) {
@@ -4121,6 +4181,7 @@ const loadFriendsTabData = async () => {
     // front, rather than building one flat list and re-sorting it once
     // status arrives a moment later.
     await fetchFriendStatusData(friends);
+    lastLoadedFriends = friends;
     renderFriendsGrouped(friends);
 
     const friendReqGrid = document.querySelector('[data-friend-requests-grid]');
