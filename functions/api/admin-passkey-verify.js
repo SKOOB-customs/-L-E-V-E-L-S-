@@ -63,7 +63,9 @@ export async function onRequestPost(context) {
     }
 
     const { token, expiresAt } = await signAdminUnlock(env, steamId);
-    return json({ ok: true, expiresAt }, 200, { 'Set-Cookie': adminUnlockCookieHeader(token) });
+    const cookieHeader = adminUnlockCookieHeader(token);
+    console.log('admin-passkey-verify debug:', JSON.stringify({ steamId, expiresAt, cookieHeaderLength: cookieHeader.length, hasSessionSecret: !!env.SESSION_SECRET }));
+    return json({ ok: true, expiresAt }, 200, { 'Set-Cookie': cookieHeader });
   } catch (error) {
     return json({ error: error.message || 'Passkey verification failed' }, 502);
   }

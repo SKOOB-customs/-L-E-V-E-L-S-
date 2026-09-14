@@ -38,7 +38,7 @@
   justify-content: center;
   gap: 18px;
   background: var(--bg);
-  animation: splash-dismiss 2.6s ease forwards;
+  animation: splash-dismiss 4.35s ease forwards;
 }
 
 @keyframes splash-dismiss {
