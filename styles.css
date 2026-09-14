@@ -21,6 +21,55 @@
   box-sizing: border-box;
 }
 
+/* Brief splash shown on every real page load (reload, a fresh visit, the
+   redirect back from Steam/Discord login — anything that's an actual
+   navigation, not a same-page tab switch). Self-dismissing via a pure CSS
+   animation rather than JS setting a timer, so it can never get stuck
+   covering the site if script.js is slow to load or errors — the random
+   admin/owner line (script.js, SPLASH_MESSAGES) is a progressive
+   enhancement on top of an overlay that already hides itself on its own. */
+.splash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--bg);
+  animation: splash-dismiss 2.6s ease forwards;
+}
+
+@keyframes splash-dismiss {
+  0%, 65% {
+    opacity: 1;
+    visibility: visible;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.splash-image {
+  width: min(320px, 70vw);
+  height: auto;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.splash-message {
+  margin: 0;
+  max-width: 340px;
+  padding: 0 20px;
+  font-family: "Inter", sans-serif;
+  font-size: 0.95rem;
+  text-align: center;
+  color: var(--chrome-1);
+}
+
 /* The `hidden` attribute only hides an element via the browser's default
    [hidden]{display:none} stylesheet rule — any author rule that sets
    `display` on the same element (e.g. .parked-grid's `display: grid`)

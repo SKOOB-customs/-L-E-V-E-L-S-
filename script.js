@@ -1,3 +1,25 @@
+// Splash (index.html's #splashOverlay) shows on every real page load and
+// self-dismisses via a pure CSS animation (styles.css) — this just picks
+// which admin/owner line to show, set as early as possible so it's there
+// before the overlay's fade-out even starts. Not tied to a specific
+// admin's real activity, just flavor text.
+const SPLASH_MESSAGES = [
+  'Skoob is cooking up some heat in the skin lab.',
+  'Bart is cooking up a new Rex tech.',
+  'WebMasta is aerialing his way to the RL champs.',
+  'PapaT is making crazy fire patterns for skins again.',
+  'WoahNelli is creating vibes for the community.',
+  'Evil is sniffing out the next competent Rex.',
+  'Yaowa is dibbling around until his Rex needs to be called in.',
+  'Honey is learning another dino to torment Prammy on.',
+  'Prammy is nesting an army to mess with Honey.',
+  'Mint has wandered into her own art again — send snacks, not search parties.',
+];
+const splashMessageEl = document.querySelector('[data-splash-message]');
+if (splashMessageEl) {
+  splashMessageEl.textContent = SPLASH_MESSAGES[Math.floor(Math.random() * SPLASH_MESSAGES.length)];
+}
+
 const toast = document.getElementById('toast');
 let toastTimer = null;
 
