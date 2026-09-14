@@ -162,21 +162,31 @@ body::before {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
   padding-right: 4px;
+  /* Overrides .chat-sidebar's Permanent Marker display font, which every
+     message previously inherited — fine for the "Community Chat" header,
+     much too thick/oversized for an actual scrolling log of messages. */
+  font-family: "Inter", sans-serif;
 }
 
 .chat-message {
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 7px 10px;
   background: var(--chat-bg);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.45;
   word-break: break-word;
   color: var(--chrome-1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-message:last-child {
+  border-bottom: none;
 }
 
 .chat-message .chat-message-user {
-  font-weight: 400;
+  font-weight: 700;
   margin-right: 6px;
   color: var(--chrome-1);
 }
@@ -185,6 +195,45 @@ body::before {
   float: right;
   color: var(--chrome-2);
   font-size: 0.7rem;
+}
+
+/* Admin/owner right-click menu on a chat message (see openChatModerationMenu
+   in script.js) — positioned via inline style.left/top at the click point. */
+.chat-moderation-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 170px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  font-family: "Inter", sans-serif;
+}
+
+.chat-moderation-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 14px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chat-moderation-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-ban-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
 }
 
 .chat-message-add-friend {

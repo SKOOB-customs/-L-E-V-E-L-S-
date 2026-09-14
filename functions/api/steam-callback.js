@@ -27,6 +27,20 @@ export async function onRequestGet({ request, env }) {
     return Response.redirect(`${origin}/#profile?steam_error=1`, 302);
   }
 
+  // A banned steamId never gets a session, not even momentarily — checked
+  // before anything else here (the directory write, the cookie). The
+  // middleware also enforces this on every subsequent request (in case a
+  // ban happens mid-session), but refusing it at the source too means a
+  // banned player never has a valid cookie in the first place.
+  if (env.PARKED_KV) {
+    try {
+      const banned = await env.PARKED_KV.get(`player_ban:${steamId}`);
+      if (banned) return Response.redirect(`${origin}/#profile?ban_error=1`, 302);
+    } catch {
+      // best-effort — a KV hiccup here shouldn't block every legitimate login
+    }
+  }
+
   let username = steamId;
   if (env.STEAM_API_KEY) {
     const summaryUrl = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${env.STEAM_API_KEY}&steamids=${steamId}`;

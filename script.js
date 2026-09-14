@@ -473,7 +473,15 @@ const setSteamProfile = (steamId, username, staffRole = '') => {
     const data = await response.json();
     if (!data.authed) {
       localStorage.removeItem(steamStorageKey);
-      window.location.reload();
+      if (data.banned) {
+        // A ban mid-session (as opposed to the stale-cookie case this
+        // check was originally built for) — a plain reload would clear
+        // the toast before it's readable, so this gives it a moment.
+        showToast('You have been banned from LeveLs.');
+        setTimeout(() => window.location.reload(), 1800);
+      } else {
+        window.location.reload();
+      }
     }
   } catch (error) {
     console.debug('Session status check failed:', error);
@@ -1056,7 +1064,9 @@ const consumeSteamRedirect = () => {
   const discordRole = params.get('discord_role');
   const discordLinked = params.get('discord_linked') === '1';
 
-  if (params.get('discord_error')) {
+  if (params.get('ban_error')) {
+    showToast('This Steam account is banned from LeveLs.');
+  } else if (params.get('discord_error')) {
     showToast('Discord login failed. Make sure you are in the Levels Discord server.');
   } else if (discordId && discordName && discordRole) {
     setDiscordProfile(discordId, discordName, discordRole);
@@ -1182,6 +1192,11 @@ const renderChatMessages = () => {
   cachedChatMessages.forEach((message) => {
     const item = document.createElement('div');
     item.className = 'chat-message';
+    // Admin/owner only (viewerAdminTier, cached by checkAdminPanelAccess)
+    // — openChatModerationMenu itself also checks this and no-ops
+    // otherwise, so a regular player's native right-click menu is left
+    // alone entirely.
+    item.addEventListener('contextmenu', (event) => openChatModerationMenu(event, message));
 
     if (
       viewerSteamId
@@ -1237,6 +1252,175 @@ const renderChatMessages = () => {
   });
 
   if (wasScrolledToBottom) chatMessages.scrollTop = chatMessages.scrollHeight;
+};
+
+// ── Chat moderation: right-click a message (admin/owner only, gated by
+// viewerAdminTier — cached from checkAdminPanelAccess() further down this
+// file, no separate lookup needed here) for a small menu to delete that
+// message or open a moderation view for its sender. ──
+let chatModerationTargetMessage = null;
+const chatModerationMenu = document.getElementById('chatModerationMenu');
+
+const closeChatModerationMenu = () => {
+  if (chatModerationMenu) chatModerationMenu.hidden = true;
+  chatModerationTargetMessage = null;
+};
+
+const openChatModerationMenu = (event, message) => {
+  if (!viewerAdminTier || !chatModerationMenu) return;
+  event.preventDefault();
+  chatModerationTargetMessage = message;
+  chatModerationMenu.style.left = `${event.clientX}px`;
+  chatModerationMenu.style.top = `${event.clientY}px`;
+  chatModerationMenu.hidden = false;
+};
+
+document.addEventListener('click', (event) => {
+  if (chatModerationMenu && !chatModerationMenu.hidden && !chatModerationMenu.contains(event.target)) {
+    closeChatModerationMenu();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeChatModerationMenu();
+});
+
+document.querySelector('[data-chat-menu-delete]')?.addEventListener('click', async () => {
+  const message = chatModerationTargetMessage;
+  closeChatModerationMenu();
+  if (!message) return;
+  try {
+    const response = await fetch('/api/chat-delete-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId: message.id }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not delete that message.');
+    }
+    // No local removal here — ChatRoom broadcasts {type:'delete'} back to
+    // every connected client including this one, and that's the only
+    // place cachedChatMessages actually gets filtered (see the socket
+    // message handler in connectChatSocket).
+  } catch (error) {
+    console.debug('Chat delete-message failed:', error);
+    showToast('Could not reach the server right now.');
+  }
+});
+
+document.querySelector('[data-chat-menu-moderate]')?.addEventListener('click', () => {
+  const message = chatModerationTargetMessage;
+  closeChatModerationMenu();
+  if (!message) return;
+  openChatModerationModal(message.steamId, message.name);
+});
+
+const openChatModerationModal = async (targetSteamId, targetName) => {
+  if (!parkedModalContent || !parkedModalOverlay) return;
+  const label = targetName || targetSteamId;
+
+  const wrapper = document.createElement('div');
+
+  const heading = document.createElement('div');
+  heading.className = 'mini-heading';
+  heading.textContent = `Moderate ${label}`;
+  wrapper.appendChild(heading);
+
+  const idNote = document.createElement('p');
+  idNote.className = 'dino-park-note';
+  idNote.textContent = `Steam ID: ${targetSteamId}`;
+  wrapper.appendChild(idNote);
+
+  const timeoutRow = document.createElement('div');
+  timeoutRow.className = 'field-row two-up';
+  const timeoutLabel = document.createElement('label');
+  timeoutLabel.textContent = 'Timeout duration';
+  const timeoutSelect = document.createElement('select');
+  for (let h = 1; h <= 24; h += 1) {
+    const option = document.createElement('option');
+    option.value = String(h);
+    option.textContent = `${h} hour${h === 1 ? '' : 's'}`;
+    timeoutSelect.appendChild(option);
+  }
+  timeoutLabel.appendChild(timeoutSelect);
+
+  const timeoutActions = document.createElement('div');
+  timeoutActions.className = 'submit-actions field-inline-action';
+  const timeoutBtn = document.createElement('button');
+  timeoutBtn.type = 'button';
+  timeoutBtn.className = 'action-button small';
+  timeoutBtn.textContent = 'Apply timeout';
+  timeoutBtn.addEventListener('click', async () => {
+    timeoutBtn.disabled = true;
+    try {
+      const response = await fetch('/api/chat-timeout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetSteamId, hours: Number(timeoutSelect.value) }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not apply that timeout.');
+      } else {
+        showToast(`${label} timed out for ${timeoutSelect.value} hour${timeoutSelect.value === '1' ? '' : 's'}.`);
+      }
+    } catch (error) {
+      console.debug('Chat timeout failed:', error);
+      showToast('Could not reach the server right now.');
+    } finally {
+      timeoutBtn.disabled = false;
+    }
+  });
+  timeoutActions.appendChild(timeoutBtn);
+  timeoutRow.append(timeoutLabel, timeoutActions);
+  wrapper.appendChild(timeoutRow);
+
+  const banLabel = document.createElement('label');
+  banLabel.className = 'chat-ban-toggle';
+  const banCheckbox = document.createElement('input');
+  banCheckbox.type = 'checkbox';
+  banLabel.append(banCheckbox, ' Ban from the entire website');
+  wrapper.appendChild(banLabel);
+
+  banCheckbox.addEventListener('change', async () => {
+    const wantsBanned = banCheckbox.checked;
+    if (wantsBanned && !window.confirm(`Ban ${label} from the entire website? This can be undone later from here.`)) {
+      banCheckbox.checked = false;
+      return;
+    }
+    banCheckbox.disabled = true;
+    try {
+      const response = await fetch('/api/chat-ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetSteamId, banned: wantsBanned }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not update that ban.');
+        banCheckbox.checked = !wantsBanned;
+      } else {
+        showToast(wantsBanned ? `${label} banned from the website.` : `${label} unbanned.`);
+      }
+    } catch (error) {
+      console.debug('Chat ban failed:', error);
+      showToast('Could not reach the server right now.');
+      banCheckbox.checked = !wantsBanned;
+    } finally {
+      banCheckbox.disabled = false;
+    }
+  });
+
+  parkedModalContent.replaceChildren(wrapper);
+  parkedModalOverlay.hidden = false;
+
+  try {
+    const response = await fetch(`/api/chat-moderation-status?targetSteamId=${encodeURIComponent(targetSteamId)}`);
+    const data = await response.json();
+    if (response.ok && data.ok) banCheckbox.checked = !!data.banned;
+  } catch (error) {
+    console.debug('Chat moderation status failed:', error);
+  }
 };
 
 // Connects only while the sidebar is actually open, rather than holding a
@@ -1308,6 +1492,17 @@ const connectChatSocket = async () => {
       cachedChatMessages = [...cachedChatMessages, data.message].slice(-200);
       renderChatMessages();
       renderWebsiteChatLog();
+    } else if (data.type === 'delete' && data.messageId) {
+      // A moderator deleted a message (see the right-click menu below) —
+      // broadcast to every connected client, including the one that
+      // triggered it, so this is the only place removal actually happens.
+      cachedChatMessages = cachedChatMessages.filter((m) => m.id !== data.messageId);
+      renderChatMessages();
+      renderWebsiteChatLog();
+    } else if (data.type === 'error' && data.message) {
+      // e.g. "you're timed out from chat until ..." — sent back to just
+      // the sender, never broadcast.
+      showToast(data.message);
     }
   });
 
@@ -3039,6 +3234,10 @@ const attachPlayerAutocomplete = (inputEl) => {
 // server-enforced cutoff; this timer just keeps the UI in sync with it
 // rather than sitting there looking unlocked after it no longer is).
 let adminUnlockExpiryTimer = null;
+// Cached here so the chat right-click moderation menu (admin/owner only)
+// doesn't need its own separate /api/admin-status round trip — it just
+// reads whatever checkAdminPanelAccess() last resolved.
+let viewerAdminTier = null;
 
 const setAdminPanelGateState = (state) => {
   // 'hidden' (not an admin at all) | 'locked' (needs the passkey) | 'unlocked'
@@ -3060,12 +3259,14 @@ const checkAdminPanelAccess = async () => {
     if (adminPanelTabButton) adminPanelTabButton.hidden = true;
     if (adminPanelPanel) adminPanelPanel.hidden = true;
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
+    viewerAdminTier = null;
     return;
   }
   try {
     const response = await fetch('/api/admin-status');
     const data = await response.json();
     const hasAccess = Boolean(data.tier);
+    viewerAdminTier = data.tier || null;
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
     // Skin Library management (save/delete) is owner-tier only — the

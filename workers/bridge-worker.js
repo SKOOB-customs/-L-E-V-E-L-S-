@@ -1102,6 +1102,14 @@ export class ChatRoom {
 
   async fetch(request) {
     if (request.headers.get('Upgrade') !== 'websocket') {
+      const url = new URL(request.url);
+      // Internal-only route, reached from this Worker's own
+      // /chat-delete-message handler (already tier-checked there) — not
+      // exposed on any public path, same way this Durable Object is only
+      // ever reached via env.CHAT_ROOM, never a raw public URL.
+      if (url.pathname === '/delete-message' && request.method === 'POST') {
+        return this.deleteMessage(request);
+      }
       return new Response('Expected WebSocket', { status: 426 });
     }
     const url = new URL(request.url);
@@ -1155,6 +1163,25 @@ export class ChatRoom {
       const text = typeof data?.text === 'string' ? data.text.trim().slice(0, 240) : '';
       if (!text) return;
 
+      // Chat-only mute (functions/api/chat-timeout.js) — checked here,
+      // per message, rather than at connect time, so a timed-out player
+      // can still read chat, just not send. A full site ban is a
+      // different, much broader thing enforced centrally in
+      // functions/api/_middleware.js (they'd never get this far — no
+      // valid session means no valid chat ticket either).
+      if (this.env.PARKED_KV) {
+        try {
+          const timeout = await this.env.PARKED_KV.get(`player_timeout:${steamId}`, 'json');
+          if (timeout?.until && timeout.until > Date.now()) {
+            const until = new Date(timeout.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            this.send(webSocket, { type: 'error', message: `You're timed out from chat until ${until}.` });
+            return;
+          }
+        } catch {
+          // best-effort — a KV hiccup shouldn't silently block every message
+        }
+      }
+
       const message = { id: crypto.randomUUID(), steamId, name, text, at: Date.now() };
       this.messages.push(message);
       if (this.messages.length > 200) this.messages = this.messages.slice(-200);
@@ -1177,6 +1204,36 @@ export class ChatRoom {
     } catch {
       // socket already gone — its close/error listener will clean it up
     }
+  }
+
+  // Reached via fetch()'s non-WebSocket branch above, from this Worker's
+  // /chat-delete-message route (already tier-checked there — no further
+  // auth here, this method trusts its caller the same way the rest of
+  // this class trusts the Worker that instantiates it).
+  async deleteMessage(request) {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+    }
+    const messageId = body?.messageId;
+    if (typeof messageId !== 'string' || !messageId) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid messageId' }), { status: 400 });
+    }
+
+    if (this.messages === null) {
+      const stored = await this.state.storage.get('messages');
+      this.messages = Array.isArray(stored) ? stored : [];
+    }
+    const before = this.messages.length;
+    this.messages = this.messages.filter((m) => m.id !== messageId);
+    if (this.messages.length === before) {
+      return new Response(JSON.stringify({ error: 'Message not found' }), { status: 404 });
+    }
+    await this.state.storage.put('messages', this.messages);
+    this.broadcast({ type: 'delete', messageId });
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
   }
 
   broadcast(payload) {
@@ -2271,6 +2328,141 @@ export default {
         return json({ ok: true, strikes: cleaned });
       } catch (error) {
         return json({ error: error.message || 'Strike list failed' }, 502);
+      }
+    }
+
+    // ── Chat moderation (right-click menu in the chat sidebar) — a full
+    // site ban (player_ban:<steamId>) is enforced centrally in
+    // functions/api/_middleware.js on every request; a chat timeout
+    // (player_timeout:<steamId>) is checked only by ChatRoom itself, per
+    // message. Both live directly in KV, not Durable Object storage —
+    // shared across every part of the site that needs to check them,
+    // unlike chat messages themselves which are local to the one
+    // ChatRoom instance. ──
+
+    if (url.pathname === '/chat-delete-message' && request.method === 'POST') {
+      if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { moderatorSteamId, messageId } = body || {};
+      if (typeof moderatorSteamId !== 'string' || !/^\d{17}$/.test(moderatorSteamId)) {
+        return json({ error: 'Missing or invalid moderatorSteamId' }, 400);
+      }
+      if (typeof messageId !== 'string' || !messageId) {
+        return json({ error: 'Missing or invalid messageId' }, 400);
+      }
+      const tier = await getAdminTier(env, moderatorSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        const id = env.CHAT_ROOM.idFromName('global');
+        const stub = env.CHAT_ROOM.get(id);
+        const response = await stub.fetch('https://internal/delete-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId }),
+        });
+        const data = await response.json();
+        return json(data, response.status);
+      } catch (error) {
+        return json({ error: error.message || 'Message delete failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/chat-timeout' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { moderatorSteamId, targetSteamId, hours } = body || {};
+      if (typeof moderatorSteamId !== 'string' || !/^\d{17}$/.test(moderatorSteamId)) {
+        return json({ error: 'Missing or invalid moderatorSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      const hoursInt = Number.parseInt(hours, 10);
+      if (!Number.isFinite(hoursInt) || hoursInt < 1 || hoursInt > 24) {
+        return json({ error: 'hours must be between 1 and 24' }, 400);
+      }
+      const tier = await getAdminTier(env, moderatorSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        const until = Date.now() + hoursInt * 60 * 60 * 1000;
+        await env.PARKED_KV.put(`player_timeout:${targetSteamId}`, JSON.stringify({
+          until,
+          at: Date.now(),
+          by: moderatorSteamId,
+        }));
+        return json({ ok: true, until });
+      } catch (error) {
+        return json({ error: error.message || 'Timeout failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/chat-ban' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { moderatorSteamId, targetSteamId, banned } = body || {};
+      if (typeof moderatorSteamId !== 'string' || !/^\d{17}$/.test(moderatorSteamId)) {
+        return json({ error: 'Missing or invalid moderatorSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, moderatorSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        if (banned) {
+          await env.PARKED_KV.put(`player_ban:${targetSteamId}`, JSON.stringify({
+            bannedAt: Date.now(),
+            bannedBy: moderatorSteamId,
+          }));
+        } else {
+          await env.PARKED_KV.delete(`player_ban:${targetSteamId}`);
+        }
+        return json({ ok: true, banned: !!banned });
+      } catch (error) {
+        return json({ error: error.message || 'Ban failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/chat-moderation-status' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      const targetSteamId = url.searchParams.get('targetSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!targetSteamId || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+
+      try {
+        const [banned, timeout] = await Promise.all([
+          env.PARKED_KV.get(`player_ban:${targetSteamId}`),
+          env.PARKED_KV.get(`player_timeout:${targetSteamId}`, 'json'),
+        ]);
+        const timeoutUntil = timeout?.until && timeout.until > Date.now() ? timeout.until : null;
+        return json({ ok: true, banned: !!banned, timeoutUntil });
+      } catch (error) {
+        return json({ error: error.message || 'Moderation status lookup failed' }, 502);
       }
     }
 
