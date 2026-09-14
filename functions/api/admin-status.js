@@ -66,7 +66,6 @@ export async function onRequestGet(context) {
         // that already exists, which just re-prompts rather than exposing anything
       }
     }
-    console.log('admin-status debug:', JSON.stringify({ steamId, adminUnlocked: data.adminUnlocked, adminUnlockExpiresAt: data.adminUnlockExpiresAt, hasCookieHeader: !!context.request.headers.get('Cookie') }));
     return json({ ...tierData, hasPasskey, unlocked: !!data.adminUnlocked, unlockExpiresAt: data.adminUnlockExpiresAt });
   } catch (error) {
     return json({ error: error.message || 'Admin tier lookup failed' }, 502);
