@@ -227,7 +227,7 @@ body::before {
   line-height: 1.45;
   word-break: break-word;
   color: var(--chrome-1);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--line);
 }
 
 .chat-message:last-child {
@@ -291,7 +291,7 @@ body::before {
   padding: 1px 6px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.05);
   color: var(--chrome-2);
   font-size: 0.68rem;
   line-height: 1.4;
@@ -376,6 +376,33 @@ body::before {
   flex-direction: column;
   gap: 14px;
   padding-right: 4px;
+}
+
+/* Gold background / black text for Chat and Friends specifically — every
+   component inside either (friend cards, request cards, forms, buttons,
+   the online/offline toggles) already colors itself entirely through
+   these shared theme variables rather than hardcoded hex values, so
+   redefining them scoped to just these two containers flips the whole
+   nested color scheme consistently instead of only the outer panel.
+   Included on the two edge toggle buttons too, since they're siblings of
+   the sidebars (not descendants) and would otherwise stay the old dark/
+   gold scheme right next to a now gold/black sidebar. */
+.chat-toggle,
+.chat-sidebar,
+.friends-toggle,
+.friends-sidebar {
+  --panel: #d8bf7d;
+  --panel-soft: #e2cf95;
+  --panel-strong: #c9ac5f;
+  --chat-bg: #e6d6a3;
+  --chat-bg-solid: #d8bf7d;
+  --chrome-1: #1a1206;
+  --chrome-2: #2b1f0e;
+  --chrome-3: #3a2a12;
+  --text: #1a1206;
+  --muted: #4a3a1c;
+  --line: rgba(0, 0, 0, 0.2);
+  --line-strong: rgba(0, 0, 0, 0.4);
 }
 
 /* The add-friend field+button row is a fixed 2-up grid everywhere else on
