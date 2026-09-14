@@ -120,5 +120,11 @@ export async function onRequestGet({ request, env }) {
       // profile; they'll just need to re-login before anything write-side works
     }
   }
+  // Every fresh login clears any leftover Admin Panel unlock, regardless
+  // of how the previous session ended (explicit logout, expiry, browser
+  // close) — the Admin Panel is meant to be treated as a sensitive area,
+  // so a new login should always require re-entering the passkey rather
+  // than silently inheriting whatever unlock window was already open.
+  headers.append('Set-Cookie', 'levels_admin_unlock=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
   return new Response(null, { status: 302, headers });
 }
