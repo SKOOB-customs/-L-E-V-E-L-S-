@@ -3318,13 +3318,6 @@ document.querySelector('[data-skin-form]')?.addEventListener('submit', async (ev
 // granting itself was never owner-restricted.
 let skinLibraryCache = [];
 
-const SKIN_LIBRARY_COLOR_FIELDS = ['BodyColor', 'MarkingsColor', 'FlankColor', 'UnderbellyColor', 'Detail1Color', 'EyesColor', 'MaleDisplayColor'];
-// Pattern/variation get their own dedicated number inputs on both forms
-// (not just the Advanced JSON textarea) — so they don't count as "extra"
-// fields that force a saved skin's load-for-editing to fall back to raw
-// JSON; only genuinely picker-less fields (Teeth/Mouth/Claws) do that.
-const SKIN_LIBRARY_NUMERIC_FIELDS = ['PatternIndex', 'SkinVariation'];
-
 // Non-null when a saved skin is currently loaded into the Skin Library
 // form for editing (via the "Edit an existing skin" dropdown) — toggles
 // which of the two save buttons is visible and whether saving clears the
@@ -3450,36 +3443,29 @@ const loadSkinLibrary = async () => {
 };
 
 // Picking a saved skin from the grant form's dropdown auto-fills the name
-// + color pickers (or the Advanced JSON field, if the saved skin has any
-// non-picker fields like Teeth/Mouth/Claws) — pure client-side
-// convenience, the actual grant submission is unchanged.
+// and the Advanced JSON field with the FULL saved colors object — always,
+// not just when the skin has non-picker fields like Teeth/Mouth/Claws.
+// Previously this only populated JSON for skins with those "extra"
+// fields and otherwise split the data across the color pickers plus the
+// separate Pattern Index/Skin Variation number inputs instead, which
+// meant a skin someone originally entered via the JSON box came back
+// empty when reselected. JSON is the single source of truth once
+// populated this way (collectSkinLibraryColors always prefers it when
+// non-empty), so the pickers and the two number inputs are cleared
+// alongside it rather than left showing stale, now-redundant values.
 document.querySelector('[data-skin-library-select]')?.addEventListener('change', (event) => {
   const skin = skinLibraryCache.find((s) => s.name === event.target.value);
   if (!skin) return;
   const nameInput = document.querySelector('[data-skin-name]');
   if (nameInput) nameInput.value = skin.name;
 
-  const knownFields = [...SKIN_LIBRARY_COLOR_FIELDS, ...SKIN_LIBRARY_NUMERIC_FIELDS];
-  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !knownFields.includes(field));
   const jsonField = document.querySelector('[data-skin-json]');
+  if (jsonField) jsonField.value = JSON.stringify(skin.colors, null, 2);
+  document.querySelectorAll('[data-skin-color]').forEach((input) => { input.value = '#808080'; });
   const patternInput = document.querySelector('[data-skin-pattern-index]');
+  if (patternInput) patternInput.value = '';
   const variationInput = document.querySelector('[data-skin-skin-variation]');
-  if (hasExtraFields && jsonField) {
-    jsonField.value = JSON.stringify(skin.colors, null, 2);
-    if (patternInput) patternInput.value = '';
-    if (variationInput) variationInput.value = '';
-  } else {
-    if (jsonField) jsonField.value = '';
-    document.querySelectorAll('[data-skin-color]').forEach((input) => {
-      const field = input.dataset.skinColor;
-      const color = skin.colors?.[field];
-      if (!color) return;
-      const toHex = (n) => Math.round((n ?? 0) * 255).toString(16).padStart(2, '0');
-      input.value = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
-    });
-    if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
-    if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
-  }
+  if (variationInput) variationInput.value = '';
 });
 
 // The Skin Library form's OWN "load for editing" dropdown — separate from
@@ -3507,27 +3493,16 @@ document.querySelector('[data-skin-library-edit-select]')?.addEventListener('cha
   if (!skin) return;
   if (nameInput) nameInput.value = skin.name;
 
-  const knownFields = [...SKIN_LIBRARY_COLOR_FIELDS, ...SKIN_LIBRARY_NUMERIC_FIELDS];
-  const hasExtraFields = Object.keys(skin.colors || {}).some((field) => !knownFields.includes(field));
-  if (hasExtraFields && jsonField) {
-    jsonField.value = JSON.stringify(skin.colors, null, 2);
-    if (patternInput) patternInput.value = '';
-    if (variationInput) variationInput.value = '';
-  } else {
-    if (jsonField) jsonField.value = '';
-    document.querySelectorAll('[data-skin-library-color]').forEach((input) => {
-      const field = input.dataset.skinLibraryColor;
-      const color = skin.colors?.[field];
-      if (!color) {
-        input.value = '#808080';
-        return;
-      }
-      const toHex = (n) => Math.round((n ?? 0) * 255).toString(16).padStart(2, '0');
-      input.value = `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
-    });
-    if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
-    if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
-  }
+  // Always the full saved colors object, not just when it has non-picker
+  // fields — see the grant-form dropdown's handler above for why (a skin
+  // originally entered via this JSON box came back empty on reselect
+  // otherwise). JSON is the single source of truth once populated this
+  // way, so the pickers and the two number inputs are cleared alongside
+  // it rather than left showing stale, now-redundant values.
+  if (jsonField) jsonField.value = JSON.stringify(skin.colors, null, 2);
+  document.querySelectorAll('[data-skin-library-color]').forEach((input) => { input.value = '#808080'; });
+  if (patternInput) patternInput.value = '';
+  if (variationInput) variationInput.value = '';
 
   setSkinLibraryEditingState(skin.name);
 });
@@ -3612,8 +3587,20 @@ const saveSkinToLibrary = async (buttonEl) => {
     } else {
       showToast(editingSkinName ? `Saved changes to "${name}".` : `Saved "${name}" to the library.`);
       if (!editingSkinName) {
+        // Every field, not just name/json — leaving the color pickers or
+        // the Pattern Index/Skin Variation number inputs populated meant
+        // they silently carried over into the NEXT new skin saved, with
+        // no visual cue anything was stale. Confirmed live: every saved
+        // skin that had a pattern ended up with the exact same
+        // PatternIndex, because whoever set it once never touched that
+        // field again for later skins.
         document.querySelector('[data-skin-library-name]').value = '';
         document.querySelector('[data-skin-library-json]').value = '';
+        document.querySelectorAll('[data-skin-library-color]').forEach((input) => { input.value = '#808080'; });
+        const patternInput = document.querySelector('[data-skin-library-pattern-index]');
+        if (patternInput) patternInput.value = '';
+        const variationInput = document.querySelector('[data-skin-library-skin-variation]');
+        if (variationInput) variationInput.value = '';
       }
       loadSkinLibrary();
     }
