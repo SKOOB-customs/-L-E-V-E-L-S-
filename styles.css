@@ -15,6 +15,15 @@
   --logo-font: "Permanent Marker", cursive;
   --chat-bg: rgba(26, 17, 8, 0.65);
   --chat-bg-solid: #120b05;
+  /* Native form controls (a <select>'s own dropdown popup, scrollbars,
+     etc.) otherwise render using whichever light/dark mode the visitor's
+     OS or browser happens to be set to, since nothing here told the
+     browser this is a dark-themed page. Confirmed live: the mutation
+     dropdowns in the Admin Panel showed a dark, readable popup for some
+     admins and a plain white one for others, purely based on each
+     admin's own system setting — this makes every native control
+     consistently dark for everyone regardless of that setting. */
+  color-scheme: dark;
 }
 
 * {
@@ -58,6 +67,12 @@
   height: auto;
   border-radius: 16px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.splash-name {
+  font-weight: 800;
+  color: var(--chrome-1);
+  text-shadow: 0 0 8px rgba(243, 230, 184, 0.85), 0 0 18px rgba(243, 230, 184, 0.5);
 }
 
 .splash-message {
@@ -2458,6 +2473,16 @@ textarea {
   background: rgba(255, 255, 255, 0.02);
   color: var(--text);
   padding: 0.82rem 0.9rem;
+}
+
+/* color-scheme: dark (see :root) already pushes browsers toward a dark
+   native popup, but Firefox in particular also honors these directly —
+   the near-transparent background above works fine for the closed box
+   sitting over this page's own dark background, but isn't a real opaque
+   color a standalone popup layered on top of everything else could use. */
+select option {
+  background-color: var(--panel-strong);
+  color: var(--text);
 }
 
 textarea {

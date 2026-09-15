@@ -2,22 +2,29 @@
 // self-dismisses via a pure CSS animation (styles.css) — this just picks
 // which admin/owner line to show, set as early as possible so it's there
 // before the overlay's fade-out even starts. Not tied to a specific
-// admin's real activity, just flavor text.
+// admin's real activity, just flavor text. Split into name/rest (instead
+// of one flat string) so the name specifically can get its own glow
+// styling (.splash-name) without the rest of the sentence.
 const SPLASH_MESSAGES = [
-  'Skoob is cooking up some heat in the skin lab.',
-  'Bart is cooking up a new Rex tech.',
-  'WebMasta is aerialing his way to the RL champs.',
-  'PapaT is making crazy fire patterns for skins again.',
-  'WoahNelli is creating vibes for the community.',
-  'Evil is sniffing out the next competent Rex.',
-  'Yaowa is dibbling around until his Rex needs to be called in.',
-  'Honey is learning another dino to torment Prammy on.',
-  'Prammy is nesting an army to mess with Honey.',
-  'Mint has wandered into her own art again — send snacks, not search parties.',
+  { name: 'Skoob', rest: 'is cooking up some heat in the skin lab.' },
+  { name: 'Bart', rest: 'is cooking up a new Rex tech.' },
+  { name: 'WebMasta', rest: 'is aerialing his way to the RL champs.' },
+  { name: 'PapaT', rest: 'is making crazy fire patterns for skins again.' },
+  { name: 'WoahNelli', rest: 'is creating vibes for the community.' },
+  { name: 'Evil', rest: 'is sniffing out the next competent Rex.' },
+  { name: 'Yaowa', rest: 'is dibbling around until his Rex needs to be called in.' },
+  { name: 'Honey', rest: 'is learning another dino to torment Prammy on.' },
+  { name: 'Prammy', rest: 'is nesting an army to mess with Honey.' },
+  { name: 'Mint', rest: 'has wandered into her own art again — send snacks, not search parties.' },
+  { name: 'Ubbe', rest: 'is searching for another feature to add while getting cooked on Rex by Soulz.' },
 ];
 const splashMessageEl = document.querySelector('[data-splash-message]');
 if (splashMessageEl) {
-  splashMessageEl.textContent = SPLASH_MESSAGES[Math.floor(Math.random() * SPLASH_MESSAGES.length)];
+  const pick = SPLASH_MESSAGES[Math.floor(Math.random() * SPLASH_MESSAGES.length)];
+  const nameEl = document.createElement('span');
+  nameEl.className = 'splash-name';
+  nameEl.textContent = pick.name;
+  splashMessageEl.append(nameEl, ` ${pick.rest}`);
 }
 
 const toast = document.getElementById('toast');
@@ -2579,6 +2586,15 @@ const mutationSlotShortLabel = (field) => {
   return match ? `Slot ${match[1]}` : field;
 };
 
+// Same field-name -> human label extraction as mutationSlotShortLabel
+// above, just worded for the Compensation form's slot labels
+// specifically ("Mutation 1:" instead of the raw internal field name
+// like "mutationSlot1").
+const compMutationSlotLabel = (field) => {
+  const match = field.match(/(\d[AB]?)$/);
+  return match ? `Mutation ${match[1]}:` : field;
+};
+
 const parkedModalOverlay = document.querySelector('[data-parked-modal]');
 const parkedModalContent = document.querySelector('[data-parked-modal-content]');
 
@@ -3456,7 +3472,7 @@ const renderMutationSlots = () => {
     <div class="field-row four-up">
       ${fields.map((field) => `
         <label>
-          ${field}
+          ${compMutationSlotLabel(field)}
           <select data-comp-mutation-field="${field}">
             <option value="">— none —</option>
             ${optionsHtml}
