@@ -687,6 +687,7 @@ const syncPlayerDirectory = async (env) => {
       scannedBackups = [];
     }
   }
+  let newlyScannedBackups = [];
   try {
     const listResponse = await pterodactylFetch(env, `/files/list?directory=${encodeURIComponent(GAME_LOGS_DIR)}`);
     const listBody = await listResponse.json();
@@ -699,13 +700,10 @@ const syncPlayerDirectory = async (env) => {
       try {
         const backupResponse = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(`${GAME_LOGS_DIR}/${name}`)}`);
         mergeJoinLines(await backupResponse.text(), players);
-        scannedBackups.push(name);
+        newlyScannedBackups.push(name);
       } catch {
         // failed to fetch this one this tick — not marked scanned, so it's retried next tick
       }
-    }
-    if (newBackups.length > 0) {
-      await env.PARKED_KV.put('player_directory:scanned_backups', JSON.stringify(scannedBackups));
     }
   } catch {
     // directory listing failed this tick — live-file merge above still ran
@@ -721,8 +719,25 @@ const syncPlayerDirectory = async (env) => {
   // write when a join was actually merged in above, by comparing against
   // the SAME parsed snapshot this function already loaded into `players`
   // before merging (existingPlayersSnapshot, captured right after load).
+  //
+  // Order matters here, and this used to have it backwards: the OLD code
+  // wrote scanned_backups (marking backup files "done") BEFORE writing
+  // the actual player_directory:index data extracted from them. If that
+  // second write ever failed — confirmed live: it did, during the KV
+  // write-quota exhaustion this session — the backup files stayed marked
+  // "already scanned" forever, even though the players inside them were
+  // never actually saved. Since a backup file is a frozen snapshot that
+  // only ever gets scanned once by design, that data was gone for good
+  // and the directory silently stayed stuck at whatever it had before —
+  // exactly what happened: most of the playerbase (most of the admin
+  // team included) became unsearchable. Persisting the real data FIRST
+  // means a failure here just leaves those backups eligible to be
+  // retried next tick instead of silently losing them.
   if (JSON.stringify(existingPlayersSnapshot) !== JSON.stringify(players)) {
     await env.PARKED_KV.put('player_directory:index', JSON.stringify({ updatedAt: Date.now(), players }));
+  }
+  if (newlyScannedBackups.length > 0) {
+    await env.PARKED_KV.put('player_directory:scanned_backups', JSON.stringify([...scannedBackups, ...newlyScannedBackups]));
   }
   return { synced: Object.keys(players).length };
 };
