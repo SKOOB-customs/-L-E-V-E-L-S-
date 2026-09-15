@@ -2071,6 +2071,13 @@ strong.stat-critical {
   margin-bottom: 0;
 }
 
+.mini-heading .badge {
+  margin-left: 8px;
+  vertical-align: middle;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .mini-heading {
   margin-bottom: 14px;
   color: var(--text);
