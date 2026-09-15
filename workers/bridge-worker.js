@@ -755,6 +755,17 @@ const syncPlayerDirectory = async (env) => {
 // cron instead, throttled internally to actually list at most once every
 // 15 minutes (checked via this cache's own updatedAt) regardless of how
 // often the cron itself ticks or any client polls the read side.
+//
+// Also folds in every steamId from admin_tiers.json (the roster file is
+// steamId-only, no names — see syncAdminTiers/getAdminTier) that's
+// missing from the join-log directory. Confirmed report: admins who
+// mostly play without ever logging into the website, and whose last
+// in-game join predates whatever backup log files the game server still
+// has on disk (it only retains a handful), were completely unsearchable
+// by name in the admin panel even though they're valid admins — "all
+// admins and players are not searchable". Same GetPlayerSummaries
+// resolution path already built for unnamed friends below covers them
+// too now, no new plumbing needed.
 const FRIENDS_UNNAMED_SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 const syncUnnamedFriendSteamIds = async (env) => {
@@ -806,6 +817,19 @@ const syncUnnamedFriendSteamIds = async (env) => {
       if (id && /^\d{17}$/.test(id) && !players[id]) unnamedSteamIds.add(id);
     }
   }
+
+  const tiersRaw = await env.PARKED_KV.get('admin_tiers:index');
+  if (tiersRaw) {
+    try {
+      const tiers = JSON.parse(tiersRaw);
+      for (const id of [...(tiers.owner || []), ...(tiers.senior || []), ...(tiers.admin || [])]) {
+        if (id && /^\d{17}$/.test(id) && !players[id]) unnamedSteamIds.add(id);
+      }
+    } catch {
+      // best-effort — friends-derived ids above still resolve fine either way
+    }
+  }
+
   await env.PARKED_KV.put('friends_unnamed_ids:index', JSON.stringify({
     steamIds: [...unnamedSteamIds],
     updatedAt: Date.now(),
