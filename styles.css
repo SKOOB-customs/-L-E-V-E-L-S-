@@ -470,21 +470,28 @@ body::before {
   flex-direction: column;
   gap: 14px;
   padding-right: 4px;
+  /* Overrides .friends-sidebar's Permanent Marker display font — fine
+     for the "Friends" header/toggle tab, too heavy and hard to read
+     once it's every label, button, and friend-list entry in here.
+     Same fix .chat-messages already applies for the same reason. */
+  font-family: "Inter", sans-serif;
 }
 
-/* Gold background / black text for Chat and Friends specifically — every
-   component inside either (friend cards, request cards, forms, buttons,
-   the online/offline toggles) already colors itself entirely through
-   these shared theme variables rather than hardcoded hex values, so
+/* Gold background / black text for Chat and Friends — every component
+   inside either (friend cards, request cards, forms, buttons, the
+   online/offline toggles) already colors itself entirely through these
+   shared theme variables rather than hardcoded hex values, so
    redefining them scoped to just these two containers flips the whole
    nested color scheme consistently instead of only the outer panel.
    Included on the two edge toggle buttons too, since they're siblings of
    the sidebars (not descendants) and would otherwise stay the old dark/
-   gold scheme right next to a now gold/black sidebar. */
+   gold scheme right next to a now gold/black sidebar.
+   Friends gets its own, deliberately less saturated/bright variant right
+   below (same warm-gold family, softer) rather than sharing this block —
+   side by side the full-brightness gold read as too much for Friends
+   specifically. */
 .chat-toggle,
-.chat-sidebar,
-.friends-toggle,
-.friends-sidebar {
+.chat-sidebar {
   --panel: #d8bf7d;
   --panel-soft: #e2cf95;
   --panel-strong: #c9ac5f;
@@ -497,6 +504,22 @@ body::before {
   --muted: #4a3a1c;
   --line: rgba(0, 0, 0, 0.2);
   --line-strong: rgba(0, 0, 0, 0.4);
+}
+
+.friends-toggle,
+.friends-sidebar {
+  --panel: #bfae82;
+  --panel-soft: #cabb92;
+  --panel-strong: #a89871;
+  --chat-bg: #cabb92;
+  --chat-bg-solid: #bfae82;
+  --chrome-1: #2a2013;
+  --chrome-2: #382c1a;
+  --chrome-3: #4a3b22;
+  --text: #2a2013;
+  --muted: #5c4d34;
+  --line: rgba(0, 0, 0, 0.18);
+  --line-strong: rgba(0, 0, 0, 0.32);
 }
 
 /* The add-friend field+button row is a fixed 2-up grid everywhere else on

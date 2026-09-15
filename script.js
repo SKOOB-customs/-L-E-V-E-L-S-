@@ -16,7 +16,7 @@ const SPLASH_MESSAGES = [
   { name: 'Honey', rest: 'is learning another dino to torment Prammy on.' },
   { name: 'Prammy', rest: 'is nesting an army to mess with Honey.' },
   { name: 'Mint', rest: 'has wandered into her own art again — send snacks, not search parties.' },
-  { name: 'Ubbe', rest: 'is adding another feature while getting cooked on Rex by Soulz.' },
+  { name: 'Ubbe', rest: 'is adding a feature while getting cooked on Rex by Soulz.' },
 ];
 // Ubbe and Skoob get an extra shimmer/sparkle on top of the shared glow
 // every name has (.splash-name-sparkle) — everyone else just gets the
