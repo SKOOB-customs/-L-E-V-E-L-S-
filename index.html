@@ -707,24 +707,6 @@
           <div data-admin-panel-content hidden>
             <p class="dino-park-note" data-admin-unlock-status hidden></p>
 
-            <section class="panel content-box" data-owner-only hidden>
-              <div class="mini-heading">Reset an admin's passkey</div>
-              <p class="dino-park-note">Owner-only — clears a locked-out admin's passkey so they're prompted to set a new one next time they open this panel.</p>
-              <form class="submit-form" data-admin-passkey-reset-form>
-                <div class="field-row two-up">
-                  <label>
-                    Admin's Steam ID or name
-                    <div class="player-search">
-                      <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-admin-passkey-reset-target required />
-                    </div>
-                  </label>
-                  <div class="submit-actions field-inline-action">
-                    <button class="action-button" type="submit">Reset passkey</button>
-                  </div>
-                </div>
-              </form>
-            </section>
-
           <section class="panel content-box">
             <div class="mini-heading">Compensation</div>
             <p class="dino-park-note">Grants a redeemable dino snapshot straight to a player's Inventory — same as a real <code>!park</code>, just without them needing to park one themselves.</p>
@@ -1009,6 +991,24 @@
               </div>
             </form>
           </section>
+
+            <section class="panel content-box" data-owner-only hidden>
+              <div class="mini-heading">Passkey recovery</div>
+              <p class="dino-park-note">Owner-only. This is for ANOTHER admin who's forgotten or gotten locked out of their own passkey — not for you to set or change yours (do that from the unlock prompt itself). Clears their passkey so they're prompted to set a brand new one next time they open this panel.</p>
+              <form class="submit-form" data-admin-passkey-reset-form>
+                <div class="field-row two-up">
+                  <label>
+                    That admin's Steam ID or name
+                    <div class="player-search">
+                      <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-admin-passkey-reset-target required />
+                    </div>
+                  </label>
+                  <div class="submit-actions field-inline-action">
+                    <button class="action-button" type="submit">Reset their passkey</button>
+                  </div>
+                </div>
+              </form>
+            </section>
           </div>
         </section>
 
