@@ -3203,6 +3203,7 @@ const hidePlayerSuggestions = (forInput) => {
   if (forInput && playerSuggestionsOwner !== forInput) return;
   playerSuggestionsPortal.hidden = true;
   playerSuggestionsPortal.innerHTML = '';
+  playerSuggestionsPortal.currentRerender = null;
   playerSuggestionsOwner = null;
 };
 
@@ -3217,19 +3218,104 @@ window.addEventListener('scroll', () => hidePlayerSuggestions(), true);
 // closes the dropdown, rather than a race between blur-hides-it and
 // click-tries-to-read-it-first.
 playerSuggestionsPortal.addEventListener('mousedown', (event) => {
+  const removeBtn = event.target.closest('[data-remove-recent]');
+  if (removeBtn) {
+    event.preventDefault();
+    event.stopPropagation();
+    removeRecentPlayerSearch(removeBtn.dataset.removeRecent);
+    playerSuggestionsPortal.currentRerender?.();
+    return;
+  }
   const row = event.target.closest('[data-steam-id]');
   if (!row || !playerSuggestionsOwner) return;
   event.preventDefault();
   playerSuggestionsOwner.value = row.dataset.steamId;
+  recordRecentPlayerSearch(row.dataset.steamId, row.dataset.name || row.dataset.steamId);
   hidePlayerSuggestions();
 });
+
+// Last 3 players any admin searched/selected via one of the fields below,
+// kept in localStorage (per-browser, not synced server-side — this is
+// just a UI convenience, not data anyone else needs to see) so they show
+// back up as one-click suggestions the next time that field is focused
+// empty, instead of having to retype a name. Shared across every field
+// attachPlayerAutocomplete is used on, since an admin picking a target
+// for Compensation today is quite likely the same target they'll want
+// for Strikes tomorrow.
+const RECENT_PLAYER_SEARCHES_KEY = 'levels_recent_player_searches';
+const MAX_RECENT_PLAYER_SEARCHES = 3;
+
+const loadRecentPlayerSearches = () => {
+  try {
+    const raw = localStorage.getItem(RECENT_PLAYER_SEARCHES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const recordRecentPlayerSearch = (steamId, name) => {
+  if (!steamId) return;
+  try {
+    const next = [{ steamId, name: name || steamId }, ...loadRecentPlayerSearches().filter((p) => p.steamId !== steamId)]
+      .slice(0, MAX_RECENT_PLAYER_SEARCHES);
+    localStorage.setItem(RECENT_PLAYER_SEARCHES_KEY, JSON.stringify(next));
+  } catch {
+    // best-effort — worst case this admin just doesn't get recent suggestions
+  }
+};
+
+const removeRecentPlayerSearch = (steamId) => {
+  try {
+    const next = loadRecentPlayerSearches().filter((p) => p.steamId !== steamId);
+    localStorage.setItem(RECENT_PLAYER_SEARCHES_KEY, JSON.stringify(next));
+  } catch {
+    // best-effort
+  }
+};
+
+const escapePlayerSuggestionText = (str) => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
 
 const attachPlayerAutocomplete = (inputEl) => {
   if (!inputEl) return;
 
   const renderSuggestions = () => {
     const query = inputEl.value.trim().toLowerCase();
-    if (!query || /^\d+$/.test(query)) {
+
+    if (!query) {
+      const recents = loadRecentPlayerSearches();
+      if (recents.length === 0) {
+        hidePlayerSuggestions(inputEl);
+        return;
+      }
+      playerSuggestionsOwner = inputEl;
+      const rect = inputEl.getBoundingClientRect();
+      playerSuggestionsPortal.style.left = `${rect.left}px`;
+      playerSuggestionsPortal.style.top = `${rect.bottom + 4}px`;
+      playerSuggestionsPortal.style.width = `${rect.width}px`;
+      playerSuggestionsPortal.innerHTML = `
+        <div class="player-suggestions-heading">Recently searched</div>
+        ${recents.map((p) => `
+          <div class="player-suggestion player-suggestion-recent" data-steam-id="${p.steamId}" data-name="${escapePlayerSuggestionText(p.name)}">
+            <span class="player-suggestion-label">
+              ${escapePlayerSuggestionText(p.name)}
+              <small>${p.steamId}</small>
+            </span>
+            <button type="button" class="player-suggestion-remove" data-remove-recent="${p.steamId}" aria-label="Remove ${escapePlayerSuggestionText(p.name)} from recent searches">×</button>
+          </div>
+        `).join('')}
+      `;
+      playerSuggestionsPortal.hidden = false;
+      playerSuggestionsPortal.currentRerender = renderSuggestions;
+      return;
+    }
+
+    if (/^\d+$/.test(query)) {
       hidePlayerSuggestions(inputEl);
       return;
     }
@@ -3246,12 +3332,13 @@ const attachPlayerAutocomplete = (inputEl) => {
     playerSuggestionsPortal.style.top = `${rect.bottom + 4}px`;
     playerSuggestionsPortal.style.width = `${rect.width}px`;
     playerSuggestionsPortal.innerHTML = matches.map((p) => `
-      <div class="player-suggestion" data-steam-id="${p.steamId}">
-        ${String(p.name).replace(/</g, '&lt;')}
+      <div class="player-suggestion" data-steam-id="${p.steamId}" data-name="${escapePlayerSuggestionText(p.name)}">
+        ${escapePlayerSuggestionText(p.name)}
         <small>${p.steamId}</small>
       </div>
     `).join('');
     playerSuggestionsPortal.hidden = false;
+    playerSuggestionsPortal.currentRerender = renderSuggestions;
   };
 
   inputEl.addEventListener('input', renderSuggestions);

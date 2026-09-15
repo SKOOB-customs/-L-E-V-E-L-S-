@@ -2384,6 +2384,44 @@ strong.stat-critical {
   font-size: 0.85em;
 }
 
+.player-suggestions-heading {
+  padding: 6px 12px;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.player-suggestion-recent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.player-suggestion-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-suggestion-remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.player-suggestion-remove:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .skin-color-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
