@@ -670,14 +670,54 @@ const spawnCurrencyGainFx = (display, delta) => {
 const renderCurrencyBalance = (balance) => {
   const display = document.querySelector('[data-currency-display]');
   const balanceEl = document.querySelector('[data-currency-balance]');
-  if (!display || !balanceEl) return;
-  display.hidden = false;
   const rounded = Math.floor(balance);
-  if (lastRenderedCurrencyBalance !== null && rounded > lastRenderedCurrencyBalance) {
-    spawnCurrencyGainFx(display, rounded - lastRenderedCurrencyBalance);
+  if (display && balanceEl) {
+    display.hidden = false;
+    if (lastRenderedCurrencyBalance !== null && rounded > lastRenderedCurrencyBalance) {
+      spawnCurrencyGainFx(display, rounded - lastRenderedCurrencyBalance);
+    }
+    balanceEl.textContent = rounded.toLocaleString();
   }
   lastRenderedCurrencyBalance = rounded;
-  balanceEl.textContent = rounded.toLocaleString();
+  const earningsBalanceEl = document.querySelector('[data-coin-earnings-balance]');
+  if (earningsBalanceEl) earningsBalanceEl.textContent = rounded.toLocaleString();
+};
+
+// ── Coin Earnings (Profile tab) ──
+//
+// Pure reference math, mirrors main.lua's playtime-accrual constants
+// exactly (CURRENCY_BASE_RATE_PER_MIN / CURRENCY_DEFAULT_MULTIPLIER /
+// CURRENCY_SPECIES_MULTIPLIER) — update both together if the in-game
+// rate ever changes. This is just showing players the same math the
+// mod already runs every 5 minutes they're spawned in, so it's static
+// reference info rather than something that needs its own poll; only
+// the live balance line (wired through renderCurrencyBalance above)
+// actually refreshes on a timer.
+const COIN_BASE_RATE_PER_MIN = 95;
+const COIN_DEFAULT_MULTIPLIER = 2.0;
+const COIN_FAST_MULTIPLIER = 7.5;
+
+const renderCoinEarningsRates = () => {
+  const defaultRateEl = document.querySelector('[data-coin-earnings-default-rate]');
+  const fastRateEl = document.querySelector('[data-coin-earnings-fast-rate]');
+  const exampleEl = document.querySelector('[data-coin-earnings-example]');
+  if (!defaultRateEl || !fastRateEl || !exampleEl) return;
+
+  const defaultPerMin = COIN_BASE_RATE_PER_MIN * COIN_DEFAULT_MULTIPLIER;
+  const fastPerMin = COIN_BASE_RATE_PER_MIN * COIN_FAST_MULTIPLIER;
+  defaultRateEl.textContent = `${Math.round(defaultPerMin).toLocaleString()}/min (${Math.round(defaultPerMin * 60).toLocaleString()}/hour)`;
+  fastRateEl.textContent = `${Math.round(fastPerMin).toLocaleString()}/min (${Math.round(fastPerMin * 60).toLocaleString()}/hour)`;
+
+  const exampleMinutes = 30;
+  const examplePayout = Math.round(defaultPerMin * exampleMinutes);
+  exampleEl.textContent = `Example: ${exampleMinutes} minutes played on a ${COIN_DEFAULT_MULTIPLIER}x species pays out ${examplePayout.toLocaleString()} coins. Coins are added automatically every 5 minutes you're spawned in and connected — check back and watch your balance climb.`;
+};
+
+const updateCoinEarningsSection = (profile) => {
+  const section = document.querySelector('[data-coin-earnings-section]');
+  if (!section) return;
+  section.hidden = !profile;
+  if (profile) renderCoinEarningsRates();
 };
 
 const loadCurrencyBalance = async () => {
@@ -991,6 +1031,7 @@ const displaySteamStatus = async () => {
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) logoutBtn.hidden = !profile && !discordProfile;
   loadDinoHistory();
+  updateCoinEarningsSection(profile);
   initTicketForm();
   updateChatSignInState();
 

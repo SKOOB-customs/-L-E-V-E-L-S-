@@ -1696,6 +1696,52 @@ strong.stat-critical {
   color: var(--muted);
 }
 
+.coin-earnings-balance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+}
+
+.coin-earnings-balance .currency-icon {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  animation: none;
+}
+
+.coin-earnings-balance strong {
+  color: var(--chrome-1);
+}
+
+.coin-earnings-rates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+}
+
+.coin-earnings-rate-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.coin-earnings-rate-label {
+  color: var(--muted);
+}
+
+.coin-earnings-rate-value {
+  font-weight: 700;
+  color: var(--chrome-1);
+  white-space: nowrap;
+}
+
 .dino-position {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
