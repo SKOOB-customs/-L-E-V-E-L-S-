@@ -75,6 +75,62 @@
   text-shadow: 0 0 8px rgba(243, 230, 184, 0.85), 0 0 18px rgba(243, 230, 184, 0.5);
 }
 
+/* Extra shimmer/sparkle reserved for just Ubbe and Skoob (script.js's
+   SPARKLE_NAMES) — a moving gradient sweep across the name itself plus
+   two tiny twinkling stars, layered on top of the glow every name
+   already gets from .splash-name above. Kept slow and low-opacity at
+   rest so it reads as "subtle" rather than gaudy. */
+.splash-name-sparkle {
+  position: relative;
+  display: inline-block;
+  background: linear-gradient(90deg, var(--chrome-1) 0%, #fff8e1 25%, var(--chrome-1) 50%, #fff8e1 75%, var(--chrome-1) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: splash-name-shimmer 2.6s linear infinite;
+}
+
+@keyframes splash-name-shimmer {
+  to {
+    background-position: -200% center;
+  }
+}
+
+.splash-name-sparkle::before,
+.splash-name-sparkle::after {
+  content: '\2726';
+  position: absolute;
+  font-size: 0.5em;
+  color: #fff8e1;
+  -webkit-text-fill-color: #fff8e1;
+  text-shadow: 0 0 6px rgba(255, 250, 220, 0.9);
+  animation: splash-name-twinkle 1.8s ease-in-out infinite;
+}
+
+.splash-name-sparkle::before {
+  top: -0.45em;
+  right: -0.65em;
+  animation-delay: 0s;
+}
+
+.splash-name-sparkle::after {
+  bottom: -0.35em;
+  left: -0.65em;
+  animation-delay: 0.9s;
+}
+
+@keyframes splash-name-twinkle {
+  0%, 100% {
+    opacity: 0.15;
+    transform: scale(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .splash-message {
   margin: 0;
   max-width: 340px;
@@ -83,6 +139,29 @@
   font-size: 0.95rem;
   text-align: center;
   color: var(--chrome-1);
+  animation: splash-message-hop 0.9s ease-out both;
+}
+
+/* "Go slightly above and gracefully drop back" — the whole line (name +
+   rest of the sentence move together, not just the name) rises past its
+   resting position on entry, then eases back down to rest instead of
+   just fading in flat. */
+@keyframes splash-message-hop {
+  0% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(2px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* The `hidden` attribute only hides an element via the browser's default

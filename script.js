@@ -16,13 +16,17 @@ const SPLASH_MESSAGES = [
   { name: 'Honey', rest: 'is learning another dino to torment Prammy on.' },
   { name: 'Prammy', rest: 'is nesting an army to mess with Honey.' },
   { name: 'Mint', rest: 'has wandered into her own art again — send snacks, not search parties.' },
-  { name: 'Ubbe', rest: 'is searching for another feature to add while getting cooked on Rex by Soulz.' },
+  { name: 'Ubbe', rest: 'is adding another feature while getting cooked on Rex by Soulz.' },
 ];
+// Ubbe and Skoob get an extra shimmer/sparkle on top of the shared glow
+// every name has (.splash-name-sparkle) — everyone else just gets the
+// base .splash-name treatment.
+const SPARKLE_NAMES = new Set(['Ubbe', 'Skoob']);
 const splashMessageEl = document.querySelector('[data-splash-message]');
 if (splashMessageEl) {
   const pick = SPLASH_MESSAGES[Math.floor(Math.random() * SPLASH_MESSAGES.length)];
   const nameEl = document.createElement('span');
-  nameEl.className = 'splash-name';
+  nameEl.className = SPARKLE_NAMES.has(pick.name) ? 'splash-name splash-name-sparkle' : 'splash-name';
   nameEl.textContent = pick.name;
   splashMessageEl.append(nameEl, ` ${pick.rest}`);
 }
