@@ -3456,6 +3456,7 @@ const checkAdminPanelAccess = async () => {
     if (data.unlocked) {
       setAdminPanelGateState('unlocked');
       loadSkinLibrary();
+      loadOwnStaffBio();
       const statusEl = document.querySelector('[data-admin-unlock-status]');
       if (statusEl) {
         if (data.unlockExpiresAt) {
@@ -4238,12 +4239,51 @@ document.querySelector('[data-strike-form]')?.addEventListener('submit', async (
 // /admin-roster-public -> the same KV-synced admin_tiers.json). Tiers with
 // no members (Senior Admin right now) stay hidden entirely rather than
 // showing an empty section.
+const STAFF_TIER_LABELS = { owner: 'Owner', senior: 'Senior Admin', admin: 'Admin' };
+
+// Every current staffer gets a card here regardless of whether they've
+// written a bio yet (falls back to an italic placeholder) — this is a
+// "meet the whole team" listing, not just the ones who filled out the
+// form, since the roster grid right above it already shows everyone too.
+const renderStaffBios = (data) => {
+  const wrap = document.querySelector('[data-staff-bios]');
+  const grid = document.querySelector('[data-staff-bio-grid]');
+  if (!wrap || !grid) return;
+  const members = ['owner', 'senior', 'admin'].flatMap((tier) => (data[tier] || []).map((member) => ({ ...member, tier })));
+  if (members.length === 0) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  grid.innerHTML = members.map((member) => {
+    const bio = String(member.bio || '').trim();
+    const bioHtml = bio
+      ? String(bio).replace(/</g, '&lt;')
+      : "This staff member hasn't shared a bio yet.";
+    return `
+      <div class="staff-bio-card">
+        <div class="staff-bio-card-header">
+          ${member.avatar ? `<img src="${member.avatar}" alt="" />` : ''}
+          <div>
+            <strong>${String(member.name).replace(/</g, '&lt;')}</strong>
+            <span class="staff-bio-card-tier">${STAFF_TIER_LABELS[member.tier] || member.tier}</span>
+          </div>
+        </div>
+        <p class="staff-bio-card-text${bio ? '' : ' is-empty'}">${bioHtml}</p>
+      </div>
+    `;
+  }).join('');
+};
+
+let lastStaffRosterData = null;
+
 const loadStaffRoster = async () => {
   const rosterEl = document.querySelector('[data-staff-roster]');
   if (!rosterEl) return;
   try {
     const response = await fetch('/api/staff-roster');
     const data = await response.json();
+    lastStaffRosterData = data;
     let anyVisible = false;
     ['owner', 'senior', 'admin'].forEach((tier) => {
       const members = data[tier] || [];
@@ -4264,6 +4304,7 @@ const loadStaffRoster = async () => {
       `).join('');
     });
     rosterEl.hidden = !anyVisible;
+    renderStaffBios(data);
   } catch (error) {
     console.debug('Staff roster load failed:', error);
   }
@@ -4271,6 +4312,57 @@ const loadStaffRoster = async () => {
 
 document.querySelector('[data-tab="community"]')?.addEventListener('click', loadStaffRoster);
 loadStaffRoster();
+
+// ── Admin Panel: self-service "Meet the Staff" bio editor ──
+//
+// Pre-filled from the same public /api/staff-roster payload the
+// Community tab uses (reusing lastStaffRosterData if a load already
+// happened this page view, otherwise fetching fresh) — no separate
+// "get my own bio" endpoint needed since the public roster already
+// carries every staffer's bio, and finding this viewer's own steamId in
+// it is just as accurate.
+const loadOwnStaffBio = async () => {
+  const input = document.querySelector('[data-staff-bio-input]');
+  const profile = getSteamProfile();
+  if (!input || !profile?.steamId) return;
+  try {
+    const data = lastStaffRosterData || await (await fetch('/api/staff-roster')).json();
+    lastStaffRosterData = data;
+    const mine = ['owner', 'senior', 'admin']
+      .flatMap((tier) => data[tier] || [])
+      .find((member) => member.steamId === profile.steamId);
+    input.value = mine?.bio || '';
+  } catch (error) {
+    console.debug('Own staff bio load failed:', error);
+  }
+};
+
+document.querySelector('[data-staff-bio-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = document.querySelector('[data-staff-bio-input]');
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/staff-bio-set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bio: input?.value || '' }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not save your bio.');
+    } else {
+      showToast('Bio saved.');
+      lastStaffRosterData = null;
+      loadStaffRoster();
+    }
+  } catch (error) {
+    console.debug('Staff bio save failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
 
 // ── Friends tab: friend requests, friend list, and meet-up teleports ──
 //

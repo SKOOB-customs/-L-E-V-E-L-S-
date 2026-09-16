@@ -1457,18 +1457,83 @@ export default {
     // nothing beyond what's already public knowledge in-game (who has
     // admin, at what tier).
     if (url.pathname === '/admin-roster-public' && request.method === 'GET') {
-      if (!env.PARKED_KV) return json({ owner: [], senior: [], admin: [] });
+      if (!env.PARKED_KV) return json({ owner: [], senior: [], admin: [], bios: {} });
       const raw = await env.PARKED_KV.get('admin_tiers:index');
-      if (!raw) return json({ owner: [], senior: [], admin: [] });
+      let tiers = { owner: [], senior: [], admin: [] };
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          tiers = {
+            owner: Array.isArray(parsed.owner) ? parsed.owner : [],
+            senior: Array.isArray(parsed.senior) ? parsed.senior : [],
+            admin: Array.isArray(parsed.admin) ? parsed.admin : [],
+          };
+        } catch {
+          // fall through with the empty default above
+        }
+      }
+      // "Meet the Staff" bios (each admin/senior/owner writes their own via
+      // the Admin Panel's self-service editor — see /staff-bio-set) live in
+      // one small KV blob, same steamId-keyed-map shape as admin_tiers.json
+      // itself, rather than one KV key per admin — there are only ever as
+      // many entries as there are staff, so a single read here is cheaper
+      // than a list() call and avoids that separate, stricter quota.
+      let bios = {};
       try {
-        const tiers = JSON.parse(raw);
-        return json({
-          owner: Array.isArray(tiers.owner) ? tiers.owner : [],
-          senior: Array.isArray(tiers.senior) ? tiers.senior : [],
-          admin: Array.isArray(tiers.admin) ? tiers.admin : [],
-        });
+        const biosRaw = await env.PARKED_KV.get('staff_bios:index');
+        if (biosRaw) bios = JSON.parse(biosRaw) || {};
       } catch {
-        return json({ owner: [], senior: [], admin: [] });
+        // best-effort — the roster itself still returns fine either way
+      }
+      return json({ ...tiers, bios });
+    }
+
+    // Self-service "Meet the Staff" bio editor — POST { steamId, bio }.
+    // Every admin/senior/owner sets their own paragraph, no owner approval
+    // needed (same self-service spirit as the Admin Panel passkey). Empty
+    // bio deletes the entry rather than storing a blank string, so an
+    // admin can clear theirs back to "hasn't shared a bio yet" on the
+    // public roster. steamId here is never trusted as the caller's own
+    // identity by this Worker route alone — functions/api/staff-bio-set.js
+    // only ever forwards the REAL verified session's steamId, never a
+    // client-supplied one, same trust boundary as every other admin route.
+    if (url.pathname === '/staff-bio-set' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, bio } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      const tier = await getAdminTier(env, steamId);
+      if (!tier) return json({ error: 'Only staff can set a "Meet the Staff" bio.' }, 403);
+      const trimmed = typeof bio === 'string' ? bio.trim() : '';
+      if (trimmed.length > 600) {
+        return json({ error: 'Keep it under 600 characters — about 3-5 lines is plenty.' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get('staff_bios:index');
+        let bios = {};
+        if (raw) {
+          try {
+            bios = JSON.parse(raw) || {};
+          } catch {
+            bios = {};
+          }
+        }
+        if (trimmed) {
+          bios[steamId] = { bio: trimmed, updatedAt: Date.now() };
+        } else {
+          delete bios[steamId];
+        }
+        await env.PARKED_KV.put('staff_bios:index', JSON.stringify(bios));
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Could not save bio' }, 502);
       }
     }
 

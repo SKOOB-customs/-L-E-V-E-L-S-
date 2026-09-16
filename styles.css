@@ -2454,6 +2454,64 @@ strong.stat-critical {
   font-size: 0.9rem;
 }
 
+.staff-bios {
+  margin-top: 20px;
+}
+
+.staff-bio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.staff-bio-card {
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+}
+
+.staff-bio-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.staff-bio-card-header img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: block;
+  flex: none;
+}
+
+.staff-bio-card-header strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.staff-bio-card-tier {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.staff-bio-card-text {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.staff-bio-card-text.is-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .submit-form {
   display: grid;
   gap: 18px;

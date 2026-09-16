@@ -418,6 +418,12 @@
               <div class="staff-roster-list" data-staff-list="admin"></div>
             </div>
           </div>
+
+          <div class="panel content-box staff-bios" data-staff-bios hidden>
+            <div class="mini-heading">Meet the staff</div>
+            <p class="dino-park-note">A few lines from each staff member, in their own words — written and kept up to date by them from the Admin Panel.</p>
+            <div class="staff-bio-grid" data-staff-bio-grid></div>
+          </div>
         </section>
 
         <section class="tab-panel" id="profile" data-tab="profile">
@@ -726,6 +732,20 @@
 
           <div data-admin-panel-content hidden>
             <p class="dino-park-note" data-admin-unlock-status hidden></p>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Meet the Staff bio</div>
+            <p class="dino-park-note">Shown publicly on the Community tab's staff roster — write your own, 3-5 lines is plenty. Save it blank to remove it.</p>
+            <form class="submit-form" data-staff-bio-form>
+              <label>
+                Your bio
+                <textarea data-staff-bio-input maxlength="600" rows="5" placeholder="Tell the community a bit about yourself..."></textarea>
+              </label>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Save bio</button>
+              </div>
+            </form>
+          </section>
 
           <section class="panel content-box">
             <div class="mini-heading">Compensation</div>

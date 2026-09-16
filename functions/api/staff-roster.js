@@ -1,15 +1,16 @@
 /**
  * Public staff roster for the Community tab's "meet the team" listing.
  *
- * GET (no params) -> { owner: [{steamId, name, avatar}], senior: [...],
- *   admin: [...] }. Fetches the tier lists from the bridge Worker's
- * /admin-roster-public route, then enriches each Steam ID with its public
- * display name + avatar via Steam's GetPlayerSummaries — the same call
- * steam-callback.js already makes on login, reused here for a batch of
- * IDs at once (single comma-separated request, well under Steam's 100-id
- * cap for this size of roster). Falls back to the bare Steam ID as the
- * name if STEAM_API_KEY isn't configured or the lookup fails — never
- * blocks the roster from rendering.
+ * GET (no params) -> { owner: [{steamId, name, avatar, bio}], senior: [...],
+ *   admin: [...] }. Fetches the tier lists (plus each staffer's
+ * self-written "Meet the Staff" bio, if any — see staff-bio-set.js) from
+ * the bridge Worker's /admin-roster-public route, then enriches each
+ * Steam ID with its public display name + avatar via Steam's
+ * GetPlayerSummaries — the same call steam-callback.js already makes on
+ * login, reused here for a batch of IDs at once (single comma-separated
+ * request, well under Steam's 100-id cap for this size of roster). Falls
+ * back to the bare Steam ID as the name if STEAM_API_KEY isn't configured
+ * or the lookup fails — never blocks the roster from rendering.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -62,10 +63,12 @@ export async function onRequestGet(context) {
     }
   }
 
+  const bios = tiers.bios || {};
   const enrich = (ids) => (ids || []).map((steamId) => ({
     steamId,
     name: profiles[steamId]?.name || steamId,
     avatar: profiles[steamId]?.avatar || null,
+    bio: bios[steamId]?.bio || '',
   }));
 
   return json({
