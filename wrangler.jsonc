@@ -55,7 +55,11 @@
   // here for it as a result.
   "durable_objects": {
     "bindings": [
-      { "name": "CHAT_ROOM", "class_name": "ChatRoom" }
+      { "name": "CHAT_ROOM", "class_name": "ChatRoom" },
+      // Holds the one persistent RCON connection every /status request
+      // shares instead of opening a fresh connect+auth each time — see
+      // RconBridge's own comment in bridge-worker.js for why.
+      { "name": "RCON_BRIDGE", "class_name": "RconBridge" }
     ]
   },
   // Free-plan Durable Objects require SQLite-backed storage specifically
@@ -64,6 +68,7 @@
   // using a new_sqlite_classes migration"). The classic get()/put()
   // storage API ChatRoom uses works the same on either backend.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["RconBridge"] }
   ]
 }

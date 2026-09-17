@@ -1288,6 +1288,150 @@ export class ChatRoom {
   }
 }
 
+// ── Persistent RCON connection (Durable Object) ──
+//
+// Every RCON request used to open a brand-new TCP socket and run a full
+// auth handshake, then close it — one connect+auth per request, even
+// with the Live Dino tab polling every 2 seconds per viewer (see
+// script.js's pollLiveDino). Game Host Bros support traced a server-wide
+// stuck-ping/FPS problem to exactly this (2026-09-15 ticket): Evrima has
+// a known bug where RCON connections that keep re-authenticating instead
+// of staying open tank ServerFPS over time, which reads in-game as
+// ping — not a network or hardware issue. Their fix suggestion: a single
+// persistent connection instead of reconnecting per request.
+//
+// A Durable Object is the only way to actually guarantee that on
+// Workers — a plain module-level variable can survive across requests
+// within one isolate, but Cloudflare can and does run multiple isolates
+// for the same Worker concurrently (different edge colos, or extra
+// capacity under load), each with its own copy, which would silently
+// defeat the whole point. A Durable Object is guaranteed to be a single
+// global instance, so this is the one real persistent connection Game
+// Host Bros asked for. Commands are serialized one at a time through
+// commandQueue — this raw TCP protocol has no request/response framing
+// beyond "read until a marker shows up," so two in-flight commands on
+// the same socket couldn't be told apart. The socket is only ever
+// re-authenticated when it's actually gone (closed/errored), never per
+// request.
+// How long a completed command's response is reused for an identical
+// (same opcode+value) request that arrives shortly after — well under
+// script.js's 2-second Live Dino poll interval, so no single viewer ever
+// sees their own previous poll's answer twice, but long enough to
+// collapse several viewers' independently-timed polls landing in the
+// same window into one real RCON round trip. Commands are serialized
+// one at a time on the single shared connection (see the class comment
+// below), so without this, a burst of concurrent requests — several
+// admins with Live Dino open at once, say — would queue up behind each
+// other and some could time out waiting their turn; confirmed live
+// during rollout with 8 simultaneous requests, several of which came
+// back "Canceled" before this existed.
+const RCON_RESPONSE_CACHE_TTL_MS = 1000;
+
+export class RconBridge {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.socket = null;
+    this.writer = null;
+    this.reader = null;
+    this.commandQueue = Promise.resolve();
+    this.inFlight = new Map(); // "<opcode>:<value>" -> Promise<responseText>
+    this.recentResponses = new Map(); // same key -> { response, at }
+  }
+
+  dropConnection() {
+    this.socket = null;
+    this.writer = null;
+    this.reader = null;
+  }
+
+  async ensureConnected() {
+    if (this.socket) return;
+    const socket = connect({ hostname: this.env.RCON_HOST, port: Number(this.env.RCON_PORT) });
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
+
+    await writer.write(authPacket(this.env.RCON_PASSWORD));
+    const authResponse = await readUntil(reader, (value) => value.includes('Password Accepted'));
+    if (!authResponse.includes('Password Accepted')) {
+      try { await writer.close(); } catch { /* best-effort teardown of a socket we're discarding anyway */ }
+      try { reader.releaseLock(); } catch { /* same */ }
+      try { socket.close(); } catch { /* same */ }
+      throw new Error('RCON authentication failed: ' + authResponse);
+    }
+
+    this.socket = socket;
+    this.writer = writer;
+    this.reader = reader;
+    // A dropped/reset connection (RCON-side idle timeout, network blip)
+    // surfaces as this promise settling — clear our references so the
+    // NEXT command reconnects instead of writing into a dead socket
+    // forever. Deliberately not awaited here; this just observes the
+    // connection's eventual end from the outside.
+    socket.closed.catch(() => {}).finally(() => this.dropConnection());
+  }
+
+  async runCommand(opcode, value, doneMarkers) {
+    await this.ensureConnected();
+    await this.writer.write(commandPacket(opcode, value));
+    return readUntil(this.reader, (text) => doneMarkers.some((marker) => text.includes(marker)));
+  }
+
+  queueCommand(opcode, value, doneMarkers) {
+    const result = this.commandQueue.then(() => this.runCommand(opcode, value, doneMarkers));
+    // Reset the chain regardless of outcome so one failed command doesn't
+    // wedge every command queued behind it — the caller still sees their
+    // own rejection via the returned `result` itself.
+    this.commandQueue = result.then(() => {}, () => {});
+    return result;
+  }
+
+  // Single-flight + short cache in front of queueCommand — see
+  // RCON_RESPONSE_CACHE_TTL_MS above for why. A fresh-enough cached
+  // response short-circuits the queue entirely; an identical request
+  // already in flight shares that same promise instead of queuing a
+  // second, redundant command right behind it.
+  getResponse(opcode, value, doneMarkers) {
+    const key = `${opcode}:${value}`;
+    const cached = this.recentResponses.get(key);
+    if (cached && Date.now() - cached.at < RCON_RESPONSE_CACHE_TTL_MS) {
+      return Promise.resolve(cached.response);
+    }
+    if (this.inFlight.has(key)) return this.inFlight.get(key);
+    const promise = this.queueCommand(opcode, value, doneMarkers)
+      .then((response) => {
+        this.recentResponses.set(key, { response, at: Date.now() });
+        return response;
+      })
+      .finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, promise);
+    return promise;
+  }
+
+  async fetch(request) {
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    const { opcode, value, doneMarkers } = body || {};
+    if (typeof opcode !== 'number') return json({ error: 'Missing opcode' }, 400);
+    const markers = Array.isArray(doneMarkers) && doneMarkers.length ? doneMarkers : ['PlayerDataEnd'];
+    try {
+      const response = await this.getResponse(opcode, value || '', markers);
+      return json({ ok: true, response });
+    } catch (error) {
+      // Whatever just failed likely means the persistent connection is
+      // actually dead (auth failure, reset mid-command) — force a full
+      // reconnect on the next call rather than leaving a half-broken
+      // socket in place for every request after this one to also fail on.
+      this.dropConnection();
+      return json({ error: error.message || 'RCON command failed' }, 502);
+    }
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -3022,57 +3166,49 @@ export default {
         },
       }, 503);
     }
+    if (!env.RCON_BRIDGE) return json({ error: 'RCON bridge is not configured' }, 503);
 
-    let socket;
-    let stage = 'connect';
+    // Routed through the RconBridge Durable Object (below) instead of
+    // opening a fresh socket + auth handshake per request, as this used
+    // to. Game Host Bros support traced a server-wide stuck-ping/FPS
+    // problem (2026-09-15 ticket) to exactly that pattern: Evrima has a
+    // known bug where RCON connections that keep re-authenticating
+    // instead of staying open tank ServerFPS over time, which shows up
+    // in-game as ping, not as anything network- or hardware-related.
+    // Their fix was "use a single persistent connection" — see
+    // RconBridge's own comment for why only a Durable Object actually
+    // guarantees that on Workers.
+    const steamId = url.searchParams.get('steam_id');
+    const rconStub = env.RCON_BRIDGE.get(env.RCON_BRIDGE.idFromName('singleton'));
+
     try {
-      socket = connect({ hostname: env.RCON_HOST, port: Number(env.RCON_PORT) });
-      const writer = socket.writable.getWriter();
-      const reader = socket.readable.getReader();
-
-      stage = 'send authentication';
-      await writer.write(authPacket(env.RCON_PASSWORD));
-
-      stage = 'read authentication response';
-      const authResponse = await readUntil(reader, (value) => value.includes('Password Accepted'));
-      if (!authResponse.includes('Password Accepted')) {
-        await writer.close();
-        reader.releaseLock();
-        return json({ error: 'RCON authentication failed: ' + authResponse }, 502);
-      }
-
-      const steamId = url.searchParams.get('steam_id');
-
       if (steamId) {
-        stage = 'player data command';
-        await writer.write(commandPacket(PLAYER_DATA_OPCODE));
-
-        stage = 'read player data response';
-        const response = await readUntil(reader, (value) => value.includes('PlayerDataEnd'));
-        await writer.close();
-        reader.releaseLock();
-
-        const dino = findPlayerDino(response, steamId);
+        const doResponse = await rconStub.fetch('https://rcon-bridge/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opcode: PLAYER_DATA_OPCODE, doneMarkers: ['PlayerDataEnd'] }),
+        });
+        const doData = await doResponse.json();
+        if (!doResponse.ok || !doData.ok) return json({ error: doData.error || 'RCON request failed' }, 502);
+        const dino = findPlayerDino(doData.response, steamId);
         if (!dino) return json({ found: false }, 404);
         return json({ found: true, ...dino });
       }
 
-      stage = 'player command';
-      await writer.write(commandPacket(PLAYERLIST_OPCODE));
-
-      stage = 'read player response';
-      const response = await readUntil(reader, (value) => value.includes('PlayerDataEnd') || value.includes('PlayerList'));
-      const players = parsePlayers(response);
-
-      await writer.close();
-      reader.releaseLock();
+      const doResponse = await rconStub.fetch('https://rcon-bridge/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opcode: PLAYERLIST_OPCODE, doneMarkers: ['PlayerDataEnd', 'PlayerList'] }),
+      });
+      const doData = await doResponse.json();
+      if (!doResponse.ok || !doData.ok) return json({ error: doData.error || 'RCON request failed' }, 502);
+      const players = parsePlayers(doData.response);
       // Matches Game.ini's MaxPlayerCount=150 — RCON's PlayerList response
       // doesn't carry a server capacity figure, so this is hand-set rather
       // than read live; update if the server's player cap ever changes.
       return json({ uptime: null, active_mods: 0, players_online: players, max_players: 150 });
     } catch (error) {
-      try { socket?.close(); } catch { }
-      return json({ error: error.message || 'RCON request failed', stage }, 502);
+      return json({ error: error.message || 'RCON request failed' }, 502);
     }
   },
 
