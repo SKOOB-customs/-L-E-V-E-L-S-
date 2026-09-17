@@ -371,13 +371,17 @@ const renderHub = () => {
   const grid = document.querySelector('[data-hub-grid]');
   if (!grid) return;
 
-  // Admin Panel only ever shows up here once checkAdminPanelAccess has
-  // actually revealed the real tab button for this signed-in admin — a
-  // hub card linking to a hidden tab would be a dead click.
+  // Admin Panel and Owner only ever show up here once checkAdminPanelAccess
+  // has actually revealed their real tab buttons for this signed-in admin —
+  // a hub card linking to a hidden tab would be a dead click.
   const adminButtonVisible = !document.querySelector('.admin-panel-tab-button')?.hidden;
+  const ownerButtonVisible = !document.querySelector('.owner-tab-button')?.hidden;
   const availablePages = HUB_PAGES.concat(
     adminButtonVisible
       ? [{ tab: 'admin-panel', icon: 'AD', title: 'Admin Panel', desc: 'Compensation, strikes, and glitch skins.' }]
+      : [],
+    ownerButtonVisible
+      ? [{ tab: 'owner', icon: 'OW', title: 'Owner', desc: 'Skin library management and admin passkey recovery.' }]
       : [],
   );
 
@@ -3439,11 +3443,27 @@ const setTransferLogsGateState = (unlocked) => {
   if (content) content.hidden = !unlocked;
 };
 
+// Owner is its own tab (moved out of the Admin Panel's inline
+// data-owner-only sections — Skin Library management and the
+// forgot-passkey reset — so it reads as a clearly separate, more
+// restricted area rather than two easy-to-miss sections buried in a
+// page every admin tier sees). Same passkey-unlock sharing as Transfer
+// Logs, PLUS gated on tier === 'owner' specifically — set/senior admins
+// never see the tab button or its panel at all, not just its content.
+const setOwnerGateState = (unlocked) => {
+  const locked = document.querySelector('[data-owner-locked]');
+  const content = document.querySelector('[data-owner-content]');
+  if (locked) locked.hidden = !!unlocked;
+  if (content) content.hidden = !unlocked;
+};
+
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
   const transferLogsTabButton = document.querySelector('.transfer-logs-tab-button');
   const transferLogsPanel = document.getElementById('transfer-logs');
+  const ownerTabButton = document.querySelector('.owner-tab-button');
+  const ownerPanel = document.getElementById('owner');
   const profile = getSteamProfile();
   if (adminUnlockExpiryTimer) {
     clearTimeout(adminUnlockExpiryTimer);
@@ -3454,6 +3474,8 @@ const checkAdminPanelAccess = async () => {
     if (adminPanelPanel) adminPanelPanel.hidden = true;
     if (transferLogsTabButton) transferLogsTabButton.hidden = true;
     if (transferLogsPanel) transferLogsPanel.hidden = true;
+    if (ownerTabButton) ownerTabButton.hidden = true;
+    if (ownerPanel) ownerPanel.hidden = true;
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
     viewerAdminTier = null;
     return;
@@ -3472,12 +3494,15 @@ const checkAdminPanelAccess = async () => {
     // any admin tier, wired up unconditionally in loadSkinLibrary().
     const isOwner = data.tier === 'owner';
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = !isOwner; });
+    if (ownerTabButton) ownerTabButton.hidden = !isOwner;
+    if (ownerPanel) ownerPanel.hidden = !isOwner;
     // renderHub() ran at page load before this async check resolved, so the
     // Admin Panel card wasn't in the grid yet for an actual admin — add it
     // in now that we know for sure.
     if (!hasAccess) {
       setAdminPanelGateState('hidden');
       setTransferLogsGateState(false);
+      setOwnerGateState(false);
       return;
     }
     renderHub();
@@ -3485,6 +3510,7 @@ const checkAdminPanelAccess = async () => {
     if (data.unlocked) {
       setAdminPanelGateState('unlocked');
       setTransferLogsGateState(true);
+      setOwnerGateState(true);
       loadSkinLibrary();
       loadOwnStaffBio();
       loadTransferLog();
@@ -3503,6 +3529,7 @@ const checkAdminPanelAccess = async () => {
     } else {
       setAdminPanelGateState('locked');
       setTransferLogsGateState(false);
+      setOwnerGateState(false);
       const form = document.querySelector('[data-admin-passkey-form]');
       const note = document.querySelector('[data-admin-passkey-note]');
       const submitBtn = document.querySelector('[data-admin-passkey-submit]');
@@ -4022,6 +4049,10 @@ document.querySelector('[data-goto-transfer-logs]')?.addEventListener('click', (
 });
 
 document.querySelector('[data-transfer-logs-unlock-link]')?.addEventListener('click', () => {
+  document.querySelector('.tab-button[data-tab="admin-panel"]')?.click();
+});
+
+document.querySelector('[data-owner-unlock-link]')?.addEventListener('click', () => {
   document.querySelector('.tab-button[data-tab="admin-panel"]')?.click();
 });
 

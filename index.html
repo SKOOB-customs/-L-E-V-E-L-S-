@@ -159,6 +159,7 @@
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
+        <button class="tab-button owner-tab-button" data-tab="owner" type="button" hidden>Owner</button>
         <button class="tab-button transfer-logs-tab-button" data-tab="transfer-logs" type="button" hidden>Transfer Logs</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
@@ -959,8 +960,48 @@
             </form>
           </section>
 
-          <section class="panel content-box" data-owner-only hidden>
-            <div class="mini-heading">Skin Library (Owner only)</div>
+          <section class="panel content-box">
+            <div class="mini-heading">Currency</div>
+            <p class="dino-park-note">Grants LeveLs Coins directly to a player, on top of whatever they've earned by playing — adds to their existing balance.</p>
+            <form class="submit-form" data-currency-form>
+              <div class="field-row two-up">
+                <label>
+                  Target Steam ID or name
+                  <div class="player-search">
+                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-currency-target required />
+                  </div>
+                </label>
+                <label>
+                  Amount
+                  <input type="number" min="1" step="1" placeholder="1000" data-currency-amount required />
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Grant coins</button>
+              </div>
+            </form>
+          </section>
+
+          </div>
+        </section>
+
+        <section class="tab-panel" id="owner" data-tab="owner" hidden>
+          <div class="section-header">
+            <p class="eyebrow">OWNER ONLY</p>
+            <h2>Owner Tools</h2>
+          </div>
+
+          <section class="panel content-box" data-owner-locked hidden>
+            <div class="mini-heading">Admin Panel is locked</div>
+            <p class="dino-park-note">Enter your admin passkey on the Admin Panel tab first, then come back here.</p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-owner-unlock-link>Go to Admin Panel</button>
+            </div>
+          </section>
+
+          <div data-owner-content hidden>
+          <section class="panel content-box">
+            <div class="mini-heading">Skin Library</div>
             <p class="dino-park-note">Save a reusable named skin here — it shows up in the "Load from library" dropdown above for any admin to grant, without re-entering colors by hand.</p>
             <form class="submit-form" data-skin-library-form>
               <div class="field-row">
@@ -1042,29 +1083,7 @@
           </section>
 
           <section class="panel content-box">
-            <div class="mini-heading">Currency</div>
-            <p class="dino-park-note">Grants LeveLs Coins directly to a player, on top of whatever they've earned by playing — adds to their existing balance.</p>
-            <form class="submit-form" data-currency-form>
-              <div class="field-row two-up">
-                <label>
-                  Target Steam ID or name
-                  <div class="player-search">
-                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-currency-target required />
-                  </div>
-                </label>
-                <label>
-                  Amount
-                  <input type="number" min="1" step="1" placeholder="1000" data-currency-amount required />
-                </label>
-              </div>
-              <div class="submit-actions">
-                <button class="action-button" type="submit">Grant coins</button>
-              </div>
-            </form>
-          </section>
-
-            <section class="panel content-box" data-owner-only hidden>
-              <div class="mini-heading">Change another admin's passkey (forgot passkey) <span class="badge">OWNER ONLY</span></div>
+              <div class="mini-heading">Change another admin's passkey (forgot passkey)</div>
               <p class="dino-park-note">This is for ANOTHER admin who's forgotten or gotten locked out of their own passkey — not for you to set or change yours (do that from the unlock prompt itself). Clears their passkey so they're prompted to set a brand new one next time they open this panel.</p>
               <form class="submit-form" data-admin-passkey-reset-form>
                 <div class="field-row two-up">
@@ -1079,7 +1098,7 @@
                   </div>
                 </div>
               </form>
-            </section>
+          </section>
           </div>
         </section>
 
