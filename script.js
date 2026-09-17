@@ -3393,7 +3393,7 @@ const attachPlayerAutocomplete = (inputEl) => {
   });
 };
 
-['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]', '[data-recover-target]'].forEach((selector) => {
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]', '[data-recover-target]', '[data-transfer-log-search-target]'].forEach((selector) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
@@ -3417,9 +3417,26 @@ const setAdminPanelGateState = (state) => {
   if (content) content.hidden = state !== 'unlocked';
 };
 
+// Transfer Logs is its own tab (not inline in the Admin Panel — see
+// loadTransferLog's own comment for why) but shares the Admin Panel's
+// exact tier + passkey-unlock gate rather than having its own passkey
+// prompt: anyone who can see it at all is already an admin, and it's
+// only ever reached from a button inside the (already-unlocked) Admin
+// Panel content, so there's nothing to gain from a second passkey
+// prompt — just show a locked note pointing back there if someone lands
+// on the tab without unlocking first (e.g. via the URL hash directly).
+const setTransferLogsGateState = (unlocked) => {
+  const locked = document.querySelector('[data-transfer-logs-locked]');
+  const content = document.querySelector('[data-transfer-logs-content]');
+  if (locked) locked.hidden = !!unlocked;
+  if (content) content.hidden = !unlocked;
+};
+
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
+  const transferLogsTabButton = document.querySelector('.transfer-logs-tab-button');
+  const transferLogsPanel = document.getElementById('transfer-logs');
   const profile = getSteamProfile();
   if (adminUnlockExpiryTimer) {
     clearTimeout(adminUnlockExpiryTimer);
@@ -3428,6 +3445,8 @@ const checkAdminPanelAccess = async () => {
   if (!profile?.steamId) {
     if (adminPanelTabButton) adminPanelTabButton.hidden = true;
     if (adminPanelPanel) adminPanelPanel.hidden = true;
+    if (transferLogsTabButton) transferLogsTabButton.hidden = true;
+    if (transferLogsPanel) transferLogsPanel.hidden = true;
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
     viewerAdminTier = null;
     return;
@@ -3439,6 +3458,8 @@ const checkAdminPanelAccess = async () => {
     viewerAdminTier = data.tier || null;
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
+    if (transferLogsTabButton) transferLogsTabButton.hidden = !hasAccess;
+    if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
     // Skin Library management (save/delete) is owner-tier only — the
     // grant form's "Load from library" dropdown is separate and works for
     // any admin tier, wired up unconditionally in loadSkinLibrary().
@@ -3449,12 +3470,14 @@ const checkAdminPanelAccess = async () => {
     // in now that we know for sure.
     if (!hasAccess) {
       setAdminPanelGateState('hidden');
+      setTransferLogsGateState(false);
       return;
     }
     renderHub();
 
     if (data.unlocked) {
       setAdminPanelGateState('unlocked');
+      setTransferLogsGateState(true);
       loadSkinLibrary();
       loadOwnStaffBio();
       loadTransferLog();
@@ -3472,6 +3495,7 @@ const checkAdminPanelAccess = async () => {
       }
     } else {
       setAdminPanelGateState('locked');
+      setTransferLogsGateState(false);
       const form = document.querySelector('[data-admin-passkey-form]');
       const note = document.querySelector('[data-admin-passkey-note]');
       const submitBtn = document.querySelector('[data-admin-passkey-submit]');
@@ -3835,54 +3859,87 @@ const loadRecoverHistory = async () => {
 
 document.querySelector('[data-recover-search]')?.addEventListener('click', loadRecoverHistory);
 
-// ── Admin Panel: Transfer Dinos log ──
+// ── Transfer Logs (own tab, reached via a button in the Admin Panel's
+// Transfer Dinos section) ──
 //
 // Every compensation grant made with "This is a transfer dino" checked
 // (see the isTransfer field wired into the Compensation form's submit
-// handler above), logged per target player. Purely informational: a
-// player past TRANSFER_LIMIT isn't blocked from getting more, their name
-// just gets flagged so an admin granting another one knows they're
-// already past the informal cap.
+// handler above), logged per target player. This used to render inline
+// inside the Admin Panel as one card per player with every transfer they
+// ever received — fine at first, but that list only ever grows, and
+// stacking it into the Admin Panel's own content meant that page got
+// permanently longer every time anyone granted a transfer. Moved to its
+// own tab instead: a flat, chronological (newest first) feed across
+// every player by default, or filtered down to just one player via the
+// search field — either way the Admin Panel itself only ever shows a
+// short static entry point, not the ever-growing log.
+//
+// Purely informational: a player past TRANSFER_LIMIT isn't blocked from
+// getting more, their name just gets flagged on every row so an admin
+// granting another one knows they're already past the informal cap.
 const TRANSFER_LIMIT = 25;
 
 const nameForSteamId = (steamId) => playerDirectory.find((p) => p.steamId === steamId)?.name || steamId;
 
-const buildTransferLogCard = (steamId, entries) => {
-  const card = document.createElement('div');
-  card.className = 'transfer-log-card';
+// null = show every player; a steamId = only that player's rows.
+let transferLogFilterSteamId = null;
+let lastTransferLogData = {};
 
-  const header = document.createElement('div');
-  header.className = 'transfer-log-card-header';
+const buildTransferLogRow = (entry) => {
+  const item = document.createElement('li');
+  item.className = 'transfer-log-row';
 
   const nameEl = document.createElement('strong');
-  nameEl.textContent = nameForSteamId(steamId);
-  if (entries.length >= TRANSFER_LIMIT) {
+  nameEl.textContent = nameForSteamId(entry.steamId);
+  item.appendChild(nameEl);
+
+  if (entry.totalForPlayer >= TRANSFER_LIMIT) {
     const limitBadge = document.createElement('span');
     limitBadge.className = 'badge transfer-log-limit-badge';
     limitBadge.textContent = 'limit reached for transfers';
-    nameEl.append(' ', limitBadge);
+    item.append(' ', limitBadge);
   }
 
-  const count = document.createElement('span');
-  count.className = 'transfer-log-card-count';
-  count.textContent = `${entries.length}/${TRANSFER_LIMIT}`;
+  const when = entry.at ? new Date(entry.at).toLocaleString() : '';
+  const detail = document.createElement('span');
+  detail.className = 'transfer-log-row-detail';
+  detail.textContent = ` — ${entry.species || 'Unknown'}${entry.name ? ` "${entry.name}"` : ''} — ${when}`;
+  item.appendChild(detail);
 
-  header.append(nameEl, count);
+  return item;
+};
+
+const renderTransferLog = (transfers) => {
+  const listEl = document.querySelector('[data-transfer-log-list]');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  const steamIds = transferLogFilterSteamId
+    ? (Array.isArray(transfers[transferLogFilterSteamId]) ? [transferLogFilterSteamId] : [])
+    : Object.keys(transfers).filter((id) => Array.isArray(transfers[id]) && transfers[id].length > 0);
+
+  const rows = [];
+  steamIds.forEach((steamId) => {
+    const entries = transfers[steamId] || [];
+    entries.forEach((entry) => rows.push({ ...entry, steamId, totalForPlayer: entries.length }));
+  });
+
+  if (rows.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = transferLogFilterSteamId
+      ? 'No transfer dinos logged for this player yet.'
+      : 'No transfer dinos logged yet.';
+    listEl.appendChild(empty);
+    return;
+  }
 
   const list = document.createElement('ul');
   list.className = 'transfer-log-entries';
-  [...entries]
+  rows
     .sort((a, b) => (b.at || 0) - (a.at || 0))
-    .forEach((entry) => {
-      const item = document.createElement('li');
-      const when = entry.at ? new Date(entry.at).toLocaleString() : '';
-      const label = entry.name ? `${entry.species || 'Unknown'} "${entry.name}"` : (entry.species || 'Unknown');
-      item.textContent = `${label} — ${when}`;
-      list.appendChild(item);
-    });
-
-  card.append(header, list);
-  return card;
+    .forEach((entry) => list.appendChild(buildTransferLogRow(entry)));
+  listEl.appendChild(list);
 };
 
 const loadTransferLog = async () => {
@@ -3895,23 +3952,43 @@ const loadTransferLog = async () => {
       listEl.innerHTML = '';
       return;
     }
-    const transfers = data.transfers || {};
-    const steamIds = Object.keys(transfers).filter((id) => Array.isArray(transfers[id]) && transfers[id].length > 0);
-    listEl.innerHTML = '';
-    if (steamIds.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'empty-state';
-      empty.textContent = 'No transfer dinos logged yet.';
-      listEl.appendChild(empty);
-      return;
-    }
-    steamIds
-      .sort((a, b) => transfers[b].length - transfers[a].length)
-      .forEach((steamId) => listEl.appendChild(buildTransferLogCard(steamId, transfers[steamId])));
+    lastTransferLogData = data.transfers || {};
+    renderTransferLog(lastTransferLogData);
   } catch (error) {
     console.debug('Transfer log load failed:', error);
   }
 };
+
+document.querySelector('[data-transfer-log-search]')?.addEventListener('click', () => {
+  const raw = document.querySelector('[data-transfer-log-search-target]')?.value.trim();
+  if (!raw) {
+    transferLogFilterSteamId = null;
+    renderTransferLog(lastTransferLogData);
+    return;
+  }
+  const steamId = extractSteamId(raw);
+  if (!/^\d{17}$/.test(steamId)) {
+    showToast('Enter a valid 17-digit Steam ID, or pick a suggestion.');
+    return;
+  }
+  transferLogFilterSteamId = steamId;
+  renderTransferLog(lastTransferLogData);
+});
+
+document.querySelector('[data-transfer-log-clear]')?.addEventListener('click', () => {
+  transferLogFilterSteamId = null;
+  const input = document.querySelector('[data-transfer-log-search-target]');
+  if (input) input.value = '';
+  renderTransferLog(lastTransferLogData);
+});
+
+document.querySelector('[data-goto-transfer-logs]')?.addEventListener('click', () => {
+  document.querySelector('.tab-button[data-tab="transfer-logs"]')?.click();
+});
+
+document.querySelector('[data-transfer-logs-unlock-link]')?.addEventListener('click', () => {
+  document.querySelector('.tab-button[data-tab="admin-panel"]')?.click();
+});
 
 document.querySelector('[data-currency-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();

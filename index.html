@@ -159,6 +159,7 @@
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
+        <button class="tab-button transfer-logs-tab-button" data-tab="transfer-logs" type="button" hidden>Transfer Logs</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
         <button class="tab-button" data-tab="tickets" type="button">Support</button>
@@ -826,8 +827,10 @@
 
           <section class="panel content-box">
             <div class="mini-heading">Transfer Dinos</div>
-            <p class="dino-park-note">Every compensation grant made with "This is a transfer dino" checked above, logged per player. Purely informational — a player at 25+ transfers isn't blocked, their name is just flagged so admins granting another one know they're past the informal cap.</p>
-            <div class="transfer-log-list" data-transfer-log-list></div>
+            <p class="dino-park-note">Check "This is a transfer dino" on the Compensation form above to log a grant as a transfer instead of a plain compensation. The full log lives on its own page so it doesn't keep growing this one.</p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-goto-transfer-logs>View Transfer Logs</button>
+            </div>
           </section>
 
           <section class="panel content-box">
@@ -1077,6 +1080,39 @@
               </form>
             </section>
           </div>
+        </section>
+
+        <section class="tab-panel" id="transfer-logs" data-tab="transfer-logs" hidden>
+          <div class="section-header">
+            <p class="eyebrow">ADMIN ONLY</p>
+            <h2>Transfer Dino Logs</h2>
+          </div>
+
+          <section class="panel content-box" data-transfer-logs-locked hidden>
+            <div class="mini-heading">Admin Panel is locked</div>
+            <p class="dino-park-note">Enter your admin passkey on the Admin Panel tab first, then come back here.</p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-transfer-logs-unlock-link>Go to Admin Panel</button>
+            </div>
+          </section>
+
+          <section class="panel content-box" data-transfer-logs-content hidden>
+            <div class="mini-heading">Search by player</div>
+            <p class="dino-park-note">Leave the search blank and hit "Show all" to see every transfer chronologically, newest first.</p>
+            <div class="field-row two-up">
+              <label>
+                Player Steam ID or name
+                <div class="player-search">
+                  <input type="text" maxlength="64" placeholder="Leave blank to show everyone" autocomplete="off" data-transfer-log-search-target />
+                </div>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-transfer-log-search>Search</button>
+                <button class="secondary-button" type="button" data-transfer-log-clear>Show all</button>
+              </div>
+            </div>
+            <div class="transfer-log-list" data-transfer-log-list></div>
+          </section>
         </section>
 
         <section class="tab-panel" id="inventory" data-tab="inventory">

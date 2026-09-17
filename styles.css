@@ -401,40 +401,34 @@ body::before {
   color: var(--text);
 }
 
-.transfer-log-card {
-  padding: 12px 14px;
-  border-radius: 12px;
+.transfer-log-entries {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transfer-log-row {
+  padding: 10px 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--line);
+  font-size: 0.85rem;
 }
 
-.transfer-log-card + .transfer-log-card {
-  margin-top: 10px;
-}
-
-.transfer-log-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.transfer-log-card-count {
-  font-weight: 700;
+.transfer-log-row strong {
   color: var(--text);
+}
+
+.transfer-log-row-detail {
+  color: var(--muted);
 }
 
 .transfer-log-limit-badge {
   color: var(--accent);
   border-color: var(--accent);
-}
-
-.transfer-log-entries {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 0.8rem;
-  color: var(--muted);
 }
 
 .chat-message-add-friend {
