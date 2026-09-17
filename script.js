@@ -3275,6 +3275,13 @@ playerSuggestionsPortal.addEventListener('mousedown', (event) => {
   if (!row || !playerSuggestionsOwner) return;
   event.preventDefault();
   playerSuggestionsOwner.value = row.dataset.steamId;
+  // Setting .value directly doesn't fire a native 'input' event — dispatch
+  // one so anything listening on this specific field (e.g. the
+  // Compensation form's transfer-checkbox visibility check) reacts to an
+  // autocomplete pick the same as it would to typing, without this
+  // generic shared handler needing to know that field-specific logic
+  // exists at all.
+  playerSuggestionsOwner.dispatchEvent(new Event('input', { bubbles: true }));
   recordRecentPlayerSearch(row.dataset.steamId, row.dataset.name || row.dataset.steamId);
   hidePlayerSuggestions();
 });
@@ -3708,6 +3715,7 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       renderMutationSlots();
       const transferCheckbox = document.querySelector('[data-comp-is-transfer]');
       if (transferCheckbox) transferCheckbox.checked = false;
+      updateCompTransferCheckboxVisibility();
       if (body.isTransfer) loadTransferLog();
     }
   } catch (error) {
@@ -3874,15 +3882,41 @@ document.querySelector('[data-recover-search]')?.addEventListener('click', loadR
 // search field — either way the Admin Panel itself only ever shows a
 // short static entry point, not the ever-growing log.
 //
-// Purely informational: a player past TRANSFER_LIMIT isn't blocked from
-// getting more, their name just gets flagged on every row so an admin
-// granting another one knows they're already past the informal cap.
+// A player past TRANSFER_LIMIT isn't blocked from getting a plain
+// compensation — their name just gets flagged on every log row so an
+// admin can see they're past it — but the Compensation form's "This is a
+// transfer dino" checkbox itself disappears once their target has hit
+// the limit (see updateCompTransferCheckboxVisibility below), since
+// there's nothing meaningful "one more transfer" means past that point.
 const TRANSFER_LIMIT = 25;
 
 const nameForSteamId = (steamId) => playerDirectory.find((p) => p.steamId === steamId)?.name || steamId;
 
 // null = show every player; a steamId = only that player's rows.
 let transferLogFilterSteamId = null;
+
+// Hides the Compensation form's transfer checkbox entirely once the
+// currently-typed target already has TRANSFER_LIMIT transfers logged —
+// reads lastTransferLogData (populated whenever the Admin Panel unlocks,
+// see loadTransferLog below) rather than fetching fresh on every
+// keystroke. Re-run on: typing in the target field, picking an
+// autocomplete suggestion (see the synthetic 'input' dispatch in the
+// shared portal handler above), and every time the transfer log itself
+// reloads, so a target already typed in before the log finished loading
+// still gets checked once it arrives.
+const updateCompTransferCheckboxVisibility = () => {
+  const wrap = document.querySelector('[data-comp-transfer-checkbox-wrap]');
+  const note = document.querySelector('[data-comp-transfer-limit-note]');
+  const checkbox = document.querySelector('[data-comp-is-transfer]');
+  if (!wrap || !checkbox) return;
+  const steamId = extractSteamId(document.querySelector('[data-comp-target]')?.value);
+  const atLimit = /^\d{17}$/.test(steamId) && (lastTransferLogData[steamId]?.length || 0) >= TRANSFER_LIMIT;
+  wrap.hidden = atLimit;
+  if (note) note.hidden = !atLimit;
+  if (atLimit) checkbox.checked = false;
+};
+
+document.querySelector('[data-comp-target]')?.addEventListener('input', updateCompTransferCheckboxVisibility);
 let lastTransferLogData = {};
 
 const buildTransferLogRow = (entry) => {
@@ -3954,6 +3988,7 @@ const loadTransferLog = async () => {
     }
     lastTransferLogData = data.transfers || {};
     renderTransferLog(lastTransferLogData);
+    updateCompTransferCheckboxVisibility();
   } catch (error) {
     console.debug('Transfer log load failed:', error);
   }
