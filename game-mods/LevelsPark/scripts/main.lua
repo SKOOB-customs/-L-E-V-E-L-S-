@@ -532,6 +532,24 @@ local function capturePawnState(pawn)
     return state
 end
 
+-- Turns a capturePawnState() result's absolute current/max pairs into the
+-- 0-100 percentages dino history stores (same shape !park's own health
+-- check above already computes inline for just health) — used wherever a
+-- history event is logged from a full captured state rather than a bare
+-- live pawn read.
+local function vitalsPctFromState(state)
+    local function pct(current, max)
+        if current == nil or max == nil or max <= 0 then return 0 end
+        return (current / max) * 100
+    end
+    return {
+        healthPct = pct(state.health, state.maxHealth),
+        staminaPct = pct(state.stamina, state.maxStamina),
+        hungerPct = pct(state.hunger, state.maxHunger),
+        thirstPct = pct(state.thirst, state.maxThirst),
+    }
+end
+
 -- Player-supplied label for their parked dino (e.g. "!park Rex"), purely our
 -- own metadata — the game has no such field. Trim, cap length, strip
 -- anything that isn't a plain printable character so it's safe to store and
@@ -734,9 +752,19 @@ local function dinoHistoryFilePath(steam)
     return SAVED_DIR .. "/dino_history_" .. steam .. ".json"
 end
 
+-- healthPct/staminaPct/hungerPct/thirstPct added alongside growthPct so
+-- the Admin Panel's Recover Dinos feature has something to show besides
+-- growth (the site displays these as "blood"/health and "water"/thirst)
+-- and to restore when reviving a dead/disconnected lineage as a fresh
+-- compensation grant. Older entries written before this existed simply
+-- won't have these fields — parseHistoryEvents below defaults them to 0
+-- rather than failing to parse the rest of the entry.
 local function historyEventToJson(evt)
-    return string.format('{"type":"%s","at":%d,"growthPct":%f}',
-        jsonEscape(evt.type), evt.at, evt.growthPct or 0)
+    return string.format(
+        '{"type":"%s","at":%d,"growthPct":%f,"healthPct":%f,"staminaPct":%f,"hungerPct":%f,"thirstPct":%f}',
+        jsonEscape(evt.type), evt.at, evt.growthPct or 0,
+        evt.healthPct or 0, evt.staminaPct or 0, evt.hungerPct or 0, evt.thirstPct or 0
+    )
 end
 
 local function historyEntryToJson(entry)
@@ -760,6 +788,10 @@ local function parseHistoryEvents(eventsSection)
             type = jsonReadString(objStr, "type"),
             at = jsonReadNumber(objStr, "at"),
             growthPct = jsonReadNumber(objStr, "growthPct") or 0,
+            healthPct = jsonReadNumber(objStr, "healthPct") or 0,
+            staminaPct = jsonReadNumber(objStr, "staminaPct") or 0,
+            hungerPct = jsonReadNumber(objStr, "hungerPct") or 0,
+            thirstPct = jsonReadNumber(objStr, "thirstPct") or 0,
         })
     end
     return events
@@ -824,9 +856,14 @@ local function findHistoryEntry(entries, dinoId)
     return nil
 end
 
-local function startNewHistoryEntry(steam, dinoId, classPath, growthPct)
+-- vitals is an optional {healthPct, staminaPct, hungerPct, thirstPct}
+-- table — every call site below now passes one, but keeping it optional
+-- means a stray old call (or a future one) degrades to zeros rather than
+-- erroring.
+local function startNewHistoryEntry(steam, dinoId, classPath, growthPct, vitals)
     local entries = loadDinoHistory(steam)
     local now = os.time()
+    vitals = vitals or {}
     table.insert(entries, {
         dinoId = dinoId,
         classPath = classPath or "",
@@ -834,13 +871,17 @@ local function startNewHistoryEntry(steam, dinoId, classPath, growthPct)
         status = "alive",
         firstSpawnedAt = now,
         lastUpdatedAt = now,
-        events = { { type = "spawn", at = now, growthPct = growthPct or 0 } },
+        events = { {
+            type = "spawn", at = now, growthPct = growthPct or 0,
+            healthPct = vitals.healthPct or 0, staminaPct = vitals.staminaPct or 0,
+            hungerPct = vitals.hungerPct or 0, thirstPct = vitals.thirstPct or 0,
+        } },
     })
     pruneDinoHistory(entries)
     saveDinoHistory(steam, entries)
 end
 
-local function appendHistoryEvent(steam, dinoId, eventType, growthPct)
+local function appendHistoryEvent(steam, dinoId, eventType, growthPct, vitals)
     if dinoId == nil or dinoId == "" then return end
     local entries = loadDinoHistory(steam)
     local entry = findHistoryEntry(entries, dinoId)
@@ -853,8 +894,13 @@ local function appendHistoryEvent(steam, dinoId, eventType, growthPct)
     -- real, more informative status must never be downgraded to a bare
     -- "disconnected".
     if eventType == "disconnected" and entry.status ~= "alive" then return end
+    vitals = vitals or {}
     local now = os.time()
-    table.insert(entry.events, { type = eventType, at = now, growthPct = growthPct or 0 })
+    table.insert(entry.events, {
+        type = eventType, at = now, growthPct = growthPct or 0,
+        healthPct = vitals.healthPct or 0, staminaPct = vitals.staminaPct or 0,
+        hungerPct = vitals.hungerPct or 0, thirstPct = vitals.thirstPct or 0,
+    })
     entry.lastUpdatedAt = now
     if eventType == "parked" then
         entry.status = "parked"
@@ -895,6 +941,7 @@ local dinoHistoryLastAddr = {}
 local dinoHistoryLastHealthOk = {}
 local currentDinoId = {}
 local lastKnownGrowth = {}
+local lastKnownVitals = {}
 
 -- Below this health%, parking is blocked outright — closes the "combat
 -- park" exploit where a player about to die in a fight parks their dino
@@ -949,7 +996,7 @@ local function tryPark(steam, name)
         return false, "Park failed: could not save state."
     end
     if state.dinoId ~= nil then
-        appendHistoryEvent(steam, state.dinoId, "parked", state.growth * 100)
+        appendHistoryEvent(steam, state.dinoId, "parked", state.growth * 100, vitalsPctFromState(state))
     end
 
     lastParkedPawnAddr[steam] = addr
@@ -1085,7 +1132,7 @@ local function tryRedeem(steam, snapshotId, name)
             dropBareSpawnEntry(steam, throwawayId)
         end
         currentDinoId[steam] = target.dinoId
-        appendHistoryEvent(steam, target.dinoId, "redeemed", (liveGrowth or 0) * 100)
+        appendHistoryEvent(steam, target.dinoId, "redeemed", (liveGrowth or 0) * 100, vitalsPctFromState(target))
     end
 
     local label = (target.name and target.name ~= "") and (" (" .. target.name .. ")") or ""
@@ -1957,6 +2004,27 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                             pcall(function() historyGrowth = pawn:GetGrowth() end)
                             if historyGrowth ~= nil then lastKnownGrowth[steam] = historyGrowth end
 
+                            -- Same health/stamina/hunger/thirst capturePawnState
+                            -- already reads elsewhere, just inline here since a
+                            -- died/disconnected event has no snapshot to pull a
+                            -- full state table from — only a live pawn read (or,
+                            -- for disconnect, whatever this table cached the
+                            -- tick before). Recomputed every tick regardless of
+                            -- whether anything is about to log an event this
+                            -- tick, so lastKnownVitals is always fresh enough
+                            -- for the disconnect case below to use.
+                            local historyVitalsRaw = {}
+                            pcall(function() historyVitalsRaw.health = pawn:GetHealth() end)
+                            pcall(function() historyVitalsRaw.maxHealth = pawn:GetMaxHealth() end)
+                            pcall(function() historyVitalsRaw.stamina = pawn:GetStamina() end)
+                            pcall(function() historyVitalsRaw.maxStamina = pawn:GetMaxStamina() end)
+                            pcall(function() historyVitalsRaw.hunger = pawn:GetHunger() end)
+                            pcall(function() historyVitalsRaw.maxHunger = pawn:GetMaxHunger() end)
+                            pcall(function() historyVitalsRaw.thirst = pawn:GetThirst() end)
+                            pcall(function() historyVitalsRaw.maxThirst = pawn:GetMaxThirst() end)
+                            local historyVitalsPct = vitalsPctFromState(historyVitalsRaw)
+                            lastKnownVitals[steam] = historyVitalsPct
+
                             if dinoHistoryLastAddr[steam] ~= historyAddr then
                                 dinoHistoryLastAddr[steam] = historyAddr
                                 local historyClassPath
@@ -1965,15 +2033,14 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                                 end)
                                 local newDinoId = steam .. "_" .. tostring(os.time()) .. "_" .. tostring(historyAddr)
                                 currentDinoId[steam] = newDinoId
-                                startNewHistoryEntry(steam, newDinoId, historyClassPath, (historyGrowth or 0) * 100)
+                                startNewHistoryEntry(steam, newDinoId, historyClassPath, (historyGrowth or 0) * 100, historyVitalsPct)
                                 dinoHistoryLastHealthOk[steam] = true
                             end
 
-                            local historyHealth
-                            pcall(function() historyHealth = pawn:GetHealth() end)
+                            local historyHealth = historyVitalsRaw.health
                             if historyHealth ~= nil then
                                 if historyHealth <= 0 and dinoHistoryLastHealthOk[steam] then
-                                    appendHistoryEvent(steam, currentDinoId[steam], "died", (historyGrowth or 0) * 100)
+                                    appendHistoryEvent(steam, currentDinoId[steam], "died", (historyGrowth or 0) * 100, historyVitalsPct)
                                     dinoHistoryLastHealthOk[steam] = false
                                 elseif historyHealth > 0 then
                                     dinoHistoryLastHealthOk[steam] = true
@@ -2027,12 +2094,13 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
             -- stale, and clear tracking so their next spawn mints fresh.
             local dinoId = currentDinoId[steam]
             if dinoId ~= nil then
-                appendHistoryEvent(steam, dinoId, "disconnected", (lastKnownGrowth[steam] or 0) * 100)
+                appendHistoryEvent(steam, dinoId, "disconnected", (lastKnownGrowth[steam] or 0) * 100, lastKnownVitals[steam])
             end
             currentDinoId[steam] = nil
             dinoHistoryLastAddr[steam] = nil
             dinoHistoryLastHealthOk[steam] = nil
             lastKnownGrowth[steam] = nil
+            lastKnownVitals[steam] = nil
         end
     end
     currencyPreviouslyOnline = currencyCurrentlyOnline

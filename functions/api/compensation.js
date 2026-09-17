@@ -2,7 +2,8 @@
  * Admin-panel compensation grant (website -> Worker -> game-server file).
  *
  * POST { targetSteamId, species, name?, growthPct?, healthPct?,
- *        staminaPct?, hungerPct?, thirstPct?, entombments?, mutations? }
+ *        staminaPct?, hungerPct?, thirstPct?, entombments?, mutations?,
+ *        isTransfer? }
  * -> proxies to the bridge Worker's /compensation-grant route, which
  * appends a redeemable dino snapshot to the target's
  * parked_<steamid>.json — the exact file format main.lua's !park already
@@ -11,6 +12,11 @@
  * functions/api/*.js file uses (see park.js). granterSteamId comes from
  * the verified session, not a client-supplied field — this is an
  * admin-only action, re-validated by tier on the Worker.
+ *
+ * isTransfer marks the grant as a Transfer Dino rather than a plain
+ * compensation — the Worker logs it separately (see /transfer-log) but
+ * otherwise grants it identically; this route just passes the flag
+ * through via the ...body spread below, no special handling needed here.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {

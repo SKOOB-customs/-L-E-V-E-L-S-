@@ -797,10 +797,37 @@
                 </label>
               </div>
               <div data-comp-mutation-slots></div>
+              <label class="checkbox-inline">
+                <input type="checkbox" data-comp-is-transfer />
+                This is a transfer dino
+              </label>
               <div class="submit-actions">
                 <button class="action-button" type="submit">Grant dino</button>
               </div>
             </form>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Recover Dinos</div>
+            <p class="dino-park-note">Search a player, then revive one of their dead or disconnected dinos as a fresh compensation grant — restores species and the vitals captured at that moment (growth, blood/health, water/thirst, hunger). Mutations and entombments aren't tracked in dino history, so a recovered dino comes back without them.</p>
+            <div class="field-row two-up">
+              <label>
+                Player Steam ID or name
+                <div class="player-search">
+                  <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-recover-target />
+                </div>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-recover-search>Load dino history</button>
+              </div>
+            </div>
+            <div class="dino-history-list" data-recover-history-list></div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Transfer Dinos</div>
+            <p class="dino-park-note">Every compensation grant made with "This is a transfer dino" checked above, logged per player. Purely informational — a player at 25+ transfers isn't blocked, their name is just flagged so admins granting another one know they're past the informal cap.</p>
+            <div class="transfer-log-list" data-transfer-log-list></div>
           </section>
 
           <section class="panel content-box">

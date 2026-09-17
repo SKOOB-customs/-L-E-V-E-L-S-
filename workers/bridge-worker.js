@@ -1595,6 +1595,37 @@ export default {
       }
     }
 
+    // Admin Panel's Recover Dinos: looks up ANY player's dino history, not
+    // just the caller's own — functions/api/dino-history.js deliberately
+    // never allows this (it was hardened earlier this project to only ever
+    // return the verified caller's own entries, after it briefly accepted
+    // a client-supplied steamId directly). This is the admin-gated
+    // equivalent for that one legitimate cross-player use case: reviving a
+    // dead/disconnected dino as a fresh compensation grant needs to see
+    // what that player actually had. requesterSteamId is tier-checked here
+    // same as every other admin route; targetSteamId is just "who to look
+    // up," not an identity claim.
+    if (url.pathname === '/dino-history-admin' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      const targetSteamId = url.searchParams.get('targetSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!targetSteamId || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+      try {
+        const index = await env.PARKED_KV.get('dino_history:index', 'json');
+        const entries = index?.histories?.[targetSteamId] || [];
+        return json({ updatedAt: index?.updatedAt || null, entries });
+      } catch (error) {
+        return json({ error: error.message || 'Dino history lookup failed' }, 502);
+      }
+    }
+
     // Public staff roster — the Community tab's "meet the team" listing.
     // Unlike /admin-tier this is intentionally unauthenticated: it's a
     // public transparency page, not an admin-only action, and returns
@@ -1703,7 +1734,7 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput } = body || {};
+      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput, isTransfer } = body || {};
       if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
         return json({ error: 'Missing or invalid granterSteamId' }, 400);
       }
@@ -1777,9 +1808,67 @@ export default {
       };
       try {
         await grantCompensationDino(env, targetSteamId, dino);
-        return json({ ok: true, dino });
       } catch (error) {
         return json({ error: error.message || 'Compensation grant failed' }, 502);
+      }
+      // Transfer Dinos: a separate category of compensation, checked by the
+      // admin on the same form rather than a different one — keeps one
+      // grant code path instead of two nearly-identical ones. Logged in
+      // its own small KV blob (one entry per grant, keyed by targetSteamId)
+      // purely for the Admin Panel's Transfer Dinos tracker; never blocks
+      // or alters the grant itself even past the informal 25-per-player
+      // cap — reaching it just flags that player's name in the tracker so
+      // admins know, per what was asked for. A failure here is logged-away
+      // rather than surfaced as an error, since the actual dino grant
+      // above already succeeded by this point.
+      if (isTransfer && env.PARKED_KV) {
+        try {
+          const raw = await env.PARKED_KV.get('transfer_log:index');
+          let log = {};
+          if (raw) {
+            try {
+              log = JSON.parse(raw) || {};
+            } catch {
+              log = {};
+            }
+          }
+          const entries = Array.isArray(log[targetSteamId]) ? log[targetSteamId] : [];
+          entries.push({ at: Date.now(), granterSteamId, species, name: dino.name || '' });
+          log[targetSteamId] = entries;
+          await env.PARKED_KV.put('transfer_log:index', JSON.stringify(log));
+        } catch (error) {
+          console.error('Transfer log write failed:', error.message);
+        }
+      }
+      return json({ ok: true, dino });
+    }
+
+    // Admin Panel's Transfer Dinos tracker — every compensation grant made
+    // with the "This is a transfer dino" box checked, logged per target
+    // player. Purely informational: a player past 25 isn't blocked from
+    // getting more, the tracker just flags their name so admins granting
+    // one know they're already past the informal cap.
+    if (url.pathname === '/transfer-log' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ transfers: {} });
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+      try {
+        const raw = await env.PARKED_KV.get('transfer_log:index');
+        let log = {};
+        if (raw) {
+          try {
+            log = JSON.parse(raw) || {};
+          } catch {
+            log = {};
+          }
+        }
+        return json({ transfers: log });
+      } catch (error) {
+        return json({ error: error.message || 'Transfer log lookup failed' }, 502);
       }
     }
 

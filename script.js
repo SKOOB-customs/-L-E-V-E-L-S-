@@ -3393,7 +3393,7 @@ const attachPlayerAutocomplete = (inputEl) => {
   });
 };
 
-['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]'].forEach((selector) => {
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]', '[data-recover-target]'].forEach((selector) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
@@ -3457,6 +3457,7 @@ const checkAdminPanelAccess = async () => {
       setAdminPanelGateState('unlocked');
       loadSkinLibrary();
       loadOwnStaffBio();
+      loadTransferLog();
       const statusEl = document.querySelector('[data-admin-unlock-status]');
       if (statusEl) {
         if (data.unlockExpiresAt) {
@@ -3660,6 +3661,7 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     thirstPct: Number(document.querySelector('[data-comp-thirst]')?.value),
     entombments: Number(document.querySelector('[data-comp-entombments]')?.value) || 0,
     mutations,
+    isTransfer: !!document.querySelector('[data-comp-is-transfer]')?.checked,
   };
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
@@ -3680,6 +3682,9 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       const entombmentsSelect = document.querySelector('[data-comp-entombments]');
       if (entombmentsSelect) entombmentsSelect.value = '0';
       renderMutationSlots();
+      const transferCheckbox = document.querySelector('[data-comp-is-transfer]');
+      if (transferCheckbox) transferCheckbox.checked = false;
+      if (body.isTransfer) loadTransferLog();
     }
   } catch (error) {
     console.debug('Compensation grant failed:', error);
@@ -3688,6 +3693,225 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     if (submitBtn) submitBtn.disabled = false;
   }
 });
+
+// ── Admin Panel: Recover Dinos ──
+//
+// Search any player, see their dino history, and revive a dead or
+// disconnected lineage as a fresh compensation grant using the exact
+// vitals (growth/health/hunger/thirst) captured at that history event —
+// reuses the same /api/compensation route the Compensation form above
+// calls, just pre-filled from history instead of typed in by hand.
+// Mutations/entombments were never tracked per history event (only
+// growth+vitals — see main.lua's historyEventToJson), so a recovered
+// dino always comes back without them; the section's own note says so.
+// Only "dead"/"disconnected" entries get a Recover button — "alive"/
+// "parked" lineages are still reachable normally in-game, nothing to
+// recover there.
+const RECOVERABLE_DINO_STATUSES = new Set(['dead', 'disconnected']);
+
+const buildRecoverHistoryCard = (entry, targetSteamId) => {
+  const card = document.createElement('div');
+  card.className = 'panel dino-history-card';
+
+  const header = document.createElement('div');
+  header.className = 'dino-history-card-header';
+  const title = document.createElement('strong');
+  title.textContent = entry.species || 'Unknown species';
+  const badge = document.createElement('span');
+  badge.className = `badge dino-history-status-${entry.status || 'alive'}`;
+  badge.textContent = DINO_HISTORY_STATUS_LABELS[entry.status] || entry.status || 'Alive';
+  header.append(title, badge);
+
+  const events = entry.events || [];
+  const lastEvent = events[events.length - 1] || {};
+
+  const vitals = document.createElement('p');
+  vitals.className = 'dino-history-card-vitals';
+  vitals.innerHTML = `
+    <span>Growth: <strong>${(lastEvent.growthPct || 0).toFixed(1)}%</strong></span>
+    <span>Blood (Health): <strong>${(lastEvent.healthPct || 0).toFixed(1)}%</strong></span>
+    <span>Water (Thirst): <strong>${(lastEvent.thirstPct || 0).toFixed(1)}%</strong></span>
+    <span>Hunger: <strong>${(lastEvent.hungerPct || 0).toFixed(1)}%</strong></span>
+  `;
+
+  const timeline = document.createElement('ul');
+  timeline.className = 'dino-history-timeline';
+  events.forEach((evt) => {
+    const item = document.createElement('li');
+    const when = evt.at ? new Date(evt.at * 1000).toLocaleString() : '';
+    item.textContent = `${DINO_HISTORY_EVENT_LABELS[evt.type] || evt.type} — ${(evt.growthPct || 0).toFixed(1)}% growth — ${when}`;
+    timeline.appendChild(item);
+  });
+
+  card.append(header, vitals, timeline);
+
+  if (RECOVERABLE_DINO_STATUSES.has(entry.status)) {
+    const recoverBtn = document.createElement('button');
+    recoverBtn.type = 'button';
+    recoverBtn.className = 'action-button small';
+    recoverBtn.textContent = 'Recover this dino';
+    recoverBtn.addEventListener('click', async () => {
+      if (!window.confirm(
+        `Grant a fresh ${entry.species} to this player, restored to growth ${(lastEvent.growthPct || 0).toFixed(1)}%, `
+        + `health ${(lastEvent.healthPct || 0).toFixed(1)}%? This creates a new compensation grant.`
+      )) return;
+      recoverBtn.disabled = true;
+      try {
+        const response = await fetch('/api/compensation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetSteamId,
+            species: entry.species,
+            growthPct: lastEvent.growthPct || 0,
+            healthPct: lastEvent.healthPct || 0,
+            staminaPct: lastEvent.staminaPct || 0,
+            hungerPct: lastEvent.hungerPct || 0,
+            thirstPct: lastEvent.thirstPct || 0,
+            entombments: 0,
+            mutations: {},
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          showToast(data.error || 'Could not recover that dino.');
+          recoverBtn.disabled = false;
+          return;
+        }
+        showToast(`Recovered a ${entry.species} for ${targetSteamId}.`);
+        recoverBtn.textContent = 'Recovered ✓';
+      } catch (error) {
+        console.debug('Dino recover failed:', error);
+        showToast('Could not reach the server right now.');
+        recoverBtn.disabled = false;
+      }
+    });
+    card.appendChild(recoverBtn);
+  }
+
+  return card;
+};
+
+const loadRecoverHistory = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetSteamId = extractSteamId(document.querySelector('[data-recover-target]')?.value);
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const listEl = document.querySelector('[data-recover-history-list]');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="empty-state">Loading…</p>';
+  try {
+    const response = await fetch(`/api/dino-history-admin?targetSteamId=${encodeURIComponent(targetSteamId)}`);
+    const data = await response.json();
+    if (!response.ok) {
+      listEl.innerHTML = '';
+      showToast(data.error || 'Could not load dino history.');
+      return;
+    }
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    listEl.innerHTML = '';
+    if (entries.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No dino history for this player yet.';
+      listEl.appendChild(empty);
+      return;
+    }
+    [...entries]
+      .sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
+      .forEach((entry) => listEl.appendChild(buildRecoverHistoryCard(entry, targetSteamId)));
+  } catch (error) {
+    console.debug('Recover history load failed:', error);
+    listEl.innerHTML = '';
+    showToast('Could not reach the server right now.');
+  }
+};
+
+document.querySelector('[data-recover-search]')?.addEventListener('click', loadRecoverHistory);
+
+// ── Admin Panel: Transfer Dinos log ──
+//
+// Every compensation grant made with "This is a transfer dino" checked
+// (see the isTransfer field wired into the Compensation form's submit
+// handler above), logged per target player. Purely informational: a
+// player past TRANSFER_LIMIT isn't blocked from getting more, their name
+// just gets flagged so an admin granting another one knows they're
+// already past the informal cap.
+const TRANSFER_LIMIT = 25;
+
+const nameForSteamId = (steamId) => playerDirectory.find((p) => p.steamId === steamId)?.name || steamId;
+
+const buildTransferLogCard = (steamId, entries) => {
+  const card = document.createElement('div');
+  card.className = 'transfer-log-card';
+
+  const header = document.createElement('div');
+  header.className = 'transfer-log-card-header';
+
+  const nameEl = document.createElement('strong');
+  nameEl.textContent = nameForSteamId(steamId);
+  if (entries.length >= TRANSFER_LIMIT) {
+    const limitBadge = document.createElement('span');
+    limitBadge.className = 'badge transfer-log-limit-badge';
+    limitBadge.textContent = 'limit reached for transfers';
+    nameEl.append(' ', limitBadge);
+  }
+
+  const count = document.createElement('span');
+  count.className = 'transfer-log-card-count';
+  count.textContent = `${entries.length}/${TRANSFER_LIMIT}`;
+
+  header.append(nameEl, count);
+
+  const list = document.createElement('ul');
+  list.className = 'transfer-log-entries';
+  [...entries]
+    .sort((a, b) => (b.at || 0) - (a.at || 0))
+    .forEach((entry) => {
+      const item = document.createElement('li');
+      const when = entry.at ? new Date(entry.at).toLocaleString() : '';
+      const label = entry.name ? `${entry.species || 'Unknown'} "${entry.name}"` : (entry.species || 'Unknown');
+      item.textContent = `${label} — ${when}`;
+      list.appendChild(item);
+    });
+
+  card.append(header, list);
+  return card;
+};
+
+const loadTransferLog = async () => {
+  const listEl = document.querySelector('[data-transfer-log-list]');
+  if (!listEl) return;
+  try {
+    const response = await fetch('/api/transfer-log');
+    const data = await response.json();
+    if (!response.ok) {
+      listEl.innerHTML = '';
+      return;
+    }
+    const transfers = data.transfers || {};
+    const steamIds = Object.keys(transfers).filter((id) => Array.isArray(transfers[id]) && transfers[id].length > 0);
+    listEl.innerHTML = '';
+    if (steamIds.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'No transfer dinos logged yet.';
+      listEl.appendChild(empty);
+      return;
+    }
+    steamIds
+      .sort((a, b) => transfers[b].length - transfers[a].length)
+      .forEach((steamId) => listEl.appendChild(buildTransferLogCard(steamId, transfers[steamId])));
+  } catch (error) {
+    console.debug('Transfer log load failed:', error);
+  }
+};
 
 document.querySelector('[data-currency-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
