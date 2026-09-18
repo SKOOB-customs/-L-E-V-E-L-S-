@@ -941,14 +941,18 @@
               <div class="field-row two-up">
                 <label>
                   Pattern index
-                  <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-pattern-index />
+                  <div class="field-stepper">
+                    <button type="button" class="field-stepper-btn" data-stepper-dec="[data-skin-pattern-index]" aria-label="Decrease pattern index">−</button>
+                    <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-pattern-index />
+                    <button type="button" class="field-stepper-btn" data-stepper-inc="[data-skin-pattern-index]" aria-label="Increase pattern index">+</button>
+                  </div>
                 </label>
                 <label>
                   Skin variation
                   <input type="number" step="1" placeholder="optional" data-skin-skin-variation />
                 </label>
               </div>
-              <p class="dino-park-note">Pattern index picks which built-in pattern layout the species uses (most dinos have several). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
+              <p class="dino-park-note">Pattern index picks which built-in pattern layout the species uses (most dinos have several — see the Skin Library's own Pattern Index field for the quickest way to explore them via "Test on my live dino"). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
 
               <details class="skin-advanced">
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
@@ -1059,14 +1063,18 @@
               <div class="field-row two-up">
                 <label>
                   Pattern index
-                  <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-library-pattern-index />
+                  <div class="field-stepper">
+                    <button type="button" class="field-stepper-btn" data-stepper-dec="[data-skin-library-pattern-index]" aria-label="Decrease pattern index">−</button>
+                    <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skin-library-pattern-index />
+                    <button type="button" class="field-stepper-btn" data-stepper-inc="[data-skin-library-pattern-index]" aria-label="Increase pattern index">+</button>
+                  </div>
                 </label>
                 <label>
                   Skin variation
                   <input type="number" step="1" placeholder="optional" data-skin-library-skin-variation />
                 </label>
               </div>
-              <p class="dino-park-note">Each species has its own valid pattern range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>. Use "Test on my live dino" to find each species' real range: try 0, 1, 2, 3… until colors stop showing up.</p>
+              <p class="dino-park-note">Each species has its own valid pattern range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>. Use "Test −1"/"Test +1" below to step through 0, 1, 2, 3… on your own live dino until colors stop showing up — that's the real range for that species.</p>
 
               <details class="skin-advanced">
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
@@ -1082,6 +1090,8 @@
                 <button class="action-button" type="submit">Save to library</button>
                 <button class="action-button" type="button" data-skin-library-save-changes hidden>Save changes</button>
                 <button class="secondary-button" type="button" data-skin-library-test>Test on my live dino</button>
+                <button class="secondary-button" type="button" data-skin-library-test-step="-1">Test −1</button>
+                <button class="secondary-button" type="button" data-skin-library-test-step="1">Test +1</button>
               </div>
             </form>
 

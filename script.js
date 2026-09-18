@@ -4552,6 +4552,56 @@ document.querySelector('[data-skin-library-test]')?.addEventListener('click', (e
   });
 });
 
+// "Test −1"/"Test +1" — steps the Pattern Index field by one and
+// immediately re-tests, so finding a species' real valid range (per the
+// note above: try 0, 1, 2, 3… until colors stop showing up) is a single
+// click in a loop instead of retyping the number and hitting Test every
+// time. Same underlying /api/skin-test call as the plain Test button.
+document.querySelectorAll('[data-skin-library-test-step]').forEach((button) => {
+  button.addEventListener('click', (event) => {
+    const profile = getSteamProfile();
+    if (!profile?.steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    const patternInput = document.querySelector('[data-skin-library-pattern-index]');
+    if (!patternInput) return;
+    const step = Number(button.dataset.skinLibraryTestStep) || 0;
+    const current = Number(patternInput.value) || 0;
+    const min = Number(patternInput.min ?? 0);
+    const max = Number(patternInput.max ?? 9);
+    patternInput.value = String(Math.min(max, Math.max(min, current + step)));
+
+    const colors = collectSkinLibraryColors();
+    if (colors === null) return;
+    requestActionAndPoll({
+      endpoint: '/api/skin-test',
+      body: { steamId: profile.steamId, colors },
+      buttonEl: event.target,
+      idleLabel: button.textContent,
+      waitingLabel: 'Waiting for in-game…',
+    });
+  });
+});
+
+// Generic +/- stepper for any [data-stepper-dec]/[data-stepper-inc] pair
+// (currently just the Pattern Index fields) — the selector attribute
+// value names which input to adjust, clamped to that input's own
+// min/max, so the same wiring works for both the Compensation form's
+// and the Skin Library's Pattern Index fields without duplicating this.
+document.querySelectorAll('[data-stepper-dec], [data-stepper-inc]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const selector = button.dataset.stepperDec || button.dataset.stepperInc;
+    const input = document.querySelector(selector);
+    if (!input) return;
+    const delta = button.dataset.stepperDec ? -1 : 1;
+    const current = Number(input.value) || 0;
+    const min = Number(input.min ?? 0);
+    const max = Number(input.max ?? 9);
+    input.value = String(Math.min(max, Math.max(min, current + delta)));
+  });
+});
+
 // Shared by the "Save to library" submit and the "Save changes" button —
 // both hit the same upsert-by-name endpoint, the only difference is
 // whether an existing skin was loaded for editing (see the edit-select

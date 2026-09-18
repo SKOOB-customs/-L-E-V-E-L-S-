@@ -388,6 +388,34 @@ body::before {
   width: fit-content;
 }
 
+.field-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.field-stepper input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.field-stepper-btn {
+  flex: none;
+  width: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.field-stepper-btn:hover {
+  background: var(--panel-soft);
+}
+
 .dino-history-card-vitals {
   display: flex;
   flex-wrap: wrap;
