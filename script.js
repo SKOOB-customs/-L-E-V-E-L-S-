@@ -3460,7 +3460,13 @@ const setOwnerGateState = (unlocked) => {
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
-  const transferLogsTabButton = document.querySelector('.transfer-logs-tab-button');
+  // Transfer Logs deliberately has no tab-bar button toggled visible here
+  // (unlike Admin Panel/Owner below) — it never shows up in anyone's tab
+  // list at all, admin or not. The only way in is the "View Transfer
+  // Logs" button inside the Admin Panel's Transfer Dinos section, which
+  // clicks this same (permanently hidden) button programmatically — same
+  // "real tab, hidden from the bar, reached via a button elsewhere"
+  // pattern index.html's Slideshow tab already uses.
   const transferLogsPanel = document.getElementById('transfer-logs');
   const ownerTabButton = document.querySelector('.owner-tab-button');
   const ownerPanel = document.getElementById('owner');
@@ -3472,7 +3478,6 @@ const checkAdminPanelAccess = async () => {
   if (!profile?.steamId) {
     if (adminPanelTabButton) adminPanelTabButton.hidden = true;
     if (adminPanelPanel) adminPanelPanel.hidden = true;
-    if (transferLogsTabButton) transferLogsTabButton.hidden = true;
     if (transferLogsPanel) transferLogsPanel.hidden = true;
     if (ownerTabButton) ownerTabButton.hidden = true;
     if (ownerPanel) ownerPanel.hidden = true;
@@ -3487,7 +3492,6 @@ const checkAdminPanelAccess = async () => {
     viewerAdminTier = data.tier || null;
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
-    if (transferLogsTabButton) transferLogsTabButton.hidden = !hasAccess;
     if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
     // Skin Library management (save/delete) is owner-tier only — the
     // grant form's "Load from library" dropdown is separate and works for
