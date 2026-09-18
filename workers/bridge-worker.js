@@ -2028,19 +2028,42 @@ export default {
       if (!Number.isFinite(chargeCount) || chargeCount < 1) {
         return json({ error: 'Charge count must be at least 1' }, 400);
       }
-      if (!colors || typeof colors !== 'object') {
-        return json({ error: 'Missing or invalid colors' }, 400);
-      }
       const tier = await getAdminTier(env, granterSteamId);
       if (!tier) return json({ error: 'Not an admin' }, 403);
 
-      const normalized = normalizeSkinColors(colors);
-      if (Object.keys(normalized).length === 0) {
-        return json({ error: 'No valid color fields provided' }, 400);
+      const trimmedName = name.trim().slice(0, 40);
+      let normalized;
+      if (tier === 'owner') {
+        // Owners can design a brand-new skin freely, same as always.
+        if (!colors || typeof colors !== 'object') {
+          return json({ error: 'Missing or invalid colors' }, 400);
+        }
+        normalized = normalizeSkinColors(colors);
+        if (Object.keys(normalized).length === 0) {
+          return json({ error: 'No valid color fields provided' }, 400);
+        }
+      } else {
+        // Non-owner admins can only grant charges of a skin that already
+        // exists in the library — colors are pulled from the library
+        // entry itself, never trusted from the client, so tampering with
+        // hidden form fields (devtools, a raw API call) can't smuggle a
+        // custom color through. Re-checked here regardless of what the
+        // website UI already hides for non-owners.
+        let library = {};
+        try {
+          const libraryRaw = await env.PARKED_KV.get('skin_library:index');
+          if (libraryRaw) library = JSON.parse(libraryRaw) || {};
+        } catch {
+          library = {};
+        }
+        const libraryEntry = library[trimmedName];
+        if (!libraryEntry) {
+          return json({ error: 'Only owners can design a custom skin — pick an existing one from the library.' }, 403);
+        }
+        normalized = libraryEntry.colors;
       }
       try {
         const skins = await readSkinCharges(env, targetSteamId);
-        const trimmedName = name.trim().slice(0, 40);
         const existing = skins.find((entry) => entry.name === trimmedName);
         let granted;
         if (existing) {

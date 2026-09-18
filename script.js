@@ -3493,13 +3493,24 @@ const checkAdminPanelAccess = async () => {
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
     if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
-    // Skin Library management (save/delete) is owner-tier only — the
-    // grant form's "Load from library" dropdown is separate and works for
-    // any admin tier, wired up unconditionally in loadSkinLibrary().
+    // Skin Library management (save/delete) is owner-tier only, and so —
+    // per a later restriction — is designing a NEW custom skin through
+    // the Glitch Skins grant form: non-owner admins can only grant
+    // charges of an already-existing library skin (colors picked, name
+    // locked, custom fields hidden below), never invent their own colors
+    // for a grant. Re-validated server-side in /skin-grant-charges
+    // regardless of what this hides — a non-owner tampering with hidden
+    // fields via devtools still can't get a custom color through.
     const isOwner = data.tier === 'owner';
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = !isOwner; });
     if (ownerTabButton) ownerTabButton.hidden = !isOwner;
     if (ownerPanel) ownerPanel.hidden = !isOwner;
+    const skinNonOwnerNote = document.querySelector('[data-skin-non-owner-note]');
+    if (skinNonOwnerNote) skinNonOwnerNote.hidden = isOwner;
+    const skinNameInput = document.querySelector('[data-skin-name]');
+    if (skinNameInput) skinNameInput.readOnly = !isOwner;
+    const skinLibrarySelectField = document.querySelector('[data-skin-library-select]');
+    if (skinLibrarySelectField) skinLibrarySelectField.required = !isOwner;
     // renderHub() ran at page load before this async check resolved, so the
     // Admin Panel card wasn't in the grid yet for an actual admin — add it
     // in now that we know for sure.
@@ -4221,11 +4232,29 @@ document.querySelector('[data-currency-form]')?.addEventListener('submit', async
   }
 });
 
+document.querySelector('[data-skin-target-self]')?.addEventListener('click', () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const targetInput = document.querySelector('[data-skin-target]');
+  if (targetInput) targetInput.value = profile.steamId;
+});
+
 document.querySelector('[data-skin-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const profile = getSteamProfile();
   if (!profile?.steamId) {
     showToast('Sign in with Steam first.');
+    return;
+  }
+  // Non-owner admins can only grant charges of an existing library skin —
+  // server-side enforced regardless (see /skin-grant-charges), this is
+  // just the friendlier client-side check so a non-owner gets a clear
+  // reason instead of a generic server error.
+  if (viewerAdminTier !== 'owner' && !document.querySelector('[data-skin-library-select]')?.value) {
+    showToast('Pick a skin from the library — only owners can design a custom one.');
     return;
   }
   const targetSteamId = extractSteamId(document.querySelector('[data-skin-target]')?.value);

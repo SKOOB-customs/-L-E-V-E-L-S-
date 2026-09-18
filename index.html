@@ -883,6 +883,7 @@
           <section class="panel content-box">
             <div class="mini-heading">Glitch Skins</div>
             <p class="dino-park-note">Grants charges of a named skin to a player's Inventory — they spend a charge themselves, either on their live dino or attached to one specific parked dino.</p>
+            <p class="dino-park-note" data-skin-non-owner-note hidden>Non-owner admins can grant charges of an existing skin from the library below (to a player, or to yourself), but can't design a new custom skin — that's owner-only for now.</p>
             <form class="submit-form" data-skin-form>
               <div class="field-row two-up">
                 <label>
@@ -891,15 +892,14 @@
                     <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-skin-target required />
                   </div>
                 </label>
-                <label>
-                  Skin name
-                  <input type="text" maxlength="40" placeholder="Neon Glitch" data-skin-name required />
-                </label>
+                <div class="submit-actions field-inline-action">
+                  <button class="secondary-button" type="button" data-skin-target-self>Grant to myself</button>
+                </div>
               </div>
               <div class="field-row two-up">
                 <label>
-                  Charges to grant
-                  <input type="number" min="1" value="1" data-skin-charge-count />
+                  Skin name
+                  <input type="text" maxlength="40" placeholder="Neon Glitch" data-skin-name required />
                 </label>
                 <label>
                   Load from library
@@ -908,7 +908,13 @@
                   </select>
                 </label>
               </div>
-              <div class="field-row skin-color-grid">
+              <div class="field-row two-up">
+                <label>
+                  Charges to grant
+                  <input type="number" min="1" value="1" data-skin-charge-count />
+                </label>
+              </div>
+              <div class="field-row skin-color-grid" data-owner-only>
                 <label>
                   Body
                   <input type="color" value="#808080" data-skin-color="BodyColor" />
@@ -938,7 +944,7 @@
                   <input type="color" value="#808080" data-skin-color="MaleDisplayColor" />
                 </label>
               </div>
-              <div class="field-row two-up">
+              <div class="field-row two-up" data-owner-only>
                 <label>
                   Pattern index
                   <div class="field-stepper">
@@ -952,9 +958,9 @@
                   <input type="number" step="1" placeholder="optional" data-skin-skin-variation />
                 </label>
               </div>
-              <p class="dino-park-note">Pattern index picks which built-in pattern layout the species uses (most dinos have several — see the Skin Library's own Pattern Index field for the quickest way to explore them via "Test on my live dino"). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
+              <p class="dino-park-note" data-owner-only>Pattern index picks which built-in pattern layout the species uses (most dinos have several — see the Skin Library's own Pattern Index field for the quickest way to explore them via "Test on my live dino"). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
 
-              <details class="skin-advanced">
+              <details class="skin-advanced" data-owner-only>
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
                 <div class="field-row">
                   <label>
