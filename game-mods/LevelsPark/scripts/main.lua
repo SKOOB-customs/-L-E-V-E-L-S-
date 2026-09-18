@@ -292,7 +292,21 @@ local function applyCustomizer(pawn, colors)
     if patternIndex ~= nil then
         patternIndex = math.floor(patternIndex)
         if patternIndex >= 0 and patternIndex <= 9 then
-            pcall(function() cd.PatternIndex = patternIndex end)
+            -- Same ok/err check the color fields above already get — this
+            -- specific write was pcall-wrapped with the result silently
+            -- discarded before, so a real reported case ("changing pattern
+            -- does nothing in-game, no matter the value") had zero log
+            -- signal to chase down. Logged unconditionally on success too
+            -- (not just failure) for the same reason: confirming the write
+            -- actually reached the property is the only way to tell "it
+            -- wrote fine but the client rejected/ignored the value" apart
+            -- from "the write itself never happened."
+            local ok, err = pcall(function() cd.PatternIndex = patternIndex end)
+            if ok then
+                log("Skin apply: PatternIndex write succeeded, wrote " .. tostring(patternIndex))
+            else
+                log("Skin apply: PatternIndex write failed: " .. tostring(err))
+            end
         else
             log("Skin apply: PatternIndex " .. tostring(patternIndex) .. " outside sanity range 0-9, skipped")
         end
