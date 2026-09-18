@@ -577,6 +577,27 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
+// See the /moderation-log route's own comment for the full picture — this
+// is the write side, called (best-effort, never blocking the real action)
+// from every route that counts as a website moderation action.
+const MODERATION_LOG_MAX_ENTRIES = 500;
+
+const logModerationAction = async (env, entry) => {
+  if (!env.PARKED_KV) return;
+  try {
+    const raw = await env.PARKED_KV.get('website_mod_log:index');
+    let entries = [];
+    if (raw) {
+      try { entries = JSON.parse(raw) || []; } catch { entries = []; }
+    }
+    entries.unshift({ at: Date.now(), ...entry });
+    if (entries.length > MODERATION_LOG_MAX_ENTRIES) entries.length = MODERATION_LOG_MAX_ENTRIES;
+    await env.PARKED_KV.put('website_mod_log:index', JSON.stringify(entries));
+  } catch (error) {
+    console.error('Moderation log write failed:', error.message);
+  }
+};
+
 // ── Per-player record indexes (friends/friend_requests/teleport_requests/
 // strikes) — replaces env.PARKED_KV.list({prefix:...}) on every single GET
 // request with one cheap get() per player. Confirmed live: a client
@@ -1265,14 +1286,21 @@ export class ChatRoom {
       const stored = await this.state.storage.get('messages');
       this.messages = Array.isArray(stored) ? stored : [];
     }
-    const before = this.messages.length;
-    this.messages = this.messages.filter((m) => m.id !== messageId);
-    if (this.messages.length === before) {
+    // Captured before filtering it out — the Worker's own /chat-delete-message
+    // route needs the deleted message's author/text to write a meaningful
+    // website moderation-log entry, and this DO is the only place that data
+    // ever lived (the route itself only ever gets a bare messageId).
+    const deleted = this.messages.find((m) => m.id === messageId) || null;
+    if (!deleted) {
       return new Response(JSON.stringify({ error: 'Message not found' }), { status: 404 });
     }
+    this.messages = this.messages.filter((m) => m.id !== messageId);
     await this.state.storage.put('messages', this.messages);
     this.broadcast({ type: 'delete', messageId });
-    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({
+      ok: true,
+      deletedMessage: { steamId: deleted.steamId, name: deleted.name, text: deleted.text },
+    }), { headers: { 'Content-Type': 'application/json' } });
   }
 
   broadcast(payload) {
@@ -1734,7 +1762,7 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput, isTransfer } = body || {};
+      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput, isTransfer, isRecovery, reason } = body || {};
       if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
         return json({ error: 'Missing or invalid granterSteamId' }, 400);
       }
@@ -1811,6 +1839,18 @@ export default {
       } catch (error) {
         return json({ error: error.message || 'Compensation grant failed' }, 502);
       }
+      // Reason (typed on the Compensation/Recover Dinos form — e.g. "Events,
+      // 2026-09-17" or "Rulebreak reversal, 2026-09-17") is purely a
+      // website-side record for the Moderation Log below; it never goes
+      // into the actual game-side snapshot main.lua applies, so an admin
+      // leaving it blank changes nothing about the grant itself.
+      const trimmedReason = typeof reason === 'string' ? reason.trim().slice(0, 500) : '';
+      await logModerationAction(env, {
+        action: isRecovery ? 'dino_recovery' : (isTransfer ? 'transfer_grant' : 'compensation_grant'),
+        actorSteamId: granterSteamId,
+        targetSteamId,
+        detail: { species, name: dino.name || '', compCode: dino.compCode, reason: trimmedReason },
+      });
       // Transfer Dinos: a separate category of compensation, checked by the
       // admin on the same form rather than a different one — keeps one
       // grant code path instead of two nearly-identical ones. Logged in
@@ -2677,6 +2717,40 @@ export default {
     // unlike chat messages themselves which are local to the one
     // ChatRoom instance. ──
 
+    // ── Website moderation log ──
+    //
+    // Every admin action taken THROUGH THE WEBSITE — chat message
+    // deletion/timeout/ban, compensation/transfer/recovery grants —
+    // logged into one rolling KV blob for the Owner tab's Moderation Log.
+    // Deliberately separate from admin_audit above: that system is
+    // tamper-evident accountability for IN-GAME console commands
+    // (Ban/Kick/etc. run through the game's own admin console, hash-
+    // chained from main.lua), a different threat model entirely. This is
+    // just a readable history of what happened via the site, capped at
+    // MODERATION_LOG_MAX_ENTRIES (oldest dropped) so it can never grow
+    // into a KV-quota problem the way an uncapped log eventually would.
+    // Logging failures are swallowed — never let a logging hiccup turn a
+    // successful moderation action into a reported failure.
+    if (url.pathname === '/moderation-log' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ entries: [] });
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner access required' }, 403);
+      try {
+        const raw = await env.PARKED_KV.get('website_mod_log:index');
+        let entries = [];
+        if (raw) {
+          try { entries = JSON.parse(raw) || []; } catch { entries = []; }
+        }
+        return json({ entries });
+      } catch (error) {
+        return json({ error: error.message || 'Moderation log lookup failed' }, 502);
+      }
+    }
+
     if (url.pathname === '/chat-delete-message' && request.method === 'POST') {
       if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
       let body;
@@ -2704,6 +2778,18 @@ export default {
           body: JSON.stringify({ messageId }),
         });
         const data = await response.json();
+        if (response.ok && data.ok) {
+          await logModerationAction(env, {
+            action: 'chat_delete_message',
+            actorSteamId: moderatorSteamId,
+            targetSteamId: data.deletedMessage?.steamId || null,
+            detail: {
+              messageId,
+              authorName: data.deletedMessage?.name || '',
+              text: (data.deletedMessage?.text || '').slice(0, 200),
+            },
+          });
+        }
         return json(data, response.status);
       } catch (error) {
         return json({ error: error.message || 'Message delete failed' }, 502);
@@ -2739,6 +2825,12 @@ export default {
           at: Date.now(),
           by: moderatorSteamId,
         }));
+        await logModerationAction(env, {
+          action: 'chat_timeout',
+          actorSteamId: moderatorSteamId,
+          targetSteamId,
+          detail: { hours: hoursInt },
+        });
         return json({ ok: true, until });
       } catch (error) {
         return json({ error: error.message || 'Timeout failed' }, 502);
@@ -2772,6 +2864,12 @@ export default {
         } else {
           await env.PARKED_KV.delete(`player_ban:${targetSteamId}`);
         }
+        await logModerationAction(env, {
+          action: banned ? 'chat_ban' : 'chat_unban',
+          actorSteamId: moderatorSteamId,
+          targetSteamId,
+          detail: {},
+        });
         return json({ ok: true, banned: !!banned });
       } catch (error) {
         return json({ error: error.message || 'Ban failed' }, 502);

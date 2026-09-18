@@ -3,7 +3,7 @@
  *
  * POST { targetSteamId, species, name?, growthPct?, healthPct?,
  *        staminaPct?, hungerPct?, thirstPct?, entombments?, mutations?,
- *        isTransfer? }
+ *        isTransfer?, isRecovery?, reason? }
  * -> proxies to the bridge Worker's /compensation-grant route, which
  * appends a redeemable dino snapshot to the target's
  * parked_<steamid>.json — the exact file format main.lua's !park already
@@ -15,8 +15,12 @@
  *
  * isTransfer marks the grant as a Transfer Dino rather than a plain
  * compensation — the Worker logs it separately (see /transfer-log) but
- * otherwise grants it identically; this route just passes the flag
- * through via the ...body spread below, no special handling needed here.
+ * otherwise grants it identically. isRecovery marks it as coming from
+ * the Recover Dinos flow instead of a manual grant — purely a label for
+ * the Owner tab's Moderation Log (see /moderation-log), no behavior
+ * difference. reason is the admin's free-text note for that same log.
+ * This route just passes all three through via the ...body spread below,
+ * no special handling needed here.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {

@@ -804,6 +804,10 @@
                 This is a transfer dino
               </label>
               <p class="dino-park-note" data-comp-transfer-limit-note hidden>This player has already reached the 25-transfer limit — granting this as a transfer isn't available for them.</p>
+              <label>
+                Reason (shows up in the Owner tab's Moderation Log)
+                <textarea rows="2" maxlength="500" placeholder="e.g. Events, Rulebreak, Gamebug — include the date this happened" data-comp-reason></textarea>
+              </label>
               <div class="submit-actions">
                 <button class="action-button" type="submit">Grant dino</button>
               </div>
@@ -824,6 +828,10 @@
                 <button class="action-button" type="button" data-recover-search>Load dino history</button>
               </div>
             </div>
+            <label>
+              Reason (applies to whichever dino you recover below — shows up in the Owner tab's Moderation Log)
+              <textarea rows="2" maxlength="500" placeholder="e.g. Events, Rulebreak, Gamebug — include the date this happened" data-recover-reason></textarea>
+            </label>
             <div class="dino-history-list" data-recover-history-list></div>
           </section>
 
@@ -1098,6 +1106,24 @@
                   </div>
                 </div>
               </form>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Moderation Log</div>
+            <p class="dino-park-note">Every admin action taken through the website — chat message deletions, timeouts, bans, compensation/transfer grants, and dino recoveries — newest first. In-game admin console actions have their own separate, tamper-evident log and aren't included here.</p>
+            <div class="field-row two-up">
+              <label>
+                Filter by admin (Steam ID or name)
+                <div class="player-search">
+                  <input type="text" maxlength="64" placeholder="Leave blank to show everyone" autocomplete="off" data-mod-log-search-target />
+                </div>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-mod-log-search>Search</button>
+                <button class="secondary-button" type="button" data-mod-log-clear>Show all</button>
+              </div>
+            </div>
+            <div class="transfer-log-list" data-mod-log-list></div>
           </section>
           </div>
         </section>

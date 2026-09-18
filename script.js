@@ -3404,7 +3404,7 @@ const attachPlayerAutocomplete = (inputEl) => {
   });
 };
 
-['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]', '[data-recover-target]', '[data-transfer-log-search-target]'].forEach((selector) => {
+['[data-comp-target]', '[data-strike-target]', '[data-skin-target]', '[data-friend-target]', '[data-currency-target]', '[data-recover-target]', '[data-transfer-log-search-target]', '[data-mod-log-search-target]'].forEach((selector) => {
   attachPlayerAutocomplete(document.querySelector(selector));
 });
 
@@ -3518,6 +3518,7 @@ const checkAdminPanelAccess = async () => {
       loadSkinLibrary();
       loadOwnStaffBio();
       loadTransferLog();
+      if (isOwner) loadModerationLog();
       const statusEl = document.querySelector('[data-admin-unlock-status]');
       if (statusEl) {
         if (data.unlockExpiresAt) {
@@ -3724,6 +3725,7 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     entombments: Number(document.querySelector('[data-comp-entombments]')?.value) || 0,
     mutations,
     isTransfer: !!document.querySelector('[data-comp-is-transfer]')?.checked,
+    reason: document.querySelector('[data-comp-reason]')?.value.trim() || '',
   };
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
@@ -3746,6 +3748,8 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       renderMutationSlots();
       const transferCheckbox = document.querySelector('[data-comp-is-transfer]');
       if (transferCheckbox) transferCheckbox.checked = false;
+      const reasonInput = document.querySelector('[data-comp-reason]');
+      if (reasonInput) reasonInput.value = '';
       updateCompTransferCheckboxVisibility();
       if (body.isTransfer) loadTransferLog();
     }
@@ -3833,6 +3837,8 @@ const buildRecoverHistoryCard = (entry, targetSteamId) => {
             thirstPct: lastEvent.thirstPct || 0,
             entombments: 0,
             mutations: {},
+            isRecovery: true,
+            reason: document.querySelector('[data-recover-reason]')?.value.trim() || '',
           }),
         });
         const data = await response.json();
@@ -4058,6 +4064,116 @@ document.querySelector('[data-transfer-logs-unlock-link]')?.addEventListener('cl
 
 document.querySelector('[data-owner-unlock-link]')?.addEventListener('click', () => {
   document.querySelector('.tab-button[data-tab="admin-panel"]')?.click();
+});
+
+// ── Owner tab: Moderation Log ──
+//
+// Every admin action taken through the website — chat moderation,
+// compensation/transfer/recovery grants — see /api/moderation-log's own
+// comment and bridge-worker.js's logModerationAction for the write side.
+// Owner-tier only (enforced server-side; this UI lives inside the
+// already owner-gated Owner tab besides). Same flat, chronological,
+// filter-by-admin pattern as the Transfer Logs tab.
+const MODERATION_ACTION_LABELS = {
+  chat_delete_message: 'Deleted chat message',
+  chat_timeout: 'Timed out in chat',
+  chat_ban: 'Banned from site',
+  chat_unban: 'Unbanned from site',
+  compensation_grant: 'Granted compensation',
+  transfer_grant: 'Granted transfer dino',
+  dino_recovery: 'Recovered dino',
+};
+
+let modLogFilterSteamId = null;
+let lastModerationLogData = [];
+
+const buildModerationLogRow = (entry) => {
+  const item = document.createElement('li');
+  item.className = 'transfer-log-row';
+
+  const actorEl = document.createElement('strong');
+  actorEl.textContent = nameForSteamId(entry.actorSteamId);
+  item.appendChild(actorEl);
+
+  const detailParts = [MODERATION_ACTION_LABELS[entry.action] || entry.action];
+  if (entry.targetSteamId) detailParts.push(`→ ${nameForSteamId(entry.targetSteamId)}`);
+  if (entry.detail?.species) detailParts.push(entry.detail.species);
+  if (entry.detail?.hours) detailParts.push(`${entry.detail.hours}h`);
+  if (entry.detail?.text) detailParts.push(`"${entry.detail.text}"`);
+  if (entry.detail?.reason) detailParts.push(`reason: ${entry.detail.reason}`);
+  const when = entry.at ? new Date(entry.at).toLocaleString() : '';
+
+  const detailEl = document.createElement('span');
+  detailEl.className = 'transfer-log-row-detail';
+  detailEl.textContent = ` — ${detailParts.join(' — ')} — ${when}`;
+  item.appendChild(detailEl);
+
+  return item;
+};
+
+const renderModerationLog = (entries) => {
+  const listEl = document.querySelector('[data-mod-log-list]');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  const filtered = modLogFilterSteamId
+    ? entries.filter((entry) => entry.actorSteamId === modLogFilterSteamId)
+    : entries;
+
+  if (filtered.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = modLogFilterSteamId
+      ? 'No moderation actions logged for this admin yet.'
+      : 'No moderation actions logged yet.';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'transfer-log-entries';
+  filtered.forEach((entry) => list.appendChild(buildModerationLogRow(entry)));
+  listEl.appendChild(list);
+};
+
+const loadModerationLog = async () => {
+  const listEl = document.querySelector('[data-mod-log-list]');
+  if (!listEl) return;
+  try {
+    const response = await fetch('/api/moderation-log');
+    const data = await response.json();
+    if (!response.ok) {
+      listEl.innerHTML = '';
+      return;
+    }
+    lastModerationLogData = Array.isArray(data.entries) ? data.entries : [];
+    renderModerationLog(lastModerationLogData);
+  } catch (error) {
+    console.debug('Moderation log load failed:', error);
+  }
+};
+
+document.querySelector('[data-mod-log-search]')?.addEventListener('click', () => {
+  const raw = document.querySelector('[data-mod-log-search-target]')?.value.trim();
+  if (!raw) {
+    modLogFilterSteamId = null;
+    renderModerationLog(lastModerationLogData);
+    return;
+  }
+  const steamId = extractSteamId(raw);
+  if (!/^\d{17}$/.test(steamId)) {
+    showToast('Enter a valid 17-digit Steam ID, or pick a suggestion.');
+    return;
+  }
+  modLogFilterSteamId = steamId;
+  renderModerationLog(lastModerationLogData);
+});
+
+document.querySelector('[data-mod-log-clear]')?.addEventListener('click', () => {
+  modLogFilterSteamId = null;
+  const input = document.querySelector('[data-mod-log-search-target]');
+  if (input) input.value = '';
+  renderModerationLog(lastModerationLogData);
 });
 
 document.querySelector('[data-currency-form]')?.addEventListener('submit', async (event) => {
