@@ -2855,6 +2855,43 @@ export default {
       }
     }
 
+    // Temporary diagnostic: reads the tail of UE4SS's own log file (which
+    // main.lua's log() prints into via UE4SS's print()) so an owner can
+    // see the mod's own console output straight from the website instead
+    // of digging through Bropanel's file manager — added specifically to
+    // chase down a live PatternIndex investigation (2026-09-18). Owner-tier
+    // only, same as every other owner-only route. ?grep= optionally
+    // filters to matching lines only (case-insensitive substring); without
+    // it, just the raw tail. Only the last ~400KB of the file is read to
+    // avoid pulling a potentially huge log in full, then trimmed to the
+    // last MOD_LOG_TAIL_MAX_LINES lines (or matches) so the response stays
+    // small regardless of how much matched.
+    const MOD_LOG_PATH = '/TheIsle/Binaries/Win64/ue4ss/UE4SS.log';
+    const MOD_LOG_TAIL_MAX_LINES = 200;
+    if (url.pathname === '/mod-log-tail' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner access required' }, 403);
+      try {
+        const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(MOD_LOG_PATH)}`);
+        let text = await response.text();
+        if (text.length > 400000) text = text.slice(-400000);
+        let lines = text.split(/\r?\n/).filter(Boolean);
+        const grep = url.searchParams.get('grep');
+        if (grep) {
+          const needle = grep.toLowerCase();
+          lines = lines.filter((line) => line.toLowerCase().includes(needle));
+        }
+        if (lines.length > MOD_LOG_TAIL_MAX_LINES) lines = lines.slice(-MOD_LOG_TAIL_MAX_LINES);
+        return json({ lines });
+      } catch (error) {
+        return json({ error: error.message || 'Mod log lookup failed' }, 502);
+      }
+    }
+
     if (url.pathname === '/chat-delete-message' && request.method === 'POST') {
       if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
       let body;

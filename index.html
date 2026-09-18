@@ -1117,6 +1117,21 @@
           </section>
 
           <section class="panel content-box">
+            <div class="mini-heading">Mod Log (diagnostic)</div>
+            <p class="dino-park-note">Temporary — reads the tail of UE4SS.log straight from the game server. Currently filtering for the skin PatternIndex investigation.</p>
+            <div class="field-row two-up">
+              <label>
+                Filter (leave blank for unfiltered tail)
+                <input type="text" value="Skin apply" data-mod-log-grep />
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-mod-log-fetch>Fetch log</button>
+              </div>
+            </div>
+            <pre class="mod-log-output" data-mod-log-output></pre>
+          </section>
+
+          <section class="panel content-box">
               <div class="mini-heading">Change another admin's passkey (forgot passkey)</div>
               <p class="dino-park-note">This is for ANOTHER admin who's forgotten or gotten locked out of their own passkey — not for you to set or change yours (do that from the unlock prompt itself). Clears their passkey so they're prompted to set a brand new one next time they open this panel.</p>
               <form class="submit-form" data-admin-passkey-reset-form>

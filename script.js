@@ -4492,6 +4492,36 @@ document.querySelector('[data-skin-trash-restore]')?.addEventListener('click', a
   }
 });
 
+// ── Owner tab: Mod Log (temporary diagnostic) ──
+//
+// See functions/api/mod-log-tail.js's own comment — reads UE4SS.log's
+// tail straight from the site, added for the live PatternIndex
+// investigation so it doesn't need relaying through Bropanel by hand.
+document.querySelector('[data-mod-log-fetch]')?.addEventListener('click', async (event) => {
+  const grepInput = document.querySelector('[data-mod-log-grep]');
+  const output = document.querySelector('[data-mod-log-output]');
+  if (!output) return;
+  const button = event.target;
+  button.disabled = true;
+  output.textContent = 'Loading…';
+  try {
+    const grep = grepInput?.value.trim() || '';
+    const response = await fetch(`/api/mod-log-tail${grep ? `?grep=${encodeURIComponent(grep)}` : ''}`);
+    const data = await response.json();
+    if (!response.ok) {
+      output.textContent = data.error || 'Could not load the log.';
+      return;
+    }
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    output.textContent = lines.length ? lines.join('\n') : '(no matching lines)';
+  } catch (error) {
+    console.debug('Mod log fetch failed:', error);
+    output.textContent = 'Could not reach the server right now.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // Picking a saved skin from the grant form's dropdown auto-fills the name
 // and the Advanced JSON field with the FULL saved colors object — always,
 // not just when the skin has non-picker fields like Teeth/Mouth/Claws.
