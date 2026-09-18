@@ -3518,7 +3518,10 @@ const checkAdminPanelAccess = async () => {
       loadSkinLibrary();
       loadOwnStaffBio();
       loadTransferLog();
-      if (isOwner) loadModerationLog();
+      if (isOwner) {
+        loadModerationLog();
+        loadSkinLibraryTrash();
+      }
       const statusEl = document.querySelector('[data-admin-unlock-status]');
       if (statusEl) {
         if (data.unlockExpiresAt) {
@@ -4400,8 +4403,9 @@ const renderSkinLibraryList = (skins) => {
           showToast(data.error || 'Could not delete that skin.');
           deleteBtn.disabled = false;
         } else {
-          showToast(`Deleted "${skin.name}" from the library.`);
+          showToast(`Deleted "${skin.name}" — restorable from Deleted Skins on the Owner tab.`);
           loadSkinLibrary();
+          loadSkinLibraryTrash();
         }
       } catch (error) {
         console.debug('Skin library delete failed:', error);
@@ -4431,6 +4435,62 @@ const loadSkinLibrary = async () => {
     console.debug('Skin library load failed:', error);
   }
 };
+
+// ── Owner tab: Skin Library recycle bin ──
+//
+// Every skin removed via "Delete" on the Skin Library above lands here
+// first instead of being gone outright — a real reported case: an owner
+// deleted a skin ("BB") by mistake with no way to get it back. Owner-tier
+// only, same as delete itself.
+let skinTrashCache = [];
+
+const loadSkinLibraryTrash = async () => {
+  const selectEl = document.querySelector('[data-skin-trash-select]');
+  if (!selectEl) return;
+  try {
+    const response = await fetch('/api/skin-library-trash');
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.trash)) return;
+    skinTrashCache = data.trash;
+    selectEl.innerHTML = '<option value="">— none —</option>' + skinTrashCache.map((entry) => {
+      const when = entry.deletedAt ? new Date(entry.deletedAt).toLocaleString() : '';
+      return `<option value="${entry.id}">${String(entry.name).replace(/</g, '&lt;')} — deleted ${when}</option>`;
+    }).join('');
+  } catch (error) {
+    console.debug('Skin library trash load failed:', error);
+  }
+};
+
+document.querySelector('[data-skin-trash-restore]')?.addEventListener('click', async (event) => {
+  const selectEl = document.querySelector('[data-skin-trash-select]');
+  const id = selectEl?.value;
+  if (!id) {
+    showToast('Pick a deleted skin to restore.');
+    return;
+  }
+  const button = event.target;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/skin-library-restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not restore that skin.');
+      return;
+    }
+    showToast(`Restored "${data.skin?.name || 'skin'}".`);
+    loadSkinLibraryTrash();
+    loadSkinLibrary();
+  } catch (error) {
+    console.debug('Skin library restore failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
 
 // Picking a saved skin from the grant form's dropdown auto-fills the name
 // and the Advanced JSON field with the FULL saved colors object — always,

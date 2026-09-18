@@ -582,6 +582,9 @@ const getAdminTier = async (env, steamId) => {
 // from every route that counts as a website moderation action.
 const MODERATION_LOG_MAX_ENTRIES = 500;
 
+// See /skin-library-delete's own comment — same rolling-cap reasoning.
+const SKIN_LIBRARY_TRASH_MAX_ENTRIES = 50;
+
 const logModerationAction = async (env, entry) => {
   if (!env.PARKED_KV) return;
   try {
@@ -2129,11 +2132,112 @@ export default {
         if (raw) {
           try { library = JSON.parse(raw) || {}; } catch { library = {}; }
         }
-        delete library[name.trim()];
+        const trimmedName = name.trim();
+        const deletedEntry = library[trimmedName];
+        delete library[trimmedName];
         await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        // Moved into a recycle bin rather than just discarded — a real
+        // reported case: an owner deleted a skin ("BB") by mistake with no
+        // way to get it back, since this used to just drop it. Capped at
+        // SKIN_LIBRARY_TRASH_MAX_ENTRIES (oldest dropped) same reasoning
+        // as every other rolling log in this file. Best-effort: a failure
+        // here shouldn't be reported as the delete itself failing, since
+        // the library write above already succeeded.
+        if (deletedEntry) {
+          try {
+            const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+            let trash = [];
+            if (trashRaw) {
+              try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+            }
+            trash.unshift({
+              id: crypto.randomUUID(),
+              name: trimmedName,
+              colors: deletedEntry.colors,
+              savedAt: deletedEntry.savedAt,
+              savedBy: deletedEntry.savedBy,
+              deletedAt: Date.now(),
+              deletedBy: granterSteamId,
+            });
+            if (trash.length > SKIN_LIBRARY_TRASH_MAX_ENTRIES) trash.length = SKIN_LIBRARY_TRASH_MAX_ENTRIES;
+            await env.PARKED_KV.put('skin_library_trash:index', JSON.stringify(trash));
+          } catch (error) {
+            console.error('Skin library trash write failed:', error.message);
+          }
+        }
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Skin library delete failed' }, 502);
+      }
+    }
+
+    // Recycle bin for deleted Skin Library entries — GET the list, POST
+    // {name -> restore that trash entry's id} to bring it back. Owner-tier
+    // only, same as save/delete themselves.
+    if (url.pathname === '/skin-library-trash' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ trash: [] });
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+      try {
+        const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+        let trash = [];
+        if (trashRaw) {
+          try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+        }
+        return json({ trash });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library trash lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-library-restore' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { granterSteamId, id } = body || {};
+      if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
+        return json({ error: 'Missing or invalid granterSteamId' }, 400);
+      }
+      if (typeof id !== 'string' || !id) {
+        return json({ error: 'Missing trash entry id' }, 400);
+      }
+      const tier = await getAdminTier(env, granterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+
+      try {
+        const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+        let trash = [];
+        if (trashRaw) {
+          try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+        }
+        const entryIndex = trash.findIndex((entry) => entry.id === id);
+        if (entryIndex === -1) return json({ error: 'That trash entry no longer exists' }, 404);
+        const entry = trash[entryIndex];
+
+        const libraryRaw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (libraryRaw) {
+          try { library = JSON.parse(libraryRaw) || {}; } catch { library = {}; }
+        }
+        if (library[entry.name]) {
+          return json({ error: `A skin named "${entry.name}" already exists — rename or delete it first, then restore this one.` }, 409);
+        }
+        library[entry.name] = { colors: entry.colors, savedAt: entry.savedAt, savedBy: entry.savedBy };
+        trash.splice(entryIndex, 1);
+
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        await env.PARKED_KV.put('skin_library_trash:index', JSON.stringify(trash));
+        return json({ ok: true, skin: { name: entry.name, colors: entry.colors } });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library restore failed' }, 502);
       }
     }
 
