@@ -2898,6 +2898,19 @@ export default {
       }
       const tier = await getAdminTier(env, requesterSteamId);
       if (tier !== 'owner') return json({ error: 'Owner access required' }, 403);
+      // ?list=1 lists the ue4ss folder instead of reading the log — a
+      // sanity check for MOD_LOG_PATH itself, in case UE4SS.log isn't
+      // actually the right filename/location on this server.
+      if (url.searchParams.get('list')) {
+        try {
+          const listResponse = await pterodactylFetch(env, `/files/list?directory=${encodeURIComponent('/TheIsle/Binaries/Win64/ue4ss')}`);
+          const listBody = await listResponse.json();
+          const names = (listBody.data || []).map((entry) => entry.attributes?.name).filter(Boolean);
+          return json({ lines: names });
+        } catch (error) {
+          return json({ error: error.message || 'ue4ss directory listing failed' }, 502);
+        }
+      }
       try {
         const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(MOD_LOG_PATH)}`);
         let text = await response.text();

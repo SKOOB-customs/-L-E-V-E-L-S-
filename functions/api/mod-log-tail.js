@@ -35,11 +35,13 @@ export async function onRequestGet(context) {
 
   const url = new URL(request.url);
   const grep = url.searchParams.get('grep') || '';
+  const list = url.searchParams.get('list') || '';
 
   try {
     const target = new URL(`${origin}/mod-log-tail`);
     target.searchParams.set('requesterSteamId', requesterSteamId);
     if (grep) target.searchParams.set('grep', grep);
+    if (list) target.searchParams.set('list', list);
     const response = await fetch(target.toString(), {
       headers: {
         Accept: 'application/json',

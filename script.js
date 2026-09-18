@@ -4551,6 +4551,32 @@ document.querySelector('[data-mod-log-fetch]')?.addEventListener('click', async 
   }
 });
 
+// Sanity check for MOD_LOG_PATH itself (see the Worker's own comment) —
+// lists what's actually in the ue4ss folder in case UE4SS.log isn't the
+// right filename/location on this server.
+document.querySelector('[data-mod-log-list]')?.addEventListener('click', async (event) => {
+  const output = document.querySelector('[data-mod-log-output]');
+  if (!output) return;
+  const button = event.target;
+  button.disabled = true;
+  output.textContent = 'Loading…';
+  try {
+    const response = await fetch('/api/mod-log-tail?list=1');
+    const data = await response.json();
+    if (!response.ok) {
+      output.textContent = data.error || 'Could not list the folder.';
+      return;
+    }
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    output.textContent = lines.length ? lines.join('\n') : '(empty folder)';
+  } catch (error) {
+    console.debug('Mod log folder list failed:', error);
+    output.textContent = 'Could not reach the server right now.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
 // Picking a saved skin from the grant form's dropdown auto-fills the name
 // and the Advanced JSON field with the FULL saved colors object — always,
 // not just when the skin has non-picker fields like Teeth/Mouth/Claws.
