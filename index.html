@@ -131,6 +131,30 @@
       </div>
     </aside>
 
+    <!-- Owner-only: every player-submitted skin idea, viewable/repliable from
+         here. Only shown once checkAdminPanelAccess() confirms owner tier AND
+         the Admin Panel passkey is unlocked — same gate as the Owner tab. -->
+    <button id="skinIdeasToggle" class="skin-ideas-toggle" type="button" aria-expanded="false" aria-controls="skinIdeasSidebar" hidden>
+      Ideas
+    </button>
+
+    <aside id="skinIdeasSidebar" class="skin-ideas-sidebar" aria-hidden="true">
+      <div class="chat-header">
+        <span>Skin Ideas</span>
+        <button id="skinIdeasClose" class="chat-close" type="button" aria-label="Close skin ideas">×</button>
+      </div>
+
+      <p class="dino-park-note" data-skin-ideas-empty hidden>No skin ideas submitted yet.</p>
+      <div id="skinIdeasList" class="skin-ideas-list" aria-live="polite"></div>
+    </aside>
+
+    <div class="parked-modal-overlay" data-skin-idea-modal hidden>
+      <div class="parked-modal-box" data-skin-idea-modal-box>
+        <button class="parked-modal-close" type="button" data-skin-idea-modal-close aria-label="Close">&times;</button>
+        <div data-skin-idea-modal-content></div>
+      </div>
+    </div>
+
     <div class="site-shell">
       <header class="site-header panel">
         <button class="brand-wrap profile-access" type="button" aria-label="Open profile">
@@ -279,7 +303,7 @@
             </p>
 
             <div class="cta-row">
-              <a class="action-button large" href="#submit">Submit a Feature</a>
+              <button type="button" class="action-button large" data-skin-idea-toggle>Submit a Feature</button>
               <a class="secondary-button large" href="#features">Explore Ideas</a>
             </div>
 
@@ -288,6 +312,21 @@
               <li>Compact mod ideas</li>
               <li>Community-led updates</li>
             </ul>
+          </div>
+
+          <div class="panel content-box" data-skin-idea-box hidden>
+            <div class="mini-heading">Submit a skin idea</div>
+            <p class="dino-park-note" data-skin-idea-signed-out hidden>Log in with Steam from the Profile tab to send an idea straight to the owners.</p>
+            <form class="submit-form" data-skin-idea-form>
+              <label>
+                Describe your skin idea
+                <textarea rows="4" maxlength="1000" placeholder="e.g. A bioluminescent pattern for Deinosuchus with glowing scute ridges..." data-skin-idea-message required></textarea>
+              </label>
+              <div class="submit-actions">
+                <button type="submit" class="action-button">Send to owners</button>
+                <button type="button" class="secondary-button" data-skin-idea-cancel>Cancel</button>
+              </div>
+            </form>
           </div>
 
           <div class="section-header">
@@ -483,6 +522,16 @@
               </div>
             </div>
             <p class="dino-park-note" data-coin-earnings-example></p>
+          </section>
+
+          <section class="panel content-box skin-idea-inbox-section" data-skin-idea-inbox-section hidden>
+            <div class="mini-heading">Skin Idea Inbox</div>
+            <p class="dino-park-note">Once an owner replies to a skin idea you've submitted, the reply shows up here.</p>
+            <button type="button" class="secondary-button" data-skin-idea-inbox-toggle>
+              Inbox (<span data-skin-idea-inbox-count>0</span>)
+            </button>
+            <p class="empty-state" data-skin-idea-inbox-empty hidden>No replies yet.</p>
+            <div class="dino-history-list" data-skin-idea-inbox-list hidden></div>
           </section>
 
         </section>

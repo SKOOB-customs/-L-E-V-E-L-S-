@@ -601,6 +601,30 @@ const logModerationAction = async (env, entry) => {
   }
 };
 
+// ── Skin idea inbox ──
+//
+// The Skins tab's "Submit a Feature" box lets any signed-in player send a
+// short skin-idea message straight to the owners — a lightweight, one-way
+// suggestion box rather than a full ticket. A thread only becomes visible
+// to the PLAYER once an owner actually replies to it (readSkinIdeaThread's
+// own gate below); until then it's write-only from their side, same
+// mechanic as dropping a note in a box. Everything lives in one rolling
+// KV blob, same shape/cap reasoning as website_mod_log above.
+const SKIN_IDEAS_MAX_ENTRIES = 300;
+
+const readSkinIdeas = async (env) => {
+  const raw = await env.PARKED_KV.get('skin_ideas:index');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeSkinIdeas = (env, ideas) => env.PARKED_KV.put('skin_ideas:index', JSON.stringify(ideas));
+
 // ── Per-player record indexes (friends/friend_requests/teleport_requests/
 // strikes) — replaces env.PARKED_KV.list({prefix:...}) on every single GET
 // request with one cheap get() per player. Confirmed live: a client
@@ -2875,6 +2899,211 @@ export default {
         return json({ entries });
       } catch (error) {
         return json({ error: error.message || 'Moderation log lookup failed' }, 502);
+      }
+    }
+
+    // Skins tab's "Submit a Feature" box — any signed-in player, no admin
+    // tier needed. name is a cosmetic display hint only (same convention
+    // as chat-ticket.js's name param), never a trust boundary — steamId is
+    // what every other route here keys off of.
+    if (url.pathname === '/skin-idea-submit' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, name, message } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      const trimmedMessage = typeof message === 'string' ? message.trim() : '';
+      if (!trimmedMessage) return json({ error: 'Enter your skin idea first.' }, 400);
+      if (trimmedMessage.length > 1000) return json({ error: 'Keep it under 1000 characters.' }, 400);
+      const trimmedName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 32) : steamId;
+
+      try {
+        const ideas = await readSkinIdeas(env);
+        const now = Date.now();
+        const idea = {
+          id: crypto.randomUUID(),
+          steamId,
+          name: trimmedName,
+          message: trimmedMessage,
+          submittedAt: now,
+          replies: [],
+          hasOwnerReply: false,
+          lastOwnerReplyAt: null,
+          playerReadAt: null,
+          lastActivityAt: now,
+        };
+        ideas.unshift(idea);
+        if (ideas.length > SKIN_IDEAS_MAX_ENTRIES) ideas.length = SKIN_IDEAS_MAX_ENTRIES;
+        await writeSkinIdeas(env, ideas);
+        return json({ ok: true, idea: { id: idea.id } });
+      } catch (error) {
+        return json({ error: error.message || 'Could not submit your idea right now.' }, 502);
+      }
+    }
+
+    // Owner-only sidebar list — every submitted idea, newest activity
+    // first. Same owner-tier gate as the Moderation Log/Owner tab.
+    if (url.pathname === '/skin-ideas' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ ideas: [] });
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner access required' }, 403);
+      try {
+        const ideas = await readSkinIdeas(env);
+        const previews = ideas
+          .slice()
+          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+          .map((idea) => ({
+            id: idea.id,
+            steamId: idea.steamId,
+            name: idea.name,
+            message: idea.message,
+            submittedAt: idea.submittedAt,
+            replyCount: idea.replies.length,
+            hasOwnerReply: idea.hasOwnerReply,
+            lastActivityAt: idea.lastActivityAt,
+          }));
+        return json({ ideas: previews });
+      } catch (error) {
+        return json({ error: error.message || 'Skin idea list lookup failed' }, 502);
+      }
+    }
+
+    // Full thread — owners can always open any thread; the original
+    // player can only open THEIR OWN once an owner has actually replied
+    // (see this file's own "Skin idea inbox" comment for why). Opening it
+    // as the player also marks it read, for the Inbox unread badge below.
+    if (url.pathname === '/skin-idea-thread' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      const ideaId = url.searchParams.get('ideaId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!ideaId) return json({ error: 'Missing ideaId' }, 400);
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      try {
+        const ideas = await readSkinIdeas(env);
+        const index = ideas.findIndex((entry) => entry.id === ideaId);
+        if (index === -1) return json({ error: 'That idea no longer exists' }, 404);
+        const idea = ideas[index];
+
+        const tier = await getAdminTier(env, requesterSteamId);
+        const isOwner = tier === 'owner';
+        const isSubmitter = requesterSteamId === idea.steamId;
+        if (!isOwner && !(isSubmitter && idea.hasOwnerReply)) {
+          return json({ error: isSubmitter ? 'No reply yet — check back soon.' : 'Not allowed to view this thread.' }, 403);
+        }
+
+        if (!isOwner && isSubmitter) {
+          idea.playerReadAt = Date.now();
+          ideas[index] = idea;
+          await writeSkinIdeas(env, ideas);
+        }
+
+        return json({ idea, viewerRole: isOwner ? 'owner' : 'player' });
+      } catch (error) {
+        return json({ error: error.message || 'Skin idea thread lookup failed' }, 502);
+      }
+    }
+
+    // Reply into a thread — owners can always reply (this is what first
+    // opens the thread up to the player, see hasOwnerReply below); the
+    // player can only reply back once that's already happened.
+    if (url.pathname === '/skin-idea-reply' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { ideaId, actorSteamId, name, text } = body || {};
+      if (typeof actorSteamId !== 'string' || !/^\d{17}$/.test(actorSteamId)) {
+        return json({ error: 'Missing or invalid actorSteamId' }, 400);
+      }
+      if (typeof ideaId !== 'string' || !ideaId) return json({ error: 'Missing ideaId' }, 400);
+      const trimmedText = typeof text === 'string' ? text.trim() : '';
+      if (!trimmedText) return json({ error: 'Enter a message first.' }, 400);
+      if (trimmedText.length > 1000) return json({ error: 'Keep it under 1000 characters.' }, 400);
+      const trimmedName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 32) : actorSteamId;
+
+      try {
+        const ideas = await readSkinIdeas(env);
+        const index = ideas.findIndex((entry) => entry.id === ideaId);
+        if (index === -1) return json({ error: 'That idea no longer exists' }, 404);
+        const idea = ideas[index];
+
+        const tier = await getAdminTier(env, actorSteamId);
+        const isOwner = tier === 'owner';
+        const isSubmitter = actorSteamId === idea.steamId;
+        if (!isOwner && !(isSubmitter && idea.hasOwnerReply)) {
+          return json({ error: isSubmitter ? 'Wait for an owner to reply first.' : 'Not allowed to reply to this thread.' }, 403);
+        }
+
+        const now = Date.now();
+        idea.replies.push({
+          from: isOwner ? 'owner' : 'player',
+          steamId: actorSteamId,
+          name: trimmedName,
+          text: trimmedText,
+          at: now,
+        });
+        if (isOwner) {
+          idea.hasOwnerReply = true;
+          idea.lastOwnerReplyAt = now;
+        } else {
+          // The player's own reply counts as having read everything up to
+          // this point — otherwise their own message would immediately
+          // re-count itself as an unread reply in their own Inbox badge.
+          idea.playerReadAt = now;
+        }
+        idea.lastActivityAt = now;
+        ideas[index] = idea;
+        await writeSkinIdeas(env, ideas);
+        return json({ ok: true, idea });
+      } catch (error) {
+        return json({ error: error.message || 'Could not send that reply right now.' }, 502);
+      }
+    }
+
+    // Profile tab's Skin Idea Inbox — the player's own idea threads, but
+    // only ones an owner has actually replied to (see the "Skin idea
+    // inbox" comment above); count is unread replies specifically (a
+    // thread whose latest owner reply came after this player's last view
+    // of it), not just "how many ideas have I submitted."
+    if (url.pathname === '/skin-idea-inbox' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ count: 0, ideas: [] });
+      try {
+        const ideas = await readSkinIdeas(env);
+        const mine = ideas
+          .filter((idea) => idea.steamId === steamId && idea.hasOwnerReply)
+          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+        const count = mine.filter((idea) => (idea.lastOwnerReplyAt || 0) > (idea.playerReadAt || 0)).length;
+        const previews = mine.map((idea) => ({
+          id: idea.id,
+          message: idea.message,
+          submittedAt: idea.submittedAt,
+          replyCount: idea.replies.length,
+          lastOwnerReplyAt: idea.lastOwnerReplyAt,
+          playerReadAt: idea.playerReadAt,
+          lastActivityAt: idea.lastActivityAt,
+        }));
+        return json({ count, ideas: previews });
+      } catch (error) {
+        return json({ error: error.message || 'Skin idea inbox lookup failed' }, 502);
       }
     }
 

@@ -1036,6 +1036,7 @@ const displaySteamStatus = async () => {
   if (logoutBtn) logoutBtn.hidden = !profile && !discordProfile;
   loadDinoHistory();
   updateCoinEarningsSection(profile);
+  loadSkinIdeaInbox();
   initTicketForm();
   updateChatSignInState();
 
@@ -3479,6 +3480,20 @@ const setOwnerGateState = (unlocked) => {
   if (content) content.hidden = !unlocked;
 };
 
+// Owner-only Skin Ideas sidebar shares the exact same tier+passkey gate as
+// the Owner tab itself. Hiding it also force-closes it if it happened to
+// be open when access is revoked (passkey lock expiring, tier change,
+// sign-out) — otherwise a set/senior admin who was recently demoted, or
+// whose passkey window just expired, could keep an already-open sidebar
+// visible even after checkAdminPanelAccess re-hides its toggle button.
+const hideSkinIdeasSidebar = () => {
+  const toggle = document.getElementById('skinIdeasToggle');
+  const sidebar = document.getElementById('skinIdeasSidebar');
+  if (toggle) toggle.hidden = true;
+  sidebar?.classList.remove('is-open');
+  sidebar?.setAttribute('aria-hidden', 'true');
+};
+
 const checkAdminPanelAccess = async () => {
   const adminPanelTabButton = document.querySelector('.admin-panel-tab-button');
   const adminPanelPanel = document.getElementById('admin-panel');
@@ -3504,6 +3519,7 @@ const checkAdminPanelAccess = async () => {
     if (ownerTabButton) ownerTabButton.hidden = true;
     if (ownerPanel) ownerPanel.hidden = true;
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
+    hideSkinIdeasSidebar();
     viewerAdminTier = null;
     return;
   }
@@ -3540,6 +3556,7 @@ const checkAdminPanelAccess = async () => {
       setAdminPanelGateState('hidden');
       setTransferLogsGateState(false);
       setOwnerGateState(false);
+      hideSkinIdeasSidebar();
       return;
     }
     renderHub();
@@ -3554,6 +3571,11 @@ const checkAdminPanelAccess = async () => {
       if (isOwner) {
         loadModerationLog();
         loadSkinLibraryTrash();
+        const skinIdeasToggle = document.getElementById('skinIdeasToggle');
+        if (skinIdeasToggle) skinIdeasToggle.hidden = false;
+        loadSkinIdeasList();
+      } else {
+        hideSkinIdeasSidebar();
       }
       const statusEl = document.querySelector('[data-admin-unlock-status]');
       if (statusEl) {
@@ -3571,6 +3593,7 @@ const checkAdminPanelAccess = async () => {
       setAdminPanelGateState('locked');
       setTransferLogsGateState(false);
       setOwnerGateState(false);
+      hideSkinIdeasSidebar();
       const form = document.querySelector('[data-admin-passkey-form]');
       const note = document.querySelector('[data-admin-passkey-note]');
       const submitBtn = document.querySelector('[data-admin-passkey-submit]');
@@ -5709,4 +5732,334 @@ friendsToggle?.addEventListener('click', () => {
 friendsClose?.addEventListener('click', closeFriends);
 
 loadFriendsTabData();
+
+// ── Skin idea inbox (Skins tab submit box, owner sidebar, Profile inbox) ──
+//
+// Skins tab: any signed-in player can send a short skin-idea message
+// straight to the owners via a lightweight inline textbox — not a full
+// ticket. A thread only becomes visible to the PLAYER once an owner
+// actually replies to it (bridge-worker.js's own "Skin idea inbox"
+// comment has the full reasoning); until then it's write-only from their
+// side, like dropping a note in a box.
+
+document.querySelector('[data-skin-idea-toggle]')?.addEventListener('click', () => {
+  const box = document.querySelector('[data-skin-idea-box]');
+  if (!box) return;
+  box.hidden = !box.hidden;
+  if (!box.hidden) {
+    const profile = getSteamProfile();
+    const signedOutNote = document.querySelector('[data-skin-idea-signed-out]');
+    const form = document.querySelector('[data-skin-idea-form]');
+    if (signedOutNote) signedOutNote.hidden = !!profile;
+    if (form) form.hidden = !profile;
+  }
+});
+
+document.querySelector('[data-skin-idea-cancel]')?.addEventListener('click', () => {
+  const box = document.querySelector('[data-skin-idea-box]');
+  if (box) box.hidden = true;
+  document.querySelector('[data-skin-idea-form]')?.reset();
+});
+
+document.querySelector('[data-skin-idea-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  const textarea = document.querySelector('[data-skin-idea-message]');
+  const message = textarea?.value.trim();
+  if (!message) return;
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/skin-idea-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: profile.username, message }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not submit your idea right now.');
+    } else {
+      showToast('Sent to the owners — thanks for the idea!');
+      if (textarea) textarea.value = '';
+      const box = document.querySelector('[data-skin-idea-box]');
+      if (box) box.hidden = true;
+    }
+  } catch (error) {
+    console.debug('Skin idea submit failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+// Shared thread modal — opened either from the owner sidebar (any thread)
+// or the player's own Inbox (their own, already-replied threads only).
+// isOwnerView picks which pair of thread/reply endpoints to call, since
+// those are deliberately separate Pages functions with different auth
+// gates (see skin-idea-thread.js vs skin-idea-thread-admin.js).
+let skinIdeaModalContext = null; // { ideaId, isOwnerView }
+
+const closeSkinIdeaModal = () => {
+  const overlay = document.querySelector('[data-skin-idea-modal]');
+  if (overlay) overlay.hidden = true;
+  skinIdeaModalContext = null;
+};
+
+document.querySelector('[data-skin-idea-modal-close]')?.addEventListener('click', closeSkinIdeaModal);
+document.querySelector('[data-skin-idea-modal]')?.addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) closeSkinIdeaModal();
+});
+
+const buildSkinIdeaMessageEl = (msg) => {
+  const el = document.createElement('div');
+  el.className = `skin-idea-message${msg.from === 'owner' ? ' from-owner' : ''}`;
+  const meta = document.createElement('span');
+  meta.className = 'skin-idea-message-meta';
+  meta.textContent = `${msg.name || (msg.from === 'owner' ? 'Owner' : 'Player')} • ${new Date(msg.at).toLocaleString()}`;
+  const text = document.createElement('div');
+  text.textContent = msg.text;
+  el.append(meta, text);
+  return el;
+};
+
+const renderSkinIdeaThread = (idea, viewerRole) => {
+  const content = document.querySelector('[data-skin-idea-modal-content]');
+  if (!content) return;
+  content.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'skin-idea-thread-header';
+  const title = document.createElement('strong');
+  title.textContent = `${idea.name || idea.steamId}'s skin idea`;
+  const submittedAt = document.createElement('p');
+  submittedAt.className = 'dino-park-note';
+  submittedAt.textContent = `Submitted ${new Date(idea.submittedAt).toLocaleString()}`;
+  header.append(title, submittedAt);
+
+  const messagesEl = document.createElement('div');
+  messagesEl.className = 'skin-idea-thread-messages';
+  // The original submitted idea isn't itself stored in the replies array
+  // — shown here as the thread's first "player" message.
+  messagesEl.appendChild(buildSkinIdeaMessageEl({ from: 'player', name: idea.name, text: idea.message, at: idea.submittedAt }));
+  (idea.replies || []).forEach((reply) => messagesEl.appendChild(buildSkinIdeaMessageEl(reply)));
+
+  const replyForm = document.createElement('form');
+  replyForm.className = 'submit-form';
+  const label = document.createElement('label');
+  label.textContent = 'Reply';
+  const textarea = document.createElement('textarea');
+  textarea.rows = 3;
+  textarea.maxLength = 1000;
+  textarea.required = true;
+  textarea.placeholder = viewerRole === 'owner' ? 'Reply as an owner...' : 'Send a reply...';
+  label.appendChild(textarea);
+  const actions = document.createElement('div');
+  actions.className = 'submit-actions';
+  const sendBtn = document.createElement('button');
+  sendBtn.type = 'submit';
+  sendBtn.className = 'action-button';
+  sendBtn.textContent = 'Reply';
+  actions.appendChild(sendBtn);
+  replyForm.append(label, actions);
+
+  replyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const profile = getSteamProfile();
+    if (!profile?.steamId || !skinIdeaModalContext) return;
+    const text = textarea.value.trim();
+    if (!text) return;
+    sendBtn.disabled = true;
+    try {
+      const endpoint = skinIdeaModalContext.isOwnerView ? '/api/skin-idea-reply-admin' : '/api/skin-idea-reply';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ideaId: skinIdeaModalContext.ideaId, name: profile.username, text }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not send that reply right now.');
+      } else {
+        renderSkinIdeaThread(data.idea, viewerRole);
+        if (skinIdeaModalContext.isOwnerView) {
+          loadSkinIdeasList();
+        } else {
+          loadSkinIdeaInbox();
+        }
+      }
+    } catch (error) {
+      console.debug('Skin idea reply failed:', error);
+      showToast('Could not reach the server right now.');
+    } finally {
+      sendBtn.disabled = false;
+    }
+  });
+
+  content.append(header, messagesEl, replyForm);
+};
+
+const openSkinIdeaThread = async (ideaId, isOwnerView) => {
+  const overlay = document.querySelector('[data-skin-idea-modal]');
+  const content = document.querySelector('[data-skin-idea-modal-content]');
+  if (!overlay || !content) return;
+  skinIdeaModalContext = { ideaId, isOwnerView };
+  content.innerHTML = '';
+  const loading = document.createElement('p');
+  loading.className = 'empty-state';
+  loading.textContent = 'Loading…';
+  content.appendChild(loading);
+  overlay.hidden = false;
+  try {
+    const endpoint = isOwnerView ? '/api/skin-idea-thread-admin' : '/api/skin-idea-thread';
+    const response = await fetch(`${endpoint}?ideaId=${encodeURIComponent(ideaId)}`);
+    const data = await response.json();
+    if (!response.ok || !data.idea) {
+      content.innerHTML = '';
+      const note = document.createElement('p');
+      note.className = 'empty-state';
+      note.textContent = data.error || 'Could not load that thread.';
+      content.appendChild(note);
+      return;
+    }
+    renderSkinIdeaThread(data.idea, data.viewerRole);
+    // Viewing as the player marks the thread read server-side — refresh
+    // the Inbox badge so it drops the now-seen reply from the count.
+    if (!isOwnerView) loadSkinIdeaInbox();
+  } catch (error) {
+    console.debug('Skin idea thread load failed:', error);
+    content.innerHTML = '';
+    const note = document.createElement('p');
+    note.className = 'empty-state';
+    note.textContent = 'Could not reach the server right now.';
+    content.appendChild(note);
+  }
+};
+
+// Owner sidebar — lists every submitted idea, newest activity first.
+const buildSkinIdeaRow = (idea) => {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = `skin-idea-row${idea.hasOwnerReply ? ' has-owner-reply' : ''}`;
+  const header = document.createElement('div');
+  header.className = 'skin-idea-row-header';
+  const name = document.createElement('span');
+  name.textContent = idea.name || idea.steamId;
+  const time = document.createElement('span');
+  time.className = 'skin-idea-row-time';
+  time.textContent = new Date(idea.lastActivityAt || idea.submittedAt).toLocaleString();
+  header.append(name, time);
+  const preview = document.createElement('div');
+  preview.className = 'skin-idea-row-preview';
+  preview.textContent = idea.message;
+  row.append(header, preview);
+  row.addEventListener('click', () => openSkinIdeaThread(idea.id, true));
+  return row;
+};
+
+const loadSkinIdeasList = async () => {
+  const list = document.getElementById('skinIdeasList');
+  const empty = document.querySelector('[data-skin-ideas-empty]');
+  if (!list) return;
+  try {
+    const response = await fetch('/api/skin-ideas');
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.ideas)) return;
+    list.innerHTML = '';
+    if (empty) empty.hidden = data.ideas.length > 0;
+    data.ideas.forEach((idea) => list.appendChild(buildSkinIdeaRow(idea)));
+  } catch (error) {
+    console.debug('Skin ideas list load failed:', error);
+  }
+};
+
+const skinIdeasToggle = document.getElementById('skinIdeasToggle');
+const skinIdeasSidebar = document.getElementById('skinIdeasSidebar');
+const skinIdeasClose = document.getElementById('skinIdeasClose');
+
+const openSkinIdeas = () => {
+  skinIdeasSidebar?.classList.add('is-open');
+  skinIdeasSidebar?.setAttribute('aria-hidden', 'false');
+  skinIdeasToggle?.setAttribute('aria-expanded', 'true');
+  loadSkinIdeasList();
+};
+
+const closeSkinIdeas = () => {
+  skinIdeasSidebar?.classList.remove('is-open');
+  skinIdeasSidebar?.setAttribute('aria-hidden', 'true');
+  skinIdeasToggle?.setAttribute('aria-expanded', 'false');
+};
+
+skinIdeasToggle?.addEventListener('click', () => {
+  const isOpen = skinIdeasSidebar?.classList.contains('is-open');
+  if (isOpen) {
+    closeSkinIdeas();
+  } else {
+    openSkinIdeas();
+  }
+});
+
+skinIdeasClose?.addEventListener('click', closeSkinIdeas);
+
+// Profile tab's Inbox — the player's own threads, only ones an owner has
+// replied to. Count is unread replies specifically, not "how many ideas
+// have I submitted" (see the Worker's own /skin-idea-inbox comment).
+const updateSkinIdeaInboxEmptyState = () => {
+  const list = document.querySelector('[data-skin-idea-inbox-list]');
+  const empty = document.querySelector('[data-skin-idea-inbox-empty]');
+  if (!list || !empty) return;
+  empty.hidden = list.hidden || list.children.length > 0;
+};
+
+const buildSkinIdeaInboxRow = (idea) => {
+  const isUnread = (idea.lastOwnerReplyAt || 0) > (idea.playerReadAt || 0);
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = `skin-idea-row has-owner-reply${isUnread ? ' is-unread' : ''}`;
+  const header = document.createElement('div');
+  header.className = 'skin-idea-row-header';
+  const label = document.createElement('span');
+  label.textContent = isUnread ? 'New reply' : 'Reply';
+  const time = document.createElement('span');
+  time.className = 'skin-idea-row-time';
+  time.textContent = new Date(idea.lastActivityAt || idea.submittedAt).toLocaleString();
+  header.append(label, time);
+  const preview = document.createElement('div');
+  preview.className = 'skin-idea-row-preview';
+  preview.textContent = idea.message;
+  row.append(header, preview);
+  row.addEventListener('click', () => openSkinIdeaThread(idea.id, false));
+  return row;
+};
+
+const loadSkinIdeaInbox = async () => {
+  const profile = getSteamProfile();
+  const section = document.querySelector('[data-skin-idea-inbox-section]');
+  if (!profile?.steamId) {
+    if (section) section.hidden = true;
+    return;
+  }
+  if (section) section.hidden = false;
+  try {
+    const response = await fetch('/api/skin-idea-inbox');
+    const data = await response.json();
+    const countEl = document.querySelector('[data-skin-idea-inbox-count]');
+    if (countEl) countEl.textContent = String(data.count || 0);
+    const list = document.querySelector('[data-skin-idea-inbox-list]');
+    if (list) {
+      list.innerHTML = '';
+      (Array.isArray(data.ideas) ? data.ideas : []).forEach((idea) => list.appendChild(buildSkinIdeaInboxRow(idea)));
+    }
+    updateSkinIdeaInboxEmptyState();
+  } catch (error) {
+    console.debug('Skin idea inbox load failed:', error);
+  }
+};
+
+document.querySelector('[data-skin-idea-inbox-toggle]')?.addEventListener('click', () => {
+  const list = document.querySelector('[data-skin-idea-inbox-list]');
+  if (!list) return;
+  list.hidden = !list.hidden;
+  updateSkinIdeaInboxEmptyState();
+});
 
