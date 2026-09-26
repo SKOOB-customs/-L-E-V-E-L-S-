@@ -2936,6 +2936,7 @@ export default {
           hasOwnerReply: false,
           lastOwnerReplyAt: null,
           playerReadAt: null,
+          ownerViewedAt: null,
           lastActivityAt: now,
         };
         ideas.unshift(idea);
@@ -2949,12 +2950,18 @@ export default {
 
     // Owner-only sidebar list — every submitted idea, newest activity
     // first. Same owner-tier gate as the Moderation Log/Owner tab.
+    // unreadCount is ideas an owner has NEVER opened yet (ownerViewedAt is
+    // still null — set the first time any owner opens that specific
+    // thread via /skin-idea-thread below), for the "Ideas" toggle's badge.
+    // Shared across both owners rather than tracked per-owner — either one
+    // opening a thread clears it for both, same simplicity tradeoff as the
+    // rest of this feature.
     if (url.pathname === '/skin-ideas' && request.method === 'GET') {
       const requesterSteamId = url.searchParams.get('requesterSteamId');
       if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
-      if (!env.PARKED_KV) return json({ ideas: [] });
+      if (!env.PARKED_KV) return json({ ideas: [], unreadCount: 0 });
       const tier = await getAdminTier(env, requesterSteamId);
       if (tier !== 'owner') return json({ error: 'Owner access required' }, 403);
       try {
@@ -2971,8 +2978,10 @@ export default {
             replyCount: idea.replies.length,
             hasOwnerReply: idea.hasOwnerReply,
             lastActivityAt: idea.lastActivityAt,
+            ownerViewedAt: idea.ownerViewedAt || null,
           }));
-        return json({ ideas: previews });
+        const unreadCount = ideas.filter((idea) => !idea.ownerViewedAt).length;
+        return json({ ideas: previews, unreadCount });
       } catch (error) {
         return json({ error: error.message || 'Skin idea list lookup failed' }, 502);
       }
@@ -3005,6 +3014,12 @@ export default {
 
         if (!isOwner && isSubmitter) {
           idea.playerReadAt = Date.now();
+          ideas[index] = idea;
+          await writeSkinIdeas(env, ideas);
+        } else if (isOwner && !idea.ownerViewedAt) {
+          // First time ANY owner has opened this specific thread — clears
+          // it from the "Ideas" toggle's unread badge (see /skin-ideas).
+          idea.ownerViewedAt = Date.now();
           ideas[index] = idea;
           await writeSkinIdeas(env, ideas);
         }

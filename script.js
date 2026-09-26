@@ -5940,7 +5940,10 @@ const openSkinIdeaThread = async (ideaId, isOwnerView) => {
 const buildSkinIdeaRow = (idea) => {
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = `skin-idea-row${idea.hasOwnerReply ? ' has-owner-reply' : ''}`;
+  const classes = ['skin-idea-row'];
+  if (idea.hasOwnerReply) classes.push('has-owner-reply');
+  if (!idea.ownerViewedAt) classes.push('is-unread');
+  row.className = classes.join(' ');
   const header = document.createElement('div');
   header.className = 'skin-idea-row-header';
   const name = document.createElement('span');
@@ -5957,6 +5960,15 @@ const buildSkinIdeaRow = (idea) => {
   return row;
 };
 
+// Yellow badge on the (red) "Ideas" toggle — count of ideas no owner has
+// ever opened yet (see the Worker's /skin-ideas comment). Refreshed here
+// (whenever the sidebar list loads) and on its own short poll below so it
+// stays current even while the sidebar itself is closed.
+const updateSkinIdeasBadge = (count) => {
+  const badge = document.querySelector('[data-skin-ideas-badge]');
+  if (badge) badge.textContent = String(count || 0);
+};
+
 const loadSkinIdeasList = async () => {
   const list = document.getElementById('skinIdeasList');
   const empty = document.querySelector('[data-skin-ideas-empty]');
@@ -5968,10 +5980,20 @@ const loadSkinIdeasList = async () => {
     list.innerHTML = '';
     if (empty) empty.hidden = data.ideas.length > 0;
     data.ideas.forEach((idea) => list.appendChild(buildSkinIdeaRow(idea)));
+    updateSkinIdeasBadge(data.unreadCount);
   } catch (error) {
     console.debug('Skin ideas list load failed:', error);
   }
 };
+
+// Keeps the badge current even while the sidebar is closed — mirrors the
+// 30s cadence loadCurrencyBalance already polls at. Only actually fetches
+// while the toggle is visible (owner tier, passkey unlocked), same guard
+// loadCurrencyBalance uses for "signed in at all".
+setInterval(() => {
+  const toggle = document.getElementById('skinIdeasToggle');
+  if (toggle && !toggle.hidden) loadSkinIdeasList();
+}, 30000);
 
 const skinIdeasToggle = document.getElementById('skinIdeasToggle');
 const skinIdeasSidebar = document.getElementById('skinIdeasSidebar');

@@ -640,16 +640,42 @@ body::before {
   right: 0;
   z-index: 30;
   transform: translateY(-50%);
-  padding: 0.7rem 0.5rem;
+  padding: 0.9rem 0.5rem 0.7rem;
   border: none;
   border-radius: 10px 0 0 10px;
-  background: var(--panel-strong);
-  color: var(--text);
+  background: #b3261e;
+  color: #fff;
   cursor: pointer;
   writing-mode: vertical-rl;
   letter-spacing: 0.1em;
   font-family: var(--logo-font);
   box-shadow: -4px 0 14px rgba(0, 0, 0, 0.28);
+}
+
+.skin-ideas-toggle:hover {
+  background: #c72e25;
+}
+
+.skin-ideas-badge {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  writing-mode: horizontal-tb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #f5c518;
+  color: #1a1206;
+  font-family: "Inter", sans-serif;
+  font-weight: 800;
+  font-size: 0.65rem;
+  line-height: 1;
+  letter-spacing: normal;
 }
 
 .skin-ideas-sidebar {
