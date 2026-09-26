@@ -4393,57 +4393,94 @@ const renderSkinLibraryList = (skins) => {
   }
   skins.forEach((skin) => {
     const card = document.createElement('div');
-    card.className = 'panel dino-history-card';
+    card.className = 'panel skin-library-card';
 
     const header = document.createElement('div');
-    header.className = 'dino-history-card-header';
+    header.className = 'skin-library-card-header';
     const title = document.createElement('strong');
     title.textContent = skin.name;
     const swatch = document.createElement('span');
-    swatch.className = 'badge';
+    swatch.className = 'skin-library-swatch';
     const bodyColor = skin.colors?.BodyColor;
     if (bodyColor) {
       const r = Math.round((bodyColor.r ?? 0.5) * 255);
       const g = Math.round((bodyColor.g ?? 0.5) * 255);
       const b = Math.round((bodyColor.b ?? 0.5) * 255);
       swatch.style.background = `rgb(${r}, ${g}, ${b})`;
-      swatch.textContent = ' ';
+      swatch.title = 'Body color preview';
     } else {
-      swatch.textContent = 'No preview';
+      swatch.classList.add('skin-library-swatch-empty');
+      swatch.title = 'No color preview';
     }
     header.append(title, swatch);
 
+    // Deleting is one click away from a live library entry every non-owner
+    // admin's grant form reads from — a stray click used to delete
+    // outright (see the "BB" skin incident this same session). Swaps the
+    // button itself for an inline "Delete this skin? Yes / No" row rather
+    // than a native confirm() dialog, so it reads as part of the card
+    // instead of a disruptive popup.
+    const actionRow = document.createElement('div');
+    actionRow.className = 'skin-library-action-row';
+
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
-    deleteBtn.className = 'secondary-button';
+    deleteBtn.className = 'skin-library-delete-btn';
     deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', async () => {
-      const profile = getSteamProfile();
-      if (!profile?.steamId) return;
-      deleteBtn.disabled = true;
-      try {
-        const response = await fetch('/api/skin-library-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ granterSteamId: profile.steamId, name: skin.name }),
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          showToast(data.error || 'Could not delete that skin.');
-          deleteBtn.disabled = false;
-        } else {
-          showToast(`Deleted "${skin.name}" — restorable from Deleted Skins on the Owner tab.`);
-          loadSkinLibrary();
-          loadSkinLibraryTrash();
-        }
-      } catch (error) {
-        console.debug('Skin library delete failed:', error);
-        showToast('Could not reach the server right now.');
-        deleteBtn.disabled = false;
-      }
-    });
 
-    card.append(header, deleteBtn);
+    const showConfirm = () => {
+      actionRow.innerHTML = '';
+      const prompt = document.createElement('span');
+      prompt.className = 'skin-library-confirm-text';
+      prompt.textContent = 'Delete this skin?';
+      const yesBtn = document.createElement('button');
+      yesBtn.type = 'button';
+      yesBtn.className = 'skin-library-confirm-yes';
+      yesBtn.textContent = 'Yes, delete';
+      const noBtn = document.createElement('button');
+      noBtn.type = 'button';
+      noBtn.className = 'skin-library-confirm-no';
+      noBtn.textContent = 'Cancel';
+
+      const showDeleteButton = () => {
+        actionRow.innerHTML = '';
+        actionRow.appendChild(deleteBtn);
+      };
+      noBtn.addEventListener('click', showDeleteButton);
+
+      yesBtn.addEventListener('click', async () => {
+        const profile = getSteamProfile();
+        if (!profile?.steamId) return;
+        yesBtn.disabled = true;
+        noBtn.disabled = true;
+        try {
+          const response = await fetch('/api/skin-library-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ granterSteamId: profile.steamId, name: skin.name }),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) {
+            showToast(data.error || 'Could not delete that skin.');
+            showDeleteButton();
+          } else {
+            showToast(`Deleted "${skin.name}" — restorable from Deleted Skins on the Owner tab.`);
+            loadSkinLibrary();
+            loadSkinLibraryTrash();
+          }
+        } catch (error) {
+          console.debug('Skin library delete failed:', error);
+          showToast('Could not reach the server right now.');
+          showDeleteButton();
+        }
+      });
+
+      actionRow.append(prompt, yesBtn, noBtn);
+    };
+    deleteBtn.addEventListener('click', showConfirm);
+    actionRow.appendChild(deleteBtn);
+
+    card.append(header, actionRow);
     list.appendChild(card);
   });
 };

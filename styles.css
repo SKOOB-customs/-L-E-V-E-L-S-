@@ -1204,6 +1204,97 @@ h6,
   gap: 8px;
 }
 
+.skin-library-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+}
+
+.skin-library-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skin-library-card-header strong {
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skin-library-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  flex-shrink: 0;
+}
+
+.skin-library-swatch-empty {
+  background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08) 3px, transparent 3px, transparent 6px);
+}
+
+.skin-library-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.skin-library-delete-btn {
+  border: 1px solid rgba(224, 108, 108, 0.35);
+  background: rgba(224, 108, 108, 0.1);
+  color: #e06c6c;
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.skin-library-delete-btn:hover {
+  background: rgba(224, 108, 108, 0.18);
+}
+
+.skin-library-confirm-text {
+  font-size: 0.78rem;
+  opacity: 0.85;
+  margin-right: 2px;
+}
+
+.skin-library-confirm-yes,
+.skin-library-confirm-no {
+  border-radius: 8px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.skin-library-confirm-yes {
+  background: rgba(224, 108, 108, 0.85);
+  color: #1a0906;
+}
+
+.skin-library-confirm-yes:hover {
+  background: rgba(224, 108, 108, 1);
+}
+
+.skin-library-confirm-no {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.skin-library-confirm-no:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
 .dino-history-status-alive { background: rgba(122, 214, 148, 0.15); color: #7ad694; }
 .dino-history-status-parked { background: rgba(216, 191, 125, 0.15); color: var(--chrome-1); }
 .dino-history-status-dead { background: rgba(224, 108, 108, 0.15); color: #e06c6c; }
