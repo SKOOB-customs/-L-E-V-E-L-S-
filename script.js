@@ -2024,6 +2024,20 @@ const worldToMapFraction = (worldX, worldY) => {
   return { fx, fy };
 };
 
+// Small manual calibration nudge for the marker DOT itself (not the
+// artwork — an earlier attempt shifted the .map-image with a CSS
+// transform instead, which visually matched but broke the pan/zoom
+// feature: that code assumes the image fills .map-mount 1:1 with no
+// transform of its own, so scaling/translating the image desynced the
+// zoom math from where the content actually was, letting you pan much
+// further on one side than the other. Percent of the map's own
+// width/height, applied only to where the dot is drawn — never to the
+// heading arrow's bearing calculation below, since that's derived from
+// frame-to-frame deltas and a constant offset cancels out of a delta
+// anyway.
+const MAP_MARKER_OFFSET_X_PCT = 3;
+const MAP_MARKER_OFFSET_Y_PCT = 2;
+
 // Snaps the marker to one of 8 compass headings (N/NE/E/SE/S/SW/W/NW) based on
 // movement since the last poll, rather than pointing at an arbitrary angle.
 let lastMarkerFraction = null;
@@ -2052,8 +2066,8 @@ const updateMapMarkerHeading = (fx, fy) => {
 const updateMapMarker = (location) => {
   if (!mapMarker || !location) return;
   const { fx, fy } = worldToMapFraction(location.x || 0, location.y || 0);
-  mapMarker.style.left = `${Math.min(100, Math.max(0, fx * 100))}%`;
-  mapMarker.style.top = `${Math.min(100, Math.max(0, fy * 100))}%`;
+  mapMarker.style.left = `${Math.min(100, Math.max(0, fx * 100 + MAP_MARKER_OFFSET_X_PCT))}%`;
+  mapMarker.style.top = `${Math.min(100, Math.max(0, fy * 100 + MAP_MARKER_OFFSET_Y_PCT))}%`;
   updateMapMarkerHeading(fx, fy);
 };
 
