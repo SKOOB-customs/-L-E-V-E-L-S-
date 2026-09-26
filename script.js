@@ -2011,8 +2011,16 @@ const MAP_MAX_Y = 607;
 const worldToMapFraction = (worldX, worldY) => {
   const sx = worldX / 1000;
   const sy = worldY / 1000;
-  const fx = (sy - MAP_MIN_Y) / (MAP_MAX_Y - MAP_MIN_Y);
-  const fy = (sx - MAP_MIN_X) / (MAP_MAX_X - MAP_MIN_X);
+  // fx (horizontal, left-right) must track world X; fy (vertical, top-
+  // bottom) must track world Y. These were accidentally transposed —
+  // fx was reading world Y and fy was reading world X — which is exactly
+  // what produced the reported 90-degree-rotated-and-mirrored compass
+  // (in-game North showing as West on the map, etc.): the marker's
+  // heading arrow derives its bearing from frame-to-frame deltas in
+  // (fx, fy), so swapping which world axis feeds which screen axis
+  // rotates every direction the same consistent way.
+  const fx = (sx - MAP_MIN_X) / (MAP_MAX_X - MAP_MIN_X);
+  const fy = (sy - MAP_MIN_Y) / (MAP_MAX_Y - MAP_MIN_Y);
   return { fx, fy };
 };
 
