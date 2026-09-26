@@ -2270,10 +2270,10 @@ strong.stat-critical {
      and up a touch to compensate — scaled up first so the shift doesn't
      reveal a gap at the opposite edges. Adjust these two values (as
      plain percentages) if it still needs fine-tuning. */
-  --map-image-shift-x: 2.5%;
-  --map-image-shift-y: -1%;
+  --map-image-shift-x: 5%;
+  --map-image-shift-y: -2.3%;
   transform-origin: 50% 50%;
-  transform: translate(var(--map-image-shift-x), var(--map-image-shift-y)) scale(1.06);
+  transform: translate(var(--map-image-shift-x), var(--map-image-shift-y)) scale(1.1);
 }
 
 .map-zoom-controls {
