@@ -1037,6 +1037,7 @@ const displaySteamStatus = async () => {
   loadDinoHistory();
   updateCoinEarningsSection(profile);
   loadSkinIdeaInbox();
+  updateVoiceSectionVisibility();
   initTicketForm();
   updateChatSignInState();
 
@@ -1165,9 +1166,19 @@ const consumeSteamRedirect = () => {
 
 consumeSteamRedirect();
 
-// Render staff roster and Steam profile status on page load
+// Render staff roster and Steam profile status on page load.
+// displaySteamStatus() calls several functions (loadSkinIdeaInbox and
+// friends) that are declared further down this same file — deferred one
+// microtask so the whole script finishes its initial top-to-bottom pass
+// (and every const function declaration in it initializes) before this
+// first call actually runs. Without this, calling it synchronously here
+// throws a "cannot access before initialization" TDZ error that an
+// unhandled-rejection swallows silently, which also skipped everything
+// after that point in the function (initTicketForm, updateChatSignInState)
+// on every single page load — confirmed via a minimal Node repro of the
+// exact same call pattern.
 renderStaffRoster();
-displaySteamStatus();
+queueMicrotask(() => displaySteamStatus());
 // Cheap KV read on the Worker side — a 30s poll is plenty responsive for
 // a balance that only actually changes every 5 minutes of playtime or on
 // an admin grant.
@@ -6083,5 +6094,383 @@ document.querySelector('[data-skin-idea-inbox-toggle]')?.addEventListener('click
   if (!list) return;
   list.hidden = !list.hidden;
   updateSkinIdeaInboxEmptyState();
+});
+
+// ── Proximity Voice (Phase 0 proof of concept) ──
+//
+// Two Cloudflare Calls sessions per browser: a "send" session carrying
+// just this player's own mic track, and a "receive" session that
+// accumulates every other nearby participant's pulled track via repeated
+// tracks/new + renegotiate calls. That's the point of using an SFU
+// (Cloudflare Calls) instead of a peer-to-peer mesh — one connection out,
+// one connection in, no matter how many other players are nearby. See
+// the design memo for the full reasoning (position pipeline, transport
+// choice, open questions).
+//
+// Volume-only for this phase — no stereo panning yet, since RCON doesn't
+// expose facing/rotation (confirmed while drafting the design memo).
+// Distance comes from /api/all-positions, the same RCON player-data
+// sweep Live Dino already polls, just returning everyone instead of one
+// player.
+
+const VOICE_ANNOUNCE_INTERVAL_MS = 8000;
+const VOICE_PRESENCE_POLL_MS = 3000;
+const VOICE_POSITION_POLL_MS = 2000;
+// Raw in-game units at which another player's voice fades to silent.
+// This is an UNTESTED placeholder, not a confirmed game value — the
+// whole point of this phase is to find out what actually feels right
+// with real people testing live, then adjust this one number.
+const VOICE_MAX_RANGE = 15000;
+
+let voiceEnabled = false;
+let voiceLocalStream = null;
+let voiceSendPC = null;
+let voiceReceivePC = null;
+let voiceSendSessionId = null;
+let voiceReceiveSessionId = null;
+let voiceAnnounceTimer = null;
+let voicePresenceTimer = null;
+let voicePositionTimer = null;
+let voiceMuted = false;
+const voiceParticipants = new Map(); // steamId -> { name, trackName, sessionId, audioEl }
+let voiceLocalPosition = null;
+
+const voiceStatus = (message) => {
+  const el = document.querySelector('[data-voice-status]');
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message || '';
+};
+
+const createVoiceSession = async () => {
+  const response = await fetch('/api/voice-session-new', { method: 'POST' });
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Could not start a voice session');
+  return data;
+};
+
+// STUN-only (no TURN host configured here) — Cloudflare Calls itself
+// provides the TURN relay server-side for the media path once connected;
+// this just needs enough ICE to gather candidates toward Cloudflare's own
+// edge, not toward another player's browser directly.
+const createVoicePeerConnection = () => new RTCPeerConnection({
+  iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }],
+  bundlePolicy: 'max-bundle',
+});
+
+const waitForIceConnected = (pc) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error('Voice connection timed out')), 8000);
+  const handler = () => {
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      clearTimeout(timer);
+      pc.removeEventListener('iceconnectionstatechange', handler);
+      resolve();
+    }
+  };
+  pc.addEventListener('iceconnectionstatechange', handler);
+});
+
+const renderVoiceParticipants = () => {
+  const list = document.querySelector('[data-voice-participants]');
+  const empty = document.querySelector('[data-voice-participants-empty]');
+  if (!list) return;
+  list.querySelectorAll('.voice-participant-row').forEach((row) => row.remove());
+  const entries = [...voiceParticipants.values()];
+  if (empty) empty.hidden = entries.length > 0;
+  entries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'voice-participant-row';
+    const name = document.createElement('span');
+    name.className = 'voice-participant-name';
+    name.textContent = entry.name;
+    const distance = document.createElement('span');
+    distance.className = 'voice-participant-distance';
+    distance.dataset.voiceDistanceFor = entry.steamId;
+    distance.textContent = '—';
+    row.append(name, distance);
+    list.appendChild(row);
+  });
+};
+
+// Pulls ONE other participant's track onto the shared receive session —
+// called once per newly-discovered participant (see pollVoicePresence),
+// not on every presence poll, so an already-pulled track never gets
+// re-negotiated.
+const pullVoiceTrack = async (participant) => {
+  if (!voiceReceivePC || !voiceReceiveSessionId) return;
+  const pullResponse = await fetch('/api/voice-pull-tracks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: voiceReceiveSessionId,
+      tracks: [{ trackName: participant.trackName, sessionId: participant.sessionId }],
+    }),
+  }).then((res) => res.json());
+  if (!pullResponse.ok) {
+    console.debug('Voice pull failed:', pullResponse.error);
+    return;
+  }
+
+  const pulledMid = pullResponse.tracks?.[0]?.mid;
+  const trackPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Voice track never arrived')), 8000);
+    const handler = (event) => {
+      if (event.transceiver.mid !== pulledMid) return;
+      voiceReceivePC.removeEventListener('track', handler);
+      clearTimeout(timer);
+      resolve(event.track);
+    };
+    voiceReceivePC.addEventListener('track', handler);
+  });
+
+  if (pullResponse.requiresImmediateRenegotiation) {
+    await voiceReceivePC.setRemoteDescription(pullResponse.sessionDescription);
+    const answer = await voiceReceivePC.createAnswer();
+    await voiceReceivePC.setLocalDescription(answer);
+    const renegotiateResponse = await fetch('/api/voice-renegotiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: voiceReceiveSessionId, sdp: answer.sdp }),
+    }).then((res) => res.json());
+    if (!renegotiateResponse.ok) {
+      console.debug('Voice renegotiate failed:', renegotiateResponse.error);
+      return;
+    }
+  }
+
+  const track = await trackPromise;
+  const audioEl = document.createElement('audio');
+  audioEl.autoplay = true;
+  audioEl.srcObject = new MediaStream([track]);
+  audioEl.dataset.voiceSteamId = participant.steamId;
+  document.body.appendChild(audioEl);
+  // Browsers can block autoplay outside a direct user-gesture call stack
+  // (this fires from a setInterval tick, several awaits removed from the
+  // original "Enable Voice" click) — surfacing a console line rather than
+  // failing silently if that happens during testing.
+  audioEl.play().catch((error) => console.debug('Voice playback blocked:', error));
+
+  voiceParticipants.set(participant.steamId, { ...participant, audioEl });
+  renderVoiceParticipants();
+};
+
+const dropVoiceParticipant = (steamId) => {
+  const entry = voiceParticipants.get(steamId);
+  if (!entry) return;
+  entry.audioEl?.remove();
+  voiceParticipants.delete(steamId);
+  renderVoiceParticipants();
+};
+
+const pollVoicePresence = async () => {
+  if (!voiceEnabled) return;
+  try {
+    const response = await fetch('/api/voice-presence');
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.participants)) return;
+    const seenSteamIds = new Set(data.participants.map((p) => p.steamId));
+    [...voiceParticipants.keys()].forEach((steamId) => {
+      if (!seenSteamIds.has(steamId)) dropVoiceParticipant(steamId);
+    });
+    for (const participant of data.participants) {
+      if (!voiceParticipants.has(participant.steamId)) {
+        pullVoiceTrack(participant).catch((error) => console.debug('Voice pull failed:', error));
+      }
+    }
+  } catch (error) {
+    console.debug('Voice presence poll failed:', error);
+  }
+};
+
+const voiceDistanceBetween = (a, b) => {
+  if (!a || !b) return null;
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+};
+
+const pollVoicePositions = async () => {
+  if (!voiceEnabled) return;
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch('/api/all-positions');
+    const data = await response.json();
+    if (!response.ok || !data.players) return;
+    voiceLocalPosition = data.players[profile.steamId]?.location || null;
+    voiceParticipants.forEach((entry, steamId) => {
+      const theirLocation = data.players[steamId]?.location;
+      const distance = voiceDistanceBetween(voiceLocalPosition, theirLocation);
+      const distanceEl = document.querySelector(`[data-voice-distance-for="${steamId}"]`);
+      if (distance == null) {
+        if (entry.audioEl) entry.audioEl.volume = 0;
+        if (distanceEl) distanceEl.textContent = 'out of range';
+        return;
+      }
+      const volume = Math.max(0, Math.min(1, 1 - distance / VOICE_MAX_RANGE));
+      if (entry.audioEl) entry.audioEl.volume = volume;
+      if (distanceEl) distanceEl.textContent = `${Math.round(distance)} units`;
+    });
+  } catch (error) {
+    console.debug('Voice position poll failed:', error);
+  }
+};
+
+const announceVoicePresence = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId || !voiceSendSessionId || !voiceLocalStream) return;
+  const trackName = voiceLocalStream.getAudioTracks()[0]?.id;
+  if (!trackName) return;
+  try {
+    await fetch('/api/voice-announce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: profile.username, sessionId: voiceSendSessionId, trackName }),
+    });
+  } catch (error) {
+    console.debug('Voice announce failed:', error);
+  }
+};
+
+const disableVoice = async () => {
+  voiceEnabled = false;
+  clearInterval(voiceAnnounceTimer);
+  clearInterval(voicePresenceTimer);
+  clearInterval(voicePositionTimer);
+  voiceAnnounceTimer = null;
+  voicePresenceTimer = null;
+  voicePositionTimer = null;
+
+  voiceParticipants.forEach((entry) => entry.audioEl?.remove());
+  voiceParticipants.clear();
+  renderVoiceParticipants();
+
+  voiceSendPC?.close();
+  voiceReceivePC?.close();
+  voiceSendPC = null;
+  voiceReceivePC = null;
+  voiceSendSessionId = null;
+  voiceReceiveSessionId = null;
+
+  voiceLocalStream?.getTracks().forEach((track) => track.stop());
+  voiceLocalStream = null;
+  voiceMuted = false;
+
+  try {
+    await fetch('/api/voice-leave', { method: 'POST' });
+  } catch (error) {
+    console.debug('Voice leave failed:', error);
+  }
+
+  voiceStatus('');
+  const toggleBtn = document.querySelector('[data-voice-toggle]');
+  if (toggleBtn) {
+    toggleBtn.textContent = 'Enable Voice';
+    toggleBtn.classList.remove('voice-toggle-on');
+  }
+  const muteBtn = document.querySelector('[data-voice-mute]');
+  if (muteBtn) {
+    muteBtn.hidden = true;
+    muteBtn.textContent = 'Mute Mic';
+  }
+};
+
+const enableVoice = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Log in with Steam first.');
+    return;
+  }
+  const toggleBtn = document.querySelector('[data-voice-toggle]');
+  if (toggleBtn) toggleBtn.disabled = true;
+  voiceStatus('Requesting microphone access...');
+  try {
+    voiceLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    voiceStatus('Connecting...');
+    const sendSession = await createVoiceSession();
+    voiceSendSessionId = sendSession.sessionId;
+    voiceSendPC = createVoicePeerConnection();
+    const localTrack = voiceLocalStream.getAudioTracks()[0];
+    const transceiver = voiceSendPC.addTransceiver(localTrack, { direction: 'sendonly' });
+    const offer = await voiceSendPC.createOffer();
+    await voiceSendPC.setLocalDescription(offer);
+
+    const connectedPromise = waitForIceConnected(voiceSendPC);
+    const pushResponse = await fetch('/api/voice-push-tracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: voiceSendSessionId,
+        sdp: offer.sdp,
+        tracks: [{ mid: transceiver.mid, trackName: localTrack.id }],
+      }),
+    }).then((res) => res.json());
+    if (!pushResponse.ok) throw new Error(pushResponse.error || 'Could not publish your mic track');
+    await voiceSendPC.setRemoteDescription(pushResponse.sessionDescription);
+    await connectedPromise;
+
+    const receiveSession = await createVoiceSession();
+    voiceReceiveSessionId = receiveSession.sessionId;
+    voiceReceivePC = createVoicePeerConnection();
+
+    voiceEnabled = true;
+    await announceVoicePresence();
+    voiceAnnounceTimer = setInterval(announceVoicePresence, VOICE_ANNOUNCE_INTERVAL_MS);
+    voicePresenceTimer = setInterval(pollVoicePresence, VOICE_PRESENCE_POLL_MS);
+    voicePositionTimer = setInterval(pollVoicePositions, VOICE_POSITION_POLL_MS);
+    pollVoicePresence();
+    pollVoicePositions();
+
+    voiceStatus('Voice on — nearby players will hear you.');
+    if (toggleBtn) {
+      toggleBtn.textContent = 'Disable Voice';
+      toggleBtn.classList.add('voice-toggle-on');
+    }
+    const muteBtn = document.querySelector('[data-voice-mute]');
+    if (muteBtn) muteBtn.hidden = false;
+  } catch (error) {
+    console.debug('Enable voice failed:', error);
+    voiceStatus(error.message || 'Could not enable voice.');
+    await disableVoice();
+  } finally {
+    if (toggleBtn) toggleBtn.disabled = false;
+  }
+};
+
+document.querySelector('[data-voice-toggle]')?.addEventListener('click', () => {
+  if (voiceEnabled) {
+    disableVoice();
+  } else {
+    enableVoice();
+  }
+});
+
+document.querySelector('[data-voice-mute]')?.addEventListener('click', (event) => {
+  if (!voiceLocalStream) return;
+  voiceMuted = !voiceMuted;
+  voiceLocalStream.getAudioTracks().forEach((track) => { track.enabled = !voiceMuted; });
+  event.target.textContent = voiceMuted ? 'Unmute Mic' : 'Mute Mic';
+});
+
+const updateVoiceSectionVisibility = () => {
+  const section = document.querySelector('[data-voice-section]');
+  if (!section) return;
+  const profile = getSteamProfile();
+  section.hidden = !profile?.steamId;
+  if (!profile?.steamId && voiceEnabled) disableVoice();
+};
+
+// Voice never auto-starts — always an explicit opt-in click, including
+// after a page reload while a previous session might technically still
+// be "live" server-side (it'll just go stale and drop out of presence).
+window.addEventListener('beforeunload', () => {
+  if (voiceEnabled) {
+    // Best-effort, fire-and-forget — no guarantee this completes before
+    // the tab actually closes, but worth trying so other participants
+    // don't wait out the full presence staleness window.
+    navigator.sendBeacon?.('/api/voice-leave', new Blob([JSON.stringify({})], { type: 'application/json' }));
+  }
 });
 

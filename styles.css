@@ -1350,6 +1350,38 @@ h6,
   text-transform: uppercase;
 }
 
+.voice-beta-badge {
+  background: rgba(111, 214, 196, 0.15);
+  border-color: rgba(111, 214, 196, 0.35);
+  color: #6fd6c4;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.voice-participant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.voice-participant-name {
+  font-weight: 700;
+}
+
+.voice-participant-distance {
+  font-family: "Inter", sans-serif;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.voice-toggle-on {
+  background: rgba(111, 214, 196, 0.85) !important;
+  color: #0a1512 !important;
+}
+
 .empty-state {
   opacity: 0.65;
   font-size: 0.9rem;

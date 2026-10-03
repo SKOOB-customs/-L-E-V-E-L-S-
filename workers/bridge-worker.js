@@ -115,6 +115,22 @@ const findPlayerDino = (response, steamId) => {
   return null;
 };
 
+// Proximity Voice (Phase 0): the PLAYER_DATA_OPCODE sweep already returns
+// EVERY spawned player's location in one response (see findPlayerDino
+// above, which just searches that same response for one match) — this is
+// the same sweep, kept instead of discarded, for the "who's near who"
+// distance math the voice feature's volume falloff needs client-side.
+const parseAllPlayerDinos = (response) => {
+  const lines = response.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const dinos = [];
+  for (const line of lines) {
+    if (!line.includes('PlayerID')) continue;
+    const dino = parsePlayerDataLine(line);
+    if (dino) dinos.push(dino);
+  }
+  return dinos;
+};
+
 // ── Mod <-> website bridge ──
 //
 // The LevelsPark UE4SS mod (game-mods/LevelsPark) writes one JSON snapshot
@@ -3760,6 +3776,153 @@ export default {
       }
 
       return json({ ok: true, players: list, unnamedSteamIds });
+    }
+
+    // ── Proximity Voice (Phase 0 proof of concept) ──
+    //
+    // Position side: one RCON sweep already returns every spawned
+    // player's location (see parseAllPlayerDinos above) — this route
+    // exposes that directly so the browser can compute "how far away is
+    // this other voice participant" for distance-based volume. Goes
+    // through the same RconBridge single-flight+cache as /status, so a
+    // client polling this every ~2s alongside Live Dino doesn't double
+    // the real RCON traffic.
+    if (url.pathname === '/all-positions' && request.method === 'GET') {
+      if (!env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD || !env.RCON_BRIDGE) {
+        return json({ error: 'RCON bridge is not configured' }, 503);
+      }
+      const rconStub = env.RCON_BRIDGE.get(env.RCON_BRIDGE.idFromName('singleton'));
+      try {
+        const doResponse = await rconStub.fetch('https://rcon-bridge/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opcode: PLAYER_DATA_OPCODE, doneMarkers: ['PlayerDataEnd'] }),
+        });
+        const doData = await doResponse.json();
+        if (!doResponse.ok || !doData.ok) return json({ error: doData.error || 'RCON request failed' }, 502);
+        const dinos = parseAllPlayerDinos(doData.response);
+        const players = {};
+        for (const dino of dinos) {
+          players[dino.playerId] = { location: dino.location, class: dino.class, name: dino.name };
+        }
+        return json({ ok: true, players });
+      } catch (error) {
+        return json({ error: error.message || 'Position sweep failed' }, 502);
+      }
+    }
+
+    // Voice side: a thin authenticated proxy in front of Cloudflare
+    // Calls' own REST API (https://rtc.live.cloudflare.com/v1/apps/...).
+    // CALLS_APP_TOKEN never reaches the browser — Cloudflare's own docs
+    // are explicit that the token must stay server-side — so every SDP
+    // offer/answer and track push/pull round-trips through here instead
+    // of the client calling Cloudflare directly. This Worker does NOT
+    // interpret any of the SDP/track payloads, just authenticates the
+    // caller (already done by the Pages layer forwarding a verified
+    // steamId) and forwards the body through unchanged.
+    const CALLS_API_BASE = 'https://rtc.live.cloudflare.com/v1/apps';
+
+    const callsFetch = async (env, path, options) => {
+      const response = await fetch(`${CALLS_API_BASE}/${env.CALLS_APP_ID}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${env.CALLS_APP_TOKEN}`,
+          ...(options?.headers || {}),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, data };
+    };
+
+    if (url.pathname === '/voice-session-new' && request.method === 'POST') {
+      if (!env.CALLS_APP_ID || !env.CALLS_APP_TOKEN) return json({ error: 'Voice is not configured' }, 503);
+      try {
+        const result = await callsFetch(env, '/sessions/new', { method: 'POST' });
+        if (!result.ok) return json({ error: result.data.errorDescription || 'Could not start a voice session' }, result.status);
+        return json({ ok: true, sessionId: result.data.sessionId, appId: env.CALLS_APP_ID });
+      } catch (error) {
+        return json({ error: error.message || 'Voice session request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/voice-push-tracks' && request.method === 'POST') {
+      if (!env.CALLS_APP_ID || !env.CALLS_APP_TOKEN) return json({ error: 'Voice is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { sessionId, sdp, tracks } = body || {};
+      if (typeof sessionId !== 'string' || !sessionId) return json({ error: 'Missing sessionId' }, 400);
+      if (typeof sdp !== 'string' || !sdp) return json({ error: 'Missing sdp' }, 400);
+      if (!Array.isArray(tracks) || tracks.length === 0) return json({ error: 'Missing tracks' }, 400);
+      try {
+        const result = await callsFetch(env, `/sessions/${encodeURIComponent(sessionId)}/tracks/new`, {
+          method: 'POST',
+          body: JSON.stringify({
+            sessionDescription: { sdp, type: 'offer' },
+            tracks: tracks.map((t) => ({ location: 'local', mid: t.mid, trackName: t.trackName })),
+          }),
+        });
+        if (!result.ok) return json({ error: result.data.errorDescription || 'Could not publish voice track' }, result.status);
+        return json({ ok: true, ...result.data });
+      } catch (error) {
+        return json({ error: error.message || 'Voice push request failed' }, 502);
+      }
+    }
+
+    // Pulls one or more remote tracks onto the caller's OWN receiving
+    // session — location is hardcoded to "remote" here rather than
+    // trusted from the client, so a tampered request can't smuggle a
+    // "local" track substitution through this same endpoint.
+    if (url.pathname === '/voice-pull-tracks' && request.method === 'POST') {
+      if (!env.CALLS_APP_ID || !env.CALLS_APP_TOKEN) return json({ error: 'Voice is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { sessionId, tracks } = body || {};
+      if (typeof sessionId !== 'string' || !sessionId) return json({ error: 'Missing sessionId' }, 400);
+      if (!Array.isArray(tracks) || tracks.length === 0) return json({ error: 'Missing tracks' }, 400);
+      try {
+        const result = await callsFetch(env, `/sessions/${encodeURIComponent(sessionId)}/tracks/new`, {
+          method: 'POST',
+          body: JSON.stringify({
+            tracks: tracks.map((t) => ({ location: 'remote', trackName: t.trackName, sessionId: t.sessionId })),
+          }),
+        });
+        if (!result.ok) return json({ error: result.data.errorDescription || 'Could not pull voice track' }, result.status);
+        return json({ ok: true, ...result.data });
+      } catch (error) {
+        return json({ error: error.message || 'Voice pull request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/voice-renegotiate' && request.method === 'PUT') {
+      if (!env.CALLS_APP_ID || !env.CALLS_APP_TOKEN) return json({ error: 'Voice is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { sessionId, sdp } = body || {};
+      if (typeof sessionId !== 'string' || !sessionId) return json({ error: 'Missing sessionId' }, 400);
+      if (typeof sdp !== 'string' || !sdp) return json({ error: 'Missing sdp' }, 400);
+      try {
+        const result = await callsFetch(env, `/sessions/${encodeURIComponent(sessionId)}/renegotiate`, {
+          method: 'PUT',
+          body: JSON.stringify({ sessionDescription: { sdp, type: 'answer' } }),
+        });
+        if (!result.ok) return json({ error: result.data.errorDescription || 'Renegotiation failed' }, result.status);
+        return json({ ok: true, ...result.data });
+      } catch (error) {
+        return json({ error: error.message || 'Voice renegotiate request failed' }, 502);
+      }
     }
 
     if (url.pathname !== '/status' && url.pathname !== '/server-status') return json({ error: 'Not found' }, 404);
