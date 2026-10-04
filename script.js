@@ -6145,6 +6145,14 @@ const voiceParticipants = new Map(); // steamId -> { name, trackName, sessionId,
 // during the first test.
 const voicePulling = new Set();
 let voiceLocalPosition = null;
+// Only admins (any tier, owners included) see other players' names and
+// live distance — regular players just see a headcount, so voice chat
+// doesn't quietly become a way to pinpoint exactly who's where. The
+// speaking-level bar is an admin-only moderation aid (spot who's being
+// a bad actor over voice), same gate. viewerAdminTier is set by
+// checkAdminPanelAccess() further up this file.
+let voiceAudioContext = null;
+let voiceLevelMeterTimer = null;
 
 const voiceStatus = (message) => {
   const el = document.querySelector('[data-voice-status]');
@@ -6185,22 +6193,90 @@ const renderVoiceParticipants = () => {
   const list = document.querySelector('[data-voice-participants]');
   const empty = document.querySelector('[data-voice-participants-empty]');
   if (!list) return;
-  list.querySelectorAll('.voice-participant-row').forEach((row) => row.remove());
+  list.querySelectorAll('.voice-participant-row, .voice-participant-count').forEach((el) => el.remove());
   const entries = [...voiceParticipants.values()];
   if (empty) empty.hidden = entries.length > 0;
+  if (entries.length === 0) return;
+
+  if (!viewerAdminTier) {
+    const countEl = document.createElement('p');
+    countEl.className = 'voice-participant-count';
+    countEl.textContent = `${entries.length} ${entries.length === 1 ? 'player' : 'players'} nearby`;
+    list.appendChild(countEl);
+    return;
+  }
+
   entries.forEach((entry) => {
     const row = document.createElement('div');
     row.className = 'voice-participant-row';
     const name = document.createElement('span');
     name.className = 'voice-participant-name';
     name.textContent = entry.name;
+    const levelBar = document.createElement('div');
+    levelBar.className = 'voice-level-bar';
+    const levelFill = document.createElement('div');
+    levelFill.className = 'voice-level-bar-fill';
+    levelBar.appendChild(levelFill);
+    // Stashed on the shared Map entry (not just this row) so the
+    // metering loop below always writes to whichever bar element is
+    // currently on screen, even after a re-render rebuilds the rows.
+    entry.levelBarFillEl = levelFill;
     const distance = document.createElement('span');
     distance.className = 'voice-participant-distance';
     distance.dataset.voiceDistanceFor = entry.steamId;
     distance.textContent = '—';
-    row.append(name, distance);
+    row.append(name, levelBar, distance);
     list.appendChild(row);
   });
+};
+
+// Admin-only speaking-level meter — a separate Web Audio analysis tap on
+// each remote participant's track, independent of the <audio> element
+// already handling actual playback/distance volume above. Routed through
+// a zero-gain node to audioCtx.destination rather than left dangling:
+// some browsers only keep pulling audio through nodes that have an
+// active path to the destination, and this keeps that path silent so it
+// never doubles up with the real <audio> playback.
+const createVoiceLevelAnalyser = (stream) => {
+  try {
+    if (!voiceAudioContext) voiceAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = voiceAudioContext.createMediaStreamSource(stream);
+    const analyser = voiceAudioContext.createAnalyser();
+    analyser.fftSize = 256;
+    const silentGain = voiceAudioContext.createGain();
+    silentGain.gain.value = 0;
+    source.connect(analyser);
+    analyser.connect(silentGain);
+    silentGain.connect(voiceAudioContext.destination);
+    return { analyser, levelData: new Uint8Array(analyser.frequencyBinCount) };
+  } catch (error) {
+    console.debug('Voice level analyser setup failed:', error);
+    return { analyser: null, levelData: null };
+  }
+};
+
+const startVoiceLevelMetering = () => {
+  if (voiceLevelMeterTimer) return;
+  voiceLevelMeterTimer = setInterval(() => {
+    if (!viewerAdminTier) return; // nothing rendered for non-admins to update
+    voiceParticipants.forEach((entry) => {
+      if (!entry.analyser || !entry.levelData || !entry.levelBarFillEl) return;
+      entry.analyser.getByteTimeDomainData(entry.levelData);
+      let sumSquares = 0;
+      for (let i = 0; i < entry.levelData.length; i += 1) {
+        const normalized = (entry.levelData[i] - 128) / 128;
+        sumSquares += normalized * normalized;
+      }
+      const rms = Math.sqrt(sumSquares / entry.levelData.length);
+      const level = Math.min(1, rms * 4); // raw mic RMS reads quiet — scaled up for a readable bar
+      entry.levelBarFillEl.style.width = `${Math.round(level * 100)}%`;
+    });
+  }, 100);
+};
+
+const stopVoiceLevelMetering = () => {
+  clearInterval(voiceLevelMeterTimer);
+  voiceLevelMeterTimer = null;
 };
 
 // Pulls ONE other participant's track onto the shared receive session —
@@ -6251,9 +6327,10 @@ const pullVoiceTrack = async (participant) => {
     }
 
     const track = await trackPromise;
+    const stream = new MediaStream([track]);
     const audioEl = document.createElement('audio');
     audioEl.autoplay = true;
-    audioEl.srcObject = new MediaStream([track]);
+    audioEl.srcObject = stream;
     audioEl.dataset.voiceSteamId = participant.steamId;
     document.body.appendChild(audioEl);
     // Browsers can block autoplay outside a direct user-gesture call
@@ -6261,7 +6338,8 @@ const pullVoiceTrack = async (participant) => {
     // that happens during testing.
     audioEl.play().catch((error) => console.debug('Voice playback blocked:', error));
 
-    voiceParticipants.set(participant.steamId, { ...participant, audioEl });
+    const { analyser, levelData } = createVoiceLevelAnalyser(stream);
+    voiceParticipants.set(participant.steamId, { ...participant, audioEl, analyser, levelData });
     renderVoiceParticipants();
   } finally {
     voicePulling.delete(participant.steamId);
@@ -6396,12 +6474,18 @@ const disableVoice = async () => {
   voiceEnabled = false;
   clearInterval(voicePositionTimer);
   voicePositionTimer = null;
+  stopVoiceLevelMetering();
   disconnectVoiceSocket();
 
   voiceParticipants.forEach((entry) => entry.audioEl?.remove());
   voiceParticipants.clear();
   voicePulling.clear();
   renderVoiceParticipants();
+
+  if (voiceAudioContext) {
+    voiceAudioContext.close().catch(() => {});
+    voiceAudioContext = null;
+  }
 
   voiceSendPC?.close();
   voiceReceivePC?.close();
@@ -6470,6 +6554,7 @@ const enableVoice = async () => {
     await connectVoiceSocket();
     voicePositionTimer = setInterval(pollVoicePositions, VOICE_POSITION_POLL_MS);
     pollVoicePositions();
+    startVoiceLevelMetering();
 
     voiceStatus('Voice on — nearby players will hear you.');
     if (toggleBtn) {

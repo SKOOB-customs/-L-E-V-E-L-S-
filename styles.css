@@ -1366,6 +1366,33 @@ h6,
   padding: 10px 14px;
 }
 
+/* Non-admin view: just a headcount, no names/distance — admins (any
+   tier, owners included) get the full .voice-participant-row below. */
+.voice-participant-count {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* Admin-only speaking-level meter, one per participant row — fills based
+   on live mic amplitude so staff can tell who's actually talking. */
+.voice-level-bar {
+  flex: 1;
+  max-width: 80px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.voice-level-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: #6fd6c4;
+  transition: width 0.08s linear;
+}
+
 .voice-participant-name {
   font-weight: 700;
 }
