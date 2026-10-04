@@ -6121,9 +6121,10 @@ document.querySelector('[data-skin-idea-inbox-toggle]')?.addEventListener('click
 
 const VOICE_POSITION_POLL_MS = 2000;
 // Raw in-game units at which another player's voice fades to silent.
-// Tuned from live testing — the untested 15000 guess faded out players
-// who were still close enough to feel in-range; 4500 matched better.
-const VOICE_MAX_RANGE = 4500;
+// Tuned from live testing in two passes: 15000 (untested guess) was way
+// too far, 4500 was still audible from farther than expected, 500 cut
+// that down further.
+const VOICE_MAX_RANGE = 500;
 
 let voiceEnabled = false;
 let voiceLocalStream = null;
