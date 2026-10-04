@@ -12,3 +12,8 @@ Thumbs.db
 
 # Wrangler CLI local build cache
 .wrangler/
+
+# Desktop overlay (overlay/) — Electron deps and build output
+overlay/node_modules/
+overlay/dist/
+overlay/out/

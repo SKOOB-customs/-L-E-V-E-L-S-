@@ -1,0 +1,13 @@
+{
+  "name": "levels-overlay",
+  "version": "0.0.1-phase0",
+  "private": true,
+  "description": "LeveLs desktop overlay — Phase 0 proof of concept (Live Dino only, fixed position, no auth yet).",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

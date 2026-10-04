@@ -1,0 +1,114 @@
+/* LeveLs Desktop Overlay — Phase 0. Small, legible over any game scene:
+   a dark semi-opaque card rather than relying on the game's own
+   background for contrast, since this has to read clearly no matter
+   what's behind it in-game. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  color: #efe6d4;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dino-card {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 8px 10px;
+  background: rgba(21, 17, 12, 0.82);
+  border: 1px solid rgba(216, 191, 125, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: #d8bf7d;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7ad694;
+  flex-shrink: 0;
+}
+
+.name {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: 42px 1fr 28px;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+}
+
+.stat-label {
+  text-transform: capitalize;
+  color: #b6a98a;
+}
+
+.stat-track {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.stat-fill {
+  height: 100%;
+}
+
+.stat-growth { background: #d8bf7d; }
+.stat-health { background: #7ad694; }
+.stat-stamina { background: #6fd6c4; }
+.stat-hunger { background: #e0b35c; }
+.stat-thirst { background: #5cb8e0; }
+
+.stat-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #efe6d4;
+}
+
+.empty {
+  font-size: 10px;
+  color: #8a7d61;
+  text-align: center;
+  margin: auto 0 0;
+}
+
+.dino-card.is-empty .stats {
+  display: none;
+}
+
+.dino-card:not(.is-empty) .empty {
+  display: none;
+}
