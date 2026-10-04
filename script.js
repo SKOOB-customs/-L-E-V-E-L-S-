@@ -6137,6 +6137,17 @@ let voiceSocketReconnectTimer = null;
 let voicePositionTimer = null;
 let voiceMuted = false;
 const voiceParticipants = new Map(); // steamId -> { name, trackName, sessionId, audioEl }
+// Everyone currently in the voice room, regardless of whether their
+// track ever successfully pulled — populated straight from the
+// roster/join/leave WebSocket events. voiceParticipants above is the
+// narrower "I actually have working audio from them" set; this one is
+// the broader "they joined voice chat at all" set the non-admin
+// headcount is based on (see updateVoiceParticipantCount).
+const voiceRoomMembers = new Map(); // steamId -> { name, sessionId, trackName }
+// Last /api/all-positions response's players object — cached so a
+// join/leave event can recompute the headcount immediately without
+// waiting for the next position poll tick.
+let voiceLastPositions = null;
 // Guards pullVoiceTrack against running twice concurrently for the same
 // steamId — e.g. the initial 'roster' list and a 'join' broadcast
 // landing for the same participant. Two overlapping SDP negotiations on
@@ -6189,7 +6200,43 @@ const waitForIceConnected = (pc) => new Promise((resolve, reject) => {
   pc.addEventListener('iceconnectionstatechange', handler);
 });
 
+// Non-admin headcount: everyone currently IN the voice room (joined,
+// regardless of whether their track ever finished pulling, whether
+// they're muted, or anything else about their actual audio) who is
+// within VOICE_MAX_RANGE of the local player right now. Deliberately
+// NOT voiceParticipants.size — that only counts people whose track
+// successfully pulled, which would quietly undercount someone who's
+// nearby with voice on but muted, still connecting, or stuck. Counted
+// from voiceRoomMembers + the latest position snapshot instead, so the
+// headcount reflects "how many potential speakers are in range," not
+// "how many I currently have working audio from."
+const updateVoiceParticipantCount = () => {
+  if (viewerAdminTier) return; // admins get the full renderVoiceParticipants() list instead
+  const list = document.querySelector('[data-voice-participants]');
+  const empty = document.querySelector('[data-voice-participants-empty]');
+  if (!list) return;
+  list.querySelectorAll('.voice-participant-row, .voice-participant-count').forEach((el) => el.remove());
+
+  let inRangeCount = 0;
+  voiceRoomMembers.forEach((member, steamId) => {
+    const theirLocation = voiceLastPositions?.[steamId]?.location;
+    const distance = voiceDistanceBetween(voiceLocalPosition, theirLocation);
+    if (distance != null && distance <= VOICE_MAX_RANGE) inRangeCount += 1;
+  });
+
+  if (empty) empty.hidden = inRangeCount > 0;
+  if (inRangeCount === 0) return;
+  const countEl = document.createElement('p');
+  countEl.className = 'voice-participant-count';
+  countEl.textContent = `${inRangeCount} ${inRangeCount === 1 ? 'player' : 'players'} nearby`;
+  list.appendChild(countEl);
+};
+
 const renderVoiceParticipants = () => {
+  if (!viewerAdminTier) {
+    updateVoiceParticipantCount();
+    return;
+  }
   const list = document.querySelector('[data-voice-participants]');
   const empty = document.querySelector('[data-voice-participants-empty]');
   if (!list) return;
@@ -6197,14 +6244,6 @@ const renderVoiceParticipants = () => {
   const entries = [...voiceParticipants.values()];
   if (empty) empty.hidden = entries.length > 0;
   if (entries.length === 0) return;
-
-  if (!viewerAdminTier) {
-    const countEl = document.createElement('p');
-    countEl.className = 'voice-participant-count';
-    countEl.textContent = `${entries.length} ${entries.length === 1 ? 'player' : 'players'} nearby`;
-    list.appendChild(countEl);
-    return;
-  }
 
   entries.forEach((entry) => {
     const row = document.createElement('div');
@@ -6370,6 +6409,7 @@ const pollVoicePositions = async () => {
     const response = await fetch('/api/all-positions');
     const data = await response.json();
     if (!response.ok || !data.players) return;
+    voiceLastPositions = data.players;
     voiceLocalPosition = data.players[profile.steamId]?.location || null;
     voiceParticipants.forEach((entry, steamId) => {
       const theirLocation = data.players[steamId]?.location;
@@ -6384,6 +6424,11 @@ const pollVoicePositions = async () => {
       if (entry.audioEl) entry.audioEl.volume = volume;
       if (distanceEl) distanceEl.textContent = `${Math.round(distance)} units`;
     });
+    // Distance changes every tick even with no join/leave — the
+    // non-admin headcount needs to track that, not just membership
+    // changes (self-guards: no-op for admins, who get the row list
+    // above instead).
+    updateVoiceParticipantCount();
   } catch (error) {
     console.debug('Voice position poll failed:', error);
   }
@@ -6440,11 +6485,19 @@ const connectVoiceSocket = async () => {
       return;
     }
     if (data.type === 'roster' && Array.isArray(data.participants)) {
-      data.participants.forEach((p) => pullVoiceTrack(p).catch((error) => console.debug('Voice pull failed:', error)));
+      data.participants.forEach((p) => {
+        voiceRoomMembers.set(p.steamId, p);
+        pullVoiceTrack(p).catch((error) => console.debug('Voice pull failed:', error));
+      });
+      updateVoiceParticipantCount();
     } else if (data.type === 'join' && data.steamId) {
+      voiceRoomMembers.set(data.steamId, data);
       pullVoiceTrack(data).catch((error) => console.debug('Voice pull failed:', error));
+      updateVoiceParticipantCount();
     } else if (data.type === 'leave' && data.steamId) {
+      voiceRoomMembers.delete(data.steamId);
       dropVoiceParticipant(data.steamId);
+      updateVoiceParticipantCount();
     }
   });
 
@@ -6479,6 +6532,8 @@ const disableVoice = async () => {
 
   voiceParticipants.forEach((entry) => entry.audioEl?.remove());
   voiceParticipants.clear();
+  voiceRoomMembers.clear();
+  voiceLastPositions = null;
   voicePulling.clear();
   renderVoiceParticipants();
 
