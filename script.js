@@ -6107,14 +6107,18 @@ document.querySelector('[data-skin-idea-inbox-toggle]')?.addEventListener('click
 // the design memo for the full reasoning (position pipeline, transport
 // choice, open questions).
 //
+// Presence (who currently has voice open) pushes over a WebSocket to
+// VoiceRoom, a Durable Object in bridge-worker.js — see its own comment
+// for why. The first real test of this feature used a KV-polled version
+// instead, and broke in exactly the ways that comment predicts: the
+// first person to join never saw the second show up, audio only worked
+// one direction, and both got stuck after a refresh. Position/distance
+// stays a plain poll — that's just numbers, not presence, and doesn't
+// need push delivery.
+//
 // Volume-only for this phase — no stereo panning yet, since RCON doesn't
 // expose facing/rotation (confirmed while drafting the design memo).
-// Distance comes from /api/all-positions, the same RCON player-data
-// sweep Live Dino already polls, just returning everyone instead of one
-// player.
 
-const VOICE_ANNOUNCE_INTERVAL_MS = 8000;
-const VOICE_PRESENCE_POLL_MS = 3000;
 const VOICE_POSITION_POLL_MS = 2000;
 // Raw in-game units at which another player's voice fades to silent.
 // This is an UNTESTED placeholder, not a confirmed game value — the
@@ -6128,11 +6132,18 @@ let voiceSendPC = null;
 let voiceReceivePC = null;
 let voiceSendSessionId = null;
 let voiceReceiveSessionId = null;
-let voiceAnnounceTimer = null;
-let voicePresenceTimer = null;
+let voiceSocket = null;
+let voiceSocketReconnectTimer = null;
 let voicePositionTimer = null;
 let voiceMuted = false;
 const voiceParticipants = new Map(); // steamId -> { name, trackName, sessionId, audioEl }
+// Guards pullVoiceTrack against running twice concurrently for the same
+// steamId — e.g. the initial 'roster' list and a 'join' broadcast
+// landing for the same participant. Two overlapping SDP negotiations on
+// the SAME receive peer connection corrupt its signaling state, which
+// was the likely cause of "worked for a split second, then stopped"
+// during the first test.
+const voicePulling = new Set();
 let voiceLocalPosition = null;
 
 const voiceStatus = (message) => {
@@ -6193,65 +6204,68 @@ const renderVoiceParticipants = () => {
 };
 
 // Pulls ONE other participant's track onto the shared receive session —
-// called once per newly-discovered participant (see pollVoicePresence),
-// not on every presence poll, so an already-pulled track never gets
-// re-negotiated.
+// called from the voice socket's 'roster'/'join' handlers below.
 const pullVoiceTrack = async (participant) => {
   if (!voiceReceivePC || !voiceReceiveSessionId) return;
-  const pullResponse = await fetch('/api/voice-pull-tracks', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: voiceReceiveSessionId,
-      tracks: [{ trackName: participant.trackName, sessionId: participant.sessionId }],
-    }),
-  }).then((res) => res.json());
-  if (!pullResponse.ok) {
-    console.debug('Voice pull failed:', pullResponse.error);
-    return;
-  }
-
-  const pulledMid = pullResponse.tracks?.[0]?.mid;
-  const trackPromise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Voice track never arrived')), 8000);
-    const handler = (event) => {
-      if (event.transceiver.mid !== pulledMid) return;
-      voiceReceivePC.removeEventListener('track', handler);
-      clearTimeout(timer);
-      resolve(event.track);
-    };
-    voiceReceivePC.addEventListener('track', handler);
-  });
-
-  if (pullResponse.requiresImmediateRenegotiation) {
-    await voiceReceivePC.setRemoteDescription(pullResponse.sessionDescription);
-    const answer = await voiceReceivePC.createAnswer();
-    await voiceReceivePC.setLocalDescription(answer);
-    const renegotiateResponse = await fetch('/api/voice-renegotiate', {
+  if (voiceParticipants.has(participant.steamId) || voicePulling.has(participant.steamId)) return;
+  voicePulling.add(participant.steamId);
+  try {
+    const pullResponse = await fetch('/api/voice-pull-tracks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: voiceReceiveSessionId, sdp: answer.sdp }),
+      body: JSON.stringify({
+        sessionId: voiceReceiveSessionId,
+        tracks: [{ trackName: participant.trackName, sessionId: participant.sessionId }],
+      }),
     }).then((res) => res.json());
-    if (!renegotiateResponse.ok) {
-      console.debug('Voice renegotiate failed:', renegotiateResponse.error);
+    if (!pullResponse.ok) {
+      console.debug('Voice pull failed:', pullResponse.error);
       return;
     }
+
+    const pulledMid = pullResponse.tracks?.[0]?.mid;
+    const trackPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Voice track never arrived')), 8000);
+      const handler = (event) => {
+        if (event.transceiver.mid !== pulledMid) return;
+        voiceReceivePC.removeEventListener('track', handler);
+        clearTimeout(timer);
+        resolve(event.track);
+      };
+      voiceReceivePC.addEventListener('track', handler);
+    });
+
+    if (pullResponse.requiresImmediateRenegotiation) {
+      await voiceReceivePC.setRemoteDescription(pullResponse.sessionDescription);
+      const answer = await voiceReceivePC.createAnswer();
+      await voiceReceivePC.setLocalDescription(answer);
+      const renegotiateResponse = await fetch('/api/voice-renegotiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: voiceReceiveSessionId, sdp: answer.sdp }),
+      }).then((res) => res.json());
+      if (!renegotiateResponse.ok) {
+        console.debug('Voice renegotiate failed:', renegotiateResponse.error);
+        return;
+      }
+    }
+
+    const track = await trackPromise;
+    const audioEl = document.createElement('audio');
+    audioEl.autoplay = true;
+    audioEl.srcObject = new MediaStream([track]);
+    audioEl.dataset.voiceSteamId = participant.steamId;
+    document.body.appendChild(audioEl);
+    // Browsers can block autoplay outside a direct user-gesture call
+    // stack — surfacing a console line rather than failing silently if
+    // that happens during testing.
+    audioEl.play().catch((error) => console.debug('Voice playback blocked:', error));
+
+    voiceParticipants.set(participant.steamId, { ...participant, audioEl });
+    renderVoiceParticipants();
+  } finally {
+    voicePulling.delete(participant.steamId);
   }
-
-  const track = await trackPromise;
-  const audioEl = document.createElement('audio');
-  audioEl.autoplay = true;
-  audioEl.srcObject = new MediaStream([track]);
-  audioEl.dataset.voiceSteamId = participant.steamId;
-  document.body.appendChild(audioEl);
-  // Browsers can block autoplay outside a direct user-gesture call stack
-  // (this fires from a setInterval tick, several awaits removed from the
-  // original "Enable Voice" click) — surfacing a console line rather than
-  // failing silently if that happens during testing.
-  audioEl.play().catch((error) => console.debug('Voice playback blocked:', error));
-
-  voiceParticipants.set(participant.steamId, { ...participant, audioEl });
-  renderVoiceParticipants();
 };
 
 const dropVoiceParticipant = (steamId) => {
@@ -6260,26 +6274,6 @@ const dropVoiceParticipant = (steamId) => {
   entry.audioEl?.remove();
   voiceParticipants.delete(steamId);
   renderVoiceParticipants();
-};
-
-const pollVoicePresence = async () => {
-  if (!voiceEnabled) return;
-  try {
-    const response = await fetch('/api/voice-presence');
-    const data = await response.json();
-    if (!response.ok || !Array.isArray(data.participants)) return;
-    const seenSteamIds = new Set(data.participants.map((p) => p.steamId));
-    [...voiceParticipants.keys()].forEach((steamId) => {
-      if (!seenSteamIds.has(steamId)) dropVoiceParticipant(steamId);
-    });
-    for (const participant of data.participants) {
-      if (!voiceParticipants.has(participant.steamId)) {
-        pullVoiceTrack(participant).catch((error) => console.debug('Voice pull failed:', error));
-      }
-    }
-  } catch (error) {
-    console.debug('Voice presence poll failed:', error);
-  }
 };
 
 const voiceDistanceBetween = (a, b) => {
@@ -6317,33 +6311,96 @@ const pollVoicePositions = async () => {
   }
 };
 
-const announceVoicePresence = async () => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId || !voiceSendSessionId || !voiceLocalStream) return;
+// ── Presence WebSocket (VoiceRoom) ──
+
+const announceOnVoiceSocket = () => {
+  if (!voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) return;
+  if (!voiceSendSessionId || !voiceLocalStream) return;
   const trackName = voiceLocalStream.getAudioTracks()[0]?.id;
   if (!trackName) return;
+  voiceSocket.send(JSON.stringify({ type: 'announce', sessionId: voiceSendSessionId, trackName }));
+};
+
+const connectVoiceSocket = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId || !voiceEnabled) return;
+  if (voiceSocket && (voiceSocket.readyState === WebSocket.OPEN || voiceSocket.readyState === WebSocket.CONNECTING)) return;
+
+  // Same signed-ticket pattern as chat — the cookie that proves who's
+  // signed in never reaches the Worker's separate workers.dev origin, so
+  // this fetches a short-lived ticket same-origin first.
+  let ticket;
   try {
-    await fetch('/api/voice-announce', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: profile.username, sessionId: voiceSendSessionId, trackName }),
-    });
+    const ticketResponse = await fetch(`/api/voice-ticket?name=${encodeURIComponent(profile.username || profile.steamId)}`);
+    const ticketData = await ticketResponse.json();
+    if (!ticketResponse.ok || !ticketData.ticket) return;
+    ticket = ticketData.ticket;
   } catch (error) {
-    console.debug('Voice announce failed:', error);
+    console.debug('Voice ticket fetch failed:', error);
+    return;
+  }
+
+  const voiceWorkerOrigin = 'wss://l-e-v-e-l-s.conlan-schlaeppi.workers.dev';
+  const url = `${voiceWorkerOrigin}/voice-ws?ticket=${encodeURIComponent(ticket)}`;
+
+  let socket;
+  try {
+    socket = new WebSocket(url);
+  } catch (error) {
+    console.debug('Voice socket creation failed:', error);
+    return;
+  }
+  voiceSocket = socket;
+
+  socket.addEventListener('open', () => announceOnVoiceSocket());
+
+  socket.addEventListener('message', (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (data.type === 'roster' && Array.isArray(data.participants)) {
+      data.participants.forEach((p) => pullVoiceTrack(p).catch((error) => console.debug('Voice pull failed:', error)));
+    } else if (data.type === 'join' && data.steamId) {
+      pullVoiceTrack(data).catch((error) => console.debug('Voice pull failed:', error));
+    } else if (data.type === 'leave' && data.steamId) {
+      dropVoiceParticipant(data.steamId);
+    }
+  });
+
+  const scheduleVoiceReconnect = () => {
+    if (voiceSocket === socket) voiceSocket = null;
+    if (!voiceEnabled || voiceSocketReconnectTimer) return;
+    voiceSocketReconnectTimer = setTimeout(() => {
+      voiceSocketReconnectTimer = null;
+      if (voiceEnabled) connectVoiceSocket();
+    }, 2000);
+  };
+  socket.addEventListener('close', scheduleVoiceReconnect);
+  socket.addEventListener('error', () => socket.close());
+};
+
+const disconnectVoiceSocket = () => {
+  clearTimeout(voiceSocketReconnectTimer);
+  voiceSocketReconnectTimer = null;
+  if (voiceSocket) {
+    const socket = voiceSocket;
+    voiceSocket = null;
+    socket.close();
   }
 };
 
 const disableVoice = async () => {
   voiceEnabled = false;
-  clearInterval(voiceAnnounceTimer);
-  clearInterval(voicePresenceTimer);
   clearInterval(voicePositionTimer);
-  voiceAnnounceTimer = null;
-  voicePresenceTimer = null;
   voicePositionTimer = null;
+  disconnectVoiceSocket();
 
   voiceParticipants.forEach((entry) => entry.audioEl?.remove());
   voiceParticipants.clear();
+  voicePulling.clear();
   renderVoiceParticipants();
 
   voiceSendPC?.close();
@@ -6356,12 +6413,6 @@ const disableVoice = async () => {
   voiceLocalStream?.getTracks().forEach((track) => track.stop());
   voiceLocalStream = null;
   voiceMuted = false;
-
-  try {
-    await fetch('/api/voice-leave', { method: 'POST' });
-  } catch (error) {
-    console.debug('Voice leave failed:', error);
-  }
 
   voiceStatus('');
   const toggleBtn = document.querySelector('[data-voice-toggle]');
@@ -6416,11 +6467,8 @@ const enableVoice = async () => {
     voiceReceivePC = createVoicePeerConnection();
 
     voiceEnabled = true;
-    await announceVoicePresence();
-    voiceAnnounceTimer = setInterval(announceVoicePresence, VOICE_ANNOUNCE_INTERVAL_MS);
-    voicePresenceTimer = setInterval(pollVoicePresence, VOICE_PRESENCE_POLL_MS);
+    await connectVoiceSocket();
     voicePositionTimer = setInterval(pollVoicePositions, VOICE_POSITION_POLL_MS);
-    pollVoicePresence();
     pollVoicePositions();
 
     voiceStatus('Voice on — nearby players will hear you.');
@@ -6461,16 +6509,4 @@ const updateVoiceSectionVisibility = () => {
   section.hidden = !profile?.steamId;
   if (!profile?.steamId && voiceEnabled) disableVoice();
 };
-
-// Voice never auto-starts — always an explicit opt-in click, including
-// after a page reload while a previous session might technically still
-// be "live" server-side (it'll just go stale and drop out of presence).
-window.addEventListener('beforeunload', () => {
-  if (voiceEnabled) {
-    // Best-effort, fire-and-forget — no guarantee this completes before
-    // the tab actually closes, but worth trying so other participants
-    // don't wait out the full presence staleness window.
-    navigator.sendBeacon?.('/api/voice-leave', new Blob([JSON.stringify({})], { type: 'application/json' }));
-  }
-});
 

@@ -1396,6 +1396,116 @@ export class ChatRoom {
 // other and some could time out waiting their turn; confirmed live
 // during rollout with 8 simultaneous requests, several of which came
 // back "Canceled" before this existed.
+// ── Proximity Voice presence (Durable Object) ──
+//
+// Phase 0 originally tracked "who currently has voice open" in a plain
+// KV blob (voice_presence:index), the same shape as the site's general
+// presence:index heartbeat. That broke immediately under real testing:
+// KV writes aren't visible everywhere right away (the exact same lag
+// that forced chat off KV-polling and onto a Durable Object — see
+// ChatRoom's own comment), and two players announcing within the same
+// few seconds hit a read-modify-write race on that one shared key, since
+// nothing serializes concurrent writers. Symptoms matched exactly: the
+// first person to join never saw the second show up, directionality
+// depended on which write had more time to propagate before the other
+// side's read, and a page refresh could leave a stale entry nothing ever
+// cleaned up. A Durable Object fixes all three at once — one
+// authoritative in-memory instance, messages handled one at a time, and
+// a closed WebSocket is an immediate, reliable "they left" signal
+// instead of waiting out a staleness window.
+export class VoiceRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sessions = new Map(); // steamId -> { webSocket, name, sessionId, trackName }
+  }
+
+  async fetch(request) {
+    if (request.headers.get('Upgrade') !== 'websocket') {
+      return new Response('Expected WebSocket', { status: 426 });
+    }
+    const url = new URL(request.url);
+    // Same signed-ticket pattern as /chat-ws — see ChatRoom's own
+    // comment for why a raw steamId query param can't be trusted here.
+    const ticket = url.searchParams.get('ticket') || '';
+    const verified = await verifyTicket(this.env, ticket);
+    if (!verified) {
+      return new Response('Missing or invalid ticket', { status: 401 });
+    }
+    const { steamId, name: verifiedName } = verified;
+    const name = verifiedName.slice(0, 32);
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    // Not awaited — the 101 response has to go back immediately to
+    // complete the upgrade handshake, same reasoning as ChatRoom.
+    this.handleSession(server, steamId, name).catch((error) => {
+      console.error('Voice session setup failed:', error.message);
+    });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async handleSession(webSocket, steamId, name) {
+    webSocket.accept();
+
+    // A refresh/reconnect from the same player replaces their old entry
+    // outright rather than stacking a second one — the old socket (if
+    // still technically open) just won't be in this.sessions to receive
+    // broadcasts anymore, and will close on its own soon after.
+    const session = { webSocket, steamId, name, sessionId: null, trackName: null };
+    this.sessions.set(steamId, session);
+
+    webSocket.addEventListener('message', (event) => {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (data?.type === 'announce' && typeof data.sessionId === 'string' && typeof data.trackName === 'string') {
+        session.sessionId = data.sessionId;
+        session.trackName = data.trackName;
+        // Tell the new arrival who's already here...
+        const roster = [...this.sessions.values()]
+          .filter((s) => s.steamId !== steamId && s.sessionId)
+          .map((s) => ({ steamId: s.steamId, name: s.name, sessionId: s.sessionId, trackName: s.trackName }));
+        this.send(webSocket, { type: 'roster', participants: roster });
+        // ...and tell everyone else the new arrival is here, now that
+        // they actually have a sessionId/trackName worth pulling.
+        this.broadcast({ type: 'join', steamId, name, sessionId: session.sessionId, trackName: session.trackName }, steamId);
+      }
+    });
+
+    const dropSession = () => {
+      if (this.sessions.get(steamId) !== session) return; // already replaced by a newer connection
+      this.sessions.delete(steamId);
+      this.broadcast({ type: 'leave', steamId }, steamId);
+    };
+    webSocket.addEventListener('close', dropSession);
+    webSocket.addEventListener('error', dropSession);
+  }
+
+  send(webSocket, payload) {
+    try {
+      webSocket.send(JSON.stringify(payload));
+    } catch {
+      // socket already gone — its close/error listener will clean it up
+    }
+  }
+
+  broadcast(payload, excludeSteamId) {
+    const json = JSON.stringify(payload);
+    for (const [steamId, session] of this.sessions) {
+      if (steamId === excludeSteamId) continue;
+      try {
+        session.webSocket.send(json);
+      } catch {
+        // let its own close/error listener handle cleanup
+      }
+    }
+  }
+}
+
 const RCON_RESPONSE_CACHE_TTL_MS = 1000;
 
 export class RconBridge {
@@ -1515,6 +1625,15 @@ export default {
       if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
       const id = env.CHAT_ROOM.idFromName('global');
       const stub = env.CHAT_ROOM.get(id);
+      return stub.fetch(request);
+    }
+
+    // Proximity Voice presence — same "one global room" shape as chat,
+    // since this site doesn't have per-server-instance scoping either.
+    if (url.pathname === '/voice-ws') {
+      if (!env.VOICE_ROOM) return json({ error: 'Voice is not configured' }, 503);
+      const id = env.VOICE_ROOM.idFromName('global');
+      const stub = env.VOICE_ROOM.get(id);
       return stub.fetch(request);
     }
 

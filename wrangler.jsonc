@@ -59,7 +59,11 @@
       // Holds the one persistent RCON connection every /status request
       // shares instead of opening a fresh connect+auth each time — see
       // RconBridge's own comment in bridge-worker.js for why.
-      { "name": "RCON_BRIDGE", "class_name": "RconBridge" }
+      { "name": "RCON_BRIDGE", "class_name": "RconBridge" },
+      // Proximity Voice (Phase 0): who currently has voice open, pushed
+      // to every connected browser in real time — see VoiceRoom's own
+      // comment for why this replaced an earlier KV-polling approach.
+      { "name": "VOICE_ROOM", "class_name": "VoiceRoom" }
     ]
   },
   // Free-plan Durable Objects require SQLite-backed storage specifically
@@ -69,6 +73,7 @@
   // storage API ChatRoom uses works the same on either backend.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["RconBridge"] }
+    { "tag": "v2", "new_sqlite_classes": ["RconBridge"] },
+    { "tag": "v3", "new_sqlite_classes": ["VoiceRoom"] }
   ]
 }
