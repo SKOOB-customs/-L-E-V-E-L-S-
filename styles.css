@@ -1358,6 +1358,24 @@ h6,
   vertical-align: middle;
 }
 
+.overlay-pairing-code {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.overlay-pairing-code-value {
+  display: inline-block;
+  font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 10px 22px;
+  border-radius: 10px;
+  background: rgba(216, 191, 125, 0.12);
+  border: 1px solid rgba(216, 191, 125, 0.35);
+  color: #d8bf7d;
+}
+
 .voice-participant-row {
   display: flex;
   align-items: center;

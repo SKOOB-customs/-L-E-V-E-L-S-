@@ -23,6 +23,11 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const TICKET_TTL_MS = 60 * 1000; // 60 seconds — just long enough to open the chat socket
 const ADMIN_UNLOCK_COOKIE_NAME = 'levels_admin_unlock';
 const ADMIN_UNLOCK_TTL_MS = 35 * 60 * 1000; // 35 minutes, per the Admin Panel passkey feature
+// Desktop Overlay (see overlay/): deliberately long-lived — pairing once
+// via a short code (functions/api/overlay-pair-start.js) should last
+// through ordinary play, not need repeating every session the way the
+// admin unlock or chat ticket do.
+const OVERLAY_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 const base64UrlEncode = (bytes) => {
   let binary = '';
@@ -171,4 +176,25 @@ export async function verifyAdminUnlock(env, request) {
   const payload = await verifyToken(env.SESSION_SECRET, token);
   if (typeof payload?.steamId !== 'string') return null;
   return { steamId: payload.steamId, expiresAt: payload.exp };
+}
+
+// Desktop Overlay auth — NOT a cookie (the overlay app is a separate
+// Electron process, not a browser session). Minted once by
+// overlay-pair-exchange.js after a short pairing code proves which
+// player is pairing, then stored locally by the overlay app itself and
+// sent back as a plain query param on every request after that (see
+// overlay-positions.js). The embedded `scope: 'overlay'` field keeps
+// this token from being reusable anywhere a session/ticket/admin-unlock
+// token is expected, even though they all share the same signing
+// mechanism underneath.
+export async function signOverlayToken(env, steamId) {
+  const now = Date.now();
+  return signPayload(env.SESSION_SECRET, { steamId, scope: 'overlay', iat: now, exp: now + OVERLAY_TOKEN_TTL_MS });
+}
+
+export async function verifyOverlayToken(env, token) {
+  if (!env.SESSION_SECRET) return null;
+  const payload = await verifyToken(env.SESSION_SECRET, token);
+  if (typeof payload?.steamId !== 'string' || payload.scope !== 'overlay') return null;
+  return { steamId: payload.steamId };
 }

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LeveLs Overlay — Connect</title>
+    <link rel="stylesheet" href="pair.css" />
+  </head>
+  <body>
+    <div class="pair-box">
+      <h1>Connect to LeveLs</h1>
+      <p>Open the website, go to your <strong>Profile</strong> tab, and click <strong>Generate Pairing Code</strong>. Enter that code below.</p>
+      <form id="pairForm">
+        <input type="text" id="codeInput" maxlength="6" placeholder="ABCD12" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+        <button type="submit" id="pairSubmit">Connect</button>
+      </form>
+      <p id="pairStatus"></p>
+    </div>
+    <script src="pair.js"></script>
+  </body>
+</html>

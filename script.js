@@ -1038,6 +1038,7 @@ const displaySteamStatus = async () => {
   updateCoinEarningsSection(profile);
   loadSkinIdeaInbox();
   updateVoiceSectionVisibility();
+  updateOverlayPairingSectionVisibility();
   initTicketForm();
   updateChatSignInState();
 
@@ -6649,4 +6650,68 @@ const updateVoiceSectionVisibility = () => {
   section.hidden = !profile?.steamId;
   if (!profile?.steamId && voiceEnabled) disableVoice();
 };
+
+// ── Desktop Overlay pairing (Profile tab) ──
+//
+// The overlay app is a separate Electron process with no browser session
+// of its own, so it can't just reuse the site's normal Steam login (and
+// embedding that login inside Electron's own Chromium view is the one
+// thing the overlay design memo explicitly says not to do — identity
+// providers increasingly block logins from embedded browsers). Instead:
+// generate a short one-time code here, the player types it into the
+// overlay once, and the overlay exchanges it server-side for a
+// long-lived token it keeps locally from then on.
+
+const updateOverlayPairingSectionVisibility = () => {
+  const section = document.querySelector('[data-overlay-pairing-section]');
+  if (!section) return;
+  const profile = getSteamProfile();
+  section.hidden = !profile?.steamId;
+};
+
+let overlayPairingCountdownTimer = null;
+
+const formatOverlayPairingCountdown = (seconds) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+document.querySelector('[data-overlay-pair-generate]')?.addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/overlay-pair-start');
+    const data = await response.json();
+    if (!response.ok || !data.code) {
+      showToast(data.error || 'Could not generate a pairing code right now.');
+      return;
+    }
+
+    const codeBox = document.querySelector('[data-overlay-pairing-code]');
+    const codeValue = document.querySelector('[data-overlay-pairing-code-value]');
+    const expiryEl = document.querySelector('[data-overlay-pairing-expiry]');
+    if (codeValue) codeValue.textContent = data.code;
+    if (codeBox) codeBox.hidden = false;
+
+    clearInterval(overlayPairingCountdownTimer);
+    let remaining = data.expiresInSeconds || 600;
+    if (expiryEl) expiryEl.textContent = formatOverlayPairingCountdown(remaining);
+    overlayPairingCountdownTimer = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(overlayPairingCountdownTimer);
+        overlayPairingCountdownTimer = null;
+        if (codeBox) codeBox.hidden = true;
+        return;
+      }
+      if (expiryEl) expiryEl.textContent = formatOverlayPairingCountdown(remaining);
+    }, 1000);
+  } catch (error) {
+    console.debug('Overlay pairing code generation failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
 

@@ -1,66 +1,75 @@
-# LeveLs Desktop Overlay — Phase 0
+# LeveLs Desktop Overlay — Phase 1
 
-Proof of concept only. One fixed-position, fixed-size, always-on-top
-window showing Live Dino for a single hardcoded Steam ID, permanently
-click-through, no drag/resize, no real auth. The only thing this phase
-exists to answer: **does an Electron always-on-top transparent window
-actually sit cleanly over Evrima in practice?** Everything else (the Map
-widget, pairing-code auth, edit mode, packaging/distribution) is a later
-phase — see the design memo for the full plan, and don't build those
-until this is confirmed working live.
+Real pairing-code auth, plus the Map widget stacked beneath Live Dino.
+Both windows fixed in place — top-left corner, same left edge, each 1/10
+screen size. No drag/resize yet (Phase 2), no installer yet (Phase 3).
+
+See the design memo for the full plan. Phase 0 (confirmed working against
+a real Windows machine running Evrima) proved the core architecture —
+this phase removes the Phase 0 limitation of a hardcoded Steam ID edited
+directly into `main.js`.
 
 ## Setup
 
-Requires [Node.js](https://nodejs.org) and **must run on the Windows
-machine you actually play Evrima on** — the parts this phase needs to
-test (always-on-top over a fullscreen game, kernel-level EAC coexisting
-with a separate overlay process) are Windows-specific and can't be
-verified any other way.
+Requires [Node.js](https://nodejs.org) and must run on the Windows (or
+other) machine you actually play Evrima on.
 
 ```
 cd overlay
 npm install
-```
-
-Then open `main.js` and replace `TEST_STEAM_ID` with a real steamId64 —
-whoever's actually going to be spawned in-game while you test.
-
-```
 npm start
 ```
 
-A small card should appear in the top-left corner of your screen, about
-1/10 the size of it, showing that player's live growth/health/stamina/
-hunger/thirst once they're spawned in-game. It polls the live site every
-2 seconds, same as the website's own Live Dino tab.
+## First launch — pairing
 
-## What to actually check
+On first run (no saved pairing yet), a small window opens asking for a
+pairing code instead of the overlay windows:
 
-1. **Does it show up over the game at all?** Launch Evrima in **Borderless
-   Windowed** mode first, not true Fullscreen Exclusive — this is a known
-   limitation of every overlay technique (Discord's included), not
-   specific to this one. If it doesn't appear even in Borderless
-   Windowed, that's the real finding to report back.
-2. **Does anything about EAC complain?** Watch for anything unusual —
-   a ban, a warning, the game refusing to launch with the overlay
-   running. (Not expected, per the design memo's reasoning — this is a
-   separate window the OS draws on top of the game, not anything
-   injected into it — but this phase exists specifically to confirm that
-   in practice, not just in theory.)
-3. **Does the data update correctly** as the test account's dino's stats
-   change in-game (take damage, get hungry, etc.)?
-4. **Visual check** — is the card actually legible over typical in-game
-   backgrounds (grass, water, sky), or does the semi-transparent
-   background need to be more opaque?
+1. On the website, go to **Profile** → **Desktop Overlay** → **Generate
+   Pairing Code**.
+2. Type that 6-character code into the overlay's pairing window.
+3. Once connected, the pairing window closes and the Map + Live Dino
+   windows appear, top-left, stacked.
+
+The resulting token is saved locally (in Electron's own per-user app
+data folder) — future launches skip pairing entirely and go straight to
+the overlay windows. No Steam ID ever needs to be typed or edited by
+hand anymore.
+
+## What changed from Phase 0
+
+- **Auth**: pairing-code flow instead of a hardcoded `TEST_STEAM_ID` in
+  `main.js`. See the design memo's §05 for why this approach (not
+  embedding Steam login inside Electron) was chosen.
+- **Map widget**: new, stacked directly beneath Live Dino at the same
+  left edge — shows your live position as a marker on the game map,
+  polling the new token-authenticated `/api/overlay-positions` endpoint.
+- Both windows still permanently click-through, still fixed position/
+  size — that's still Phase 2.
 
 ## Known limitations (expected, not bugs)
 
 - Fixed top-left position, fixed size — no dragging or resizing yet
   (Phase 2).
-- One hardcoded Steam ID, edited directly in `main.js` — no login, no
-  pairing code yet (Phase 1).
-- No Map widget yet — Live Dino only (Phase 1).
-- Click-through is permanent — there's no edit-mode hotkey yet to toggle
-  it (Phase 2).
+- Click-through is permanent — no edit-mode hotkey yet (Phase 2).
+- Re-pairing required if the local config file is deleted, or if the
+  overlay token is ever revoked server-side (not yet built — tokens
+  currently last 90 days with no manual revoke path).
 - Not packaged as an installer — runs via `npm start` from source only
   (Phase 3).
+
+## If `npm start` fails with "Electron failed to install correctly"
+
+This is a known, common Electron install issue — the `electron` npm
+package downloads its actual ~150MB binary separately, and that download
+step can get blocked by network/firewall/antivirus software without a
+clear error. If `npm install` finishes but `npm start` still fails:
+
+1. Confirm you can download `https://github.com/electron/electron/releases/download/v33.4.11/electron-v33.4.11-win32-x64.zip`
+   directly in a browser. If that also fails, the problem is your
+   network, not npm.
+2. If the browser download works, manually extract that zip's contents
+   directly into `overlay/node_modules/electron/dist/` (so
+   `node_modules/electron/dist/electron.exe` exists directly, no extra
+   nested folder), then create `overlay/node_modules/electron/path.txt`
+   containing exactly `electron.exe` (no extra whitespace/newline).
