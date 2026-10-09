@@ -1039,6 +1039,7 @@ const displaySteamStatus = async () => {
   loadSkinIdeaInbox();
   updateVoiceSectionVisibility();
   updateOverlayPairingSectionVisibility();
+  updateDomeTeleportButtonVisibility();
   initTicketForm();
   updateChatSignInState();
 
@@ -2568,6 +2569,38 @@ document.querySelector('[data-hotzone-teleport]')?.addEventListener('click', (ev
     waitingLabel: 'Waiting for in-game…',
     onSuccess: () => {
       hotzoneTokenAvailable = false; // confirmed used — refreshes tomorrow
+      pollLiveDino();
+    },
+  });
+});
+
+// Dome Teleport — only shown for accounts whose Steam display name
+// starts with the exact 3-character prefix "Ayo" (capital A, lowercase
+// y/o). This is a client-side convenience only; the Worker re-checks the
+// same prefix against its own player directory regardless of what this
+// hides, so tampering with this check via devtools can't get a request
+// through for anyone it's not meant for.
+const updateDomeTeleportButtonVisibility = () => {
+  const btn = document.querySelector('[data-dome-teleport]');
+  if (!btn) return;
+  const profile = getSteamProfile();
+  btn.hidden = !profile?.username?.startsWith('Ayo');
+};
+
+document.querySelector('[data-dome-teleport]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/dome-teleport',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Dome',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
       pollLiveDino();
     },
   });

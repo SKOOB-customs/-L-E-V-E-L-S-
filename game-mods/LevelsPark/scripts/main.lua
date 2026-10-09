@@ -1791,6 +1791,45 @@ local function checkWebsiteHotzoneTeleportRequest(steam)
     writeRequestResult(hotzoneTeleportResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Dome Teleport ──
+--
+-- Same mechanism as Hotzone (tryHotzoneTeleport is generic — "move this
+-- player's live pawn to this X/Y/Z" — reused here rather than
+-- duplicated), but the destination is a single fixed, hand-captured
+-- coordinate (a real player's actual live position at the time it was
+-- captured, not a computed point), so there's no Z-safety-buffer concern
+-- the way Hotzone has. Who's allowed to use it at all is decided
+-- server-side in the Worker (name-prefix check against the website's own
+-- player directory) — this mod trusts whatever request file shows up
+-- here the same way it trusts every other website-triggered request.
+local function domeTeleportRequestFilePath(steam)
+    return SAVED_DIR .. "/dome_teleport_request_" .. steam .. ".json"
+end
+
+local function domeTeleportResultFilePath(steam)
+    return SAVED_DIR .. "/dome_teleport_result_" .. steam .. ".json"
+end
+
+local function checkWebsiteDomeTeleportRequest(steam)
+    local path = domeTeleportRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local x = jsonReadNumber(body, "x")
+    local y = jsonReadNumber(body, "y")
+    local z = jsonReadNumber(body, "z")
+    if requestId == nil or x == nil or y == nil or z == nil then return end
+
+    local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    safeNotify(steam, message)
+    log("Dome teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(domeTeleportResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Website-triggered growth pause/resume (Live Dino tab) ──
 --
 -- ATIDinosaurBase carries its own uint8 bIsGrowthPaused flag plus an
@@ -2073,6 +2112,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteGrowthPauseRequest(steam)
                     checkWebsiteSetPrimeRequest(steam)
                     checkWebsiteHotzoneTeleportRequest(steam)
+                    checkWebsiteDomeTeleportRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)
                     if pawn ~= nil then

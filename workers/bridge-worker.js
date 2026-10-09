@@ -610,6 +610,31 @@ const findDensestCircleCenter = (points, radius) => {
   return { center: best, count: bestCount };
 };
 
+// ── Dome Teleport ──
+//
+// Same request/result mechanism as Hotzone (reuses the identical
+// tryHotzoneTeleport on the mod side — see its own comment), but to one
+// fixed, hand-captured coordinate rather than a computed point. Captured
+// live from Skoob's own actual position while standing in the Dome
+// (2026-10-09) — a real player's real location, same trust basis
+// tryTeleportToFriend already relies on, so no Z-safety-buffer concern
+// here the way Hotzone's computed destinations have.
+//
+// Gated to players whose Steam display name starts with the exact
+// 3-character prefix "Ayo" (capital A, lowercase y/o) — re-checked here
+// server-side against player_directory:index regardless of whether the
+// website hid the button, same "client hint, server re-verifies"
+// posture as every other gated action in this file.
+const DOME_DESTINATION = { x: -34605, y: 116398, z: 37042 };
+const DOME_NAME_PREFIX = 'Ayo';
+
+const domeTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/dome_teleport_request_${steamId}.json`;
+const domeTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/dome_teleport_result_${steamId}.json`;
+const requestDomeTeleport = (env, steamId) =>
+  writeRequest(env, domeTeleportRequestPath, steamId, DOME_DESTINATION);
+const readDomeTeleportResult = (env, steamId, requestId) =>
+  readResult(env, domeTeleportResultPath, steamId, requestId);
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -4134,6 +4159,61 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Hotzone teleport result lookup failed' }, 502);
+      }
+    }
+
+    // Dome Teleport — see DOME_DESTINATION's own comment. No daily token,
+    // no health requirement (unlike Hotzone) — just the name-prefix gate,
+    // re-checked here against player_directory:index (the Steam display
+    // name captured from join-log scraping, NOT the per-dino nickname
+    // RCON's own Name field reports — those are two different things,
+    // and the nickname one would be the wrong check here).
+    if (url.pathname === '/dome-teleport-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+
+      let players = {};
+      try {
+        const raw = await env.PARKED_KV.get('player_directory:index');
+        if (raw) players = JSON.parse(raw).players || {};
+      } catch {
+        players = {};
+      }
+      const displayName = players[steamId]?.name || '';
+      if (!displayName.startsWith(DOME_NAME_PREFIX)) {
+        return json({ error: 'Not available for your account.' }, 403);
+      }
+
+      try {
+        const requestId = await requestDomeTeleport(env, steamId);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Dome teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/dome-teleport-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readDomeTeleportResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Dome teleport result lookup failed' }, 502);
       }
     }
 
