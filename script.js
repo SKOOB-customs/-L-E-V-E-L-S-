@@ -2268,10 +2268,48 @@ const updateSetPrimeButtonForLiveState = (isAlive, growth, isPrime) => {
   btn.textContent = 'Set Prime (Bypass)';
 };
 
+// Hotzone Teleport: full health required (server re-checks this live via
+// RCON regardless — this is just so the button reflects reality instead
+// of letting a click fail with a surprise error), plus today's token
+// needs to still be available. hotzoneTokenAvailable is loaded once via
+// loadHotzoneStatus() (see below) rather than re-fetched every poll
+// tick — join/leave state doesn't need to be that fresh, and a
+// successful use already refreshes it immediately afterward.
+const HOTZONE_FULL_HEALTH_THRESHOLD = 0.999; // matches the Worker's own check
+const HOTZONE_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
+let hotzoneTokenAvailable = null; // null = not loaded yet
+
+const updateHotzoneTeleportButtonForLiveState = (isAlive, healthPct) => {
+  const btn = document.querySelector('[data-hotzone-teleport]');
+  if (!btn || HOTZONE_BUSY_LABELS.has(btn.textContent)) return;
+  if (hotzoneTokenAvailable === false) {
+    btn.disabled = true;
+    btn.textContent = 'Hotzone Teleport (used today)';
+    return;
+  }
+  btn.disabled = !isAlive || healthPct < HOTZONE_FULL_HEALTH_THRESHOLD;
+  btn.textContent = 'Hotzone Teleport';
+};
+
+const loadHotzoneStatus = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch('/api/hotzone-status');
+    const data = await response.json();
+    if (response.ok && typeof data.available === 'boolean') {
+      hotzoneTokenAvailable = data.available;
+    }
+  } catch (error) {
+    console.debug('Hotzone status load failed:', error);
+  }
+};
+
 const renderLiveDino = (dino) => {
   updateParkButtonForLiveState((dino.health || 0) * 100);
   updateGrowthPauseButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.growthPaused));
   updateSetPrimeButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.primeElder));
+  updateHotzoneTeleportButtonForLiveState((dino.health || 0) > 0, dino.health || 0);
 
   // querySelectorAll, not querySelector — the same stat/name/prime markup
   // is duplicated in the compact strip under the map (see index.html's
@@ -2361,6 +2399,7 @@ let liveDinoPollingInterval = null;
 const startLiveDinoPolling = () => {
   if (liveDinoPollingInterval) clearInterval(liveDinoPollingInterval);
   pollLiveDino();
+  loadHotzoneStatus(); // once — not worth re-checking every 2s poll tick
   liveDinoPollingInterval = setInterval(pollLiveDino, 2000);
 };
 
@@ -2506,6 +2545,30 @@ document.querySelector('[data-set-prime]')?.addEventListener('click', (event) =>
     waitingLabel: 'Waiting for in-game…',
     onSuccess: () => {
       pollLiveDino(); // refresh so the PRIME badge and button state update
+    },
+  });
+});
+
+// Live Dino tab's Hotzone Teleport button — spends the caller's one free
+// daily use to teleport just outside the server's most populated area
+// right now (see functions/api/hotzone-teleport.js / bridge-worker.js's
+// findDensestCircleCenter for the actual clustering math).
+document.querySelector('[data-hotzone-teleport]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/hotzone-teleport',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Hotzone Teleport',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      hotzoneTokenAvailable = false; // confirmed used — refreshes tomorrow
+      pollLiveDino();
     },
   });
 });

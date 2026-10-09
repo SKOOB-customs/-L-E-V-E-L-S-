@@ -531,6 +531,85 @@ const setPrimeResultPath = (steamId) => `${REDEEM_SAVED_DIR}/set_prime_result_${
 const requestSetPrime = (env, steamId) => writeRequest(env, setPrimeRequestPath, steamId, {});
 const readSetPrimeResult = (env, steamId, requestId) => readResult(env, setPrimeResultPath, steamId, requestId);
 
+// ── Hotzone Teleport (Live Dino tab) ──
+//
+// One free use per real-world UTC day, doesn't accumulate if unused —
+// tracked as just the LAST date it was used (hotzone_token:<steamId> in
+// KV), not a countdown; "available" is simply "stored date !== today",
+// so there's nothing to reset on a schedule. Marked used only once
+// main.lua confirms the teleport actually landed (see
+// /hotzone-teleport-result below) — same "never burn a charge on a
+// failed attempt" posture as skin charges elsewhere in this file.
+const hotzoneTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/hotzone_teleport_request_${steamId}.json`;
+const hotzoneTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/hotzone_teleport_result_${steamId}.json`;
+const requestHotzoneTeleport = (env, steamId, destination) =>
+  writeRequest(env, hotzoneTeleportRequestPath, steamId, destination);
+const readHotzoneTeleportResult = (env, steamId, requestId) =>
+  readResult(env, hotzoneTeleportResultPath, steamId, requestId);
+
+const HOTZONE_RADIUS = 4000; // 8000-unit diameter, per spec
+const HOTZONE_TELEPORT_DISTANCE = 7200;
+const HOTZONE_MIN_OTHER_PLAYERS = 3; // below this, it's not really a "populated area"
+// main.lua has no ground/terrain trace capability to find a safe Z for
+// an arbitrary (X,Y) — only Z values taken from a pawn that's actually
+// standing there have ever been proven safe (see its own comment on
+// tryHotzoneTeleport). This biases the destination's Z upward from the
+// edge anchor's own live Z, so a wrong guess fails safe (a short fall
+// onto real terrain once gravity takes over) instead of failing
+// dangerous (spawning inside solid geometry). Untested — the first real
+// number to tune if players report landing too high/low.
+const HOTZONE_Z_SAFETY_BUFFER = 1500;
+
+const todayUtcDateString = () => new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+// Classic "most points covered by a fixed-radius circle": the optimal
+// circle always has at least one point ON its boundary, and in the
+// general case at least two (otherwise it could shift and cover more) —
+// so every candidate center is either a point's own position, or the
+// circumcenter of some pair of points at most one diameter apart. O(n^2)
+// candidates, O(n) to score each — trivial at the player counts a
+// 150-cap server actually sees (confirmed in testing: well under a
+// millisecond of real work).
+const findDensestCircleCenter = (points, radius) => {
+  if (points.length === 0) return null;
+  const candidates = points.map((p) => ({ x: p.x, y: p.y }));
+
+  const diameter = radius * 2;
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + 1; j < points.length; j += 1) {
+      const a = points[i];
+      const b = points[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d === 0 || d > diameter) continue;
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2;
+      const h = Math.sqrt(Math.max(0, radius * radius - (d / 2) * (d / 2)));
+      const ox = (-dy / d) * h;
+      const oy = (dx / d) * h;
+      candidates.push({ x: mx + ox, y: my + oy });
+      candidates.push({ x: mx - ox, y: my - oy });
+    }
+  }
+
+  let best = null;
+  let bestCount = -1;
+  for (const center of candidates) {
+    let count = 0;
+    for (const p of points) {
+      const dx = p.x - center.x;
+      const dy = p.y - center.y;
+      if (dx * dx + dy * dy <= radius * radius) count += 1;
+    }
+    if (count > bestCount) {
+      bestCount = count;
+      best = center;
+    }
+  }
+  return { center: best, count: bestCount };
+};
+
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
 // admin_tiers.json (written directly via Pterodactyl when the roster was
@@ -3927,6 +4006,151 @@ export default {
         return json({ ok: true, players });
       } catch (error) {
         return json({ error: error.message || 'Position sweep failed' }, 502);
+      }
+    }
+
+    // Hotzone Teleport: one RCON sweep covers everything this needs —
+    // the requester's own live health (must be full) and every other
+    // spawned player's position (the population search). See
+    // findDensestCircleCenter's own comment for the clustering math and
+    // HOTZONE_Z_SAFETY_BUFFER's for why the destination Z is biased
+    // upward rather than guessed exactly.
+    if (url.pathname === '/hotzone-teleport-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV || !env.RCON_BRIDGE) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+
+      const today = todayUtcDateString();
+      const tokenKey = `hotzone_token:${steamId}`;
+      const lastUsedDate = await env.PARKED_KV.get(tokenKey);
+      if (lastUsedDate === today) {
+        return json({ error: "You've already used today's hotzone token — it refreshes tomorrow." }, 429);
+      }
+
+      const rconStub = env.RCON_BRIDGE.get(env.RCON_BRIDGE.idFromName('singleton'));
+      let dinos;
+      try {
+        const doResponse = await rconStub.fetch('https://rcon-bridge/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opcode: PLAYER_DATA_OPCODE, doneMarkers: ['PlayerDataEnd'] }),
+        });
+        const doData = await doResponse.json();
+        if (!doResponse.ok || !doData.ok) return json({ error: doData.error || 'RCON request failed' }, 502);
+        dinos = parseAllPlayerDinos(doData.response);
+      } catch (error) {
+        return json({ error: error.message || 'Position sweep failed' }, 502);
+      }
+
+      const self = dinos.find((d) => d.playerId === steamId);
+      if (!self) return json({ error: 'Spawn in first, then try again.' }, 400);
+      if (self.health < 0.999) {
+        return json({ error: 'You need to be at full health to use a hotzone token.' }, 400);
+      }
+
+      const others = dinos
+        .filter((d) => d.playerId !== steamId)
+        .map((d) => ({ steamId: d.playerId, x: d.location.x, y: d.location.y, z: d.location.z }));
+
+      const densest = findDensestCircleCenter(others, HOTZONE_RADIUS);
+      if (!densest || densest.count < HOTZONE_MIN_OTHER_PLAYERS) {
+        return json({ error: 'Not enough players clustered in one area right now.' }, 400);
+      }
+
+      // Edge anchor: of the players actually inside the winning circle,
+      // whichever is farthest from its center — i.e. closest to the
+      // boundary.
+      const inCircle = others.filter((p) => {
+        const dx = p.x - densest.center.x;
+        const dy = p.y - densest.center.y;
+        return dx * dx + dy * dy <= HOTZONE_RADIUS * HOTZONE_RADIUS;
+      });
+      let anchor = inCircle[0];
+      let anchorDistSq = -1;
+      for (const p of inCircle) {
+        const dx = p.x - densest.center.x;
+        const dy = p.y - densest.center.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > anchorDistSq) {
+          anchorDistSq = distSq;
+          anchor = p;
+        }
+      }
+
+      // Outward from the circle's center, through the anchor, continuing
+      // HOTZONE_TELEPORT_DISTANCE further — lands just past the crowd's
+      // edge rather than inside it.
+      let dirX = anchor.x - densest.center.x;
+      let dirY = anchor.y - densest.center.y;
+      const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
+      if (dirLen < 1) {
+        // Degenerate case (anchor essentially at the circle's own
+        // center) — arbitrary but deterministic fallback direction.
+        dirX = 1;
+        dirY = 0;
+      } else {
+        dirX /= dirLen;
+        dirY /= dirLen;
+      }
+
+      const destination = {
+        x: anchor.x + dirX * HOTZONE_TELEPORT_DISTANCE,
+        y: anchor.y + dirY * HOTZONE_TELEPORT_DISTANCE,
+        z: anchor.z + HOTZONE_Z_SAFETY_BUFFER,
+      };
+
+      try {
+        const requestId = await requestHotzoneTeleport(env, steamId, destination);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Hotzone teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/hotzone-teleport-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readHotzoneTeleportResult(env, steamId, requestId);
+        if (result?.ok && env.PARKED_KV) {
+          // Marked used only now — confirmed success, not just a
+          // submitted attempt. A failed teleport (no live pawn, etc.)
+          // never burns the player's one daily use.
+          await env.PARKED_KV.put(`hotzone_token:${steamId}`, todayUtcDateString());
+        }
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Hotzone teleport result lookup failed' }, 502);
+      }
+    }
+
+    // So the website can show the button's enabled/disabled state (and
+    // "refreshes tomorrow" messaging) without spending an actual attempt
+    // finding out.
+    if (url.pathname === '/hotzone-status' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ ok: true, available: true });
+      try {
+        const lastUsedDate = await env.PARKED_KV.get(`hotzone_token:${steamId}`);
+        return json({ ok: true, available: lastUsedDate !== todayUtcDateString() });
+      } catch (error) {
+        return json({ error: error.message || 'Hotzone status lookup failed' }, 502);
       }
     }
 

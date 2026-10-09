@@ -1330,6 +1330,14 @@ local function setPrimeResultFilePath(steam)
     return SAVED_DIR .. "/set_prime_result_" .. steam .. ".json"
 end
 
+local function hotzoneTeleportRequestFilePath(steam)
+    return SAVED_DIR .. "/hotzone_teleport_request_" .. steam .. ".json"
+end
+
+local function hotzoneTeleportResultFilePath(steam)
+    return SAVED_DIR .. "/hotzone_teleport_result_" .. steam .. ".json"
+end
+
 local function writeRequestResult(resultPath, requestId, ok, message)
     local resultJson = string.format(
         '{"requestId":"%s","ok":%s,"message":"%s","processedAt":%d}',
@@ -1722,6 +1730,67 @@ local function checkWebsiteTeleportRequest(steam)
     writeRequestResult(teleportExecuteResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Hotzone Teleport (Live Dino tab, one free use per real-world day) ──
+--
+-- Unlike tryTeleportToFriend above, the destination here is a computed
+-- point (found server-side in the Worker: densest cluster of other
+-- players, then offset outward from whoever's nearest that cluster's
+-- edge — see bridge-worker.js's own comment on the circle math), not
+-- another player's actual live location. That matters for one reason:
+-- K2_GetActorLocation/K2_SetActorLocation have only ever been proven
+-- safe here when the Z value comes from a pawn that's ACTUALLY standing
+-- there (friend teleport, same as this). This mod has no ground/terrain
+-- trace capability to find a safe Z for an arbitrary (X,Y) — the Z the
+-- Worker sends is the edge-anchor player's own live Z plus a fixed
+-- upward buffer, specifically so a wrong guess fails safe (falling a
+-- short distance onto real terrain) rather than failing dangerous
+-- (spawning inside solid geometry). Same {X=,Y=,Z=} table shape as
+-- every other FVector constructed in this file (see e.g. the {R=,G=,B=,
+-- A=} color literals above) — UE4SS's own marshaling convention, not
+-- specific to this function.
+local function tryHotzoneTeleport(steam, x, y, z)
+    local gm = findGameMode()
+    if gm == nil then return false, "Teleport failed: internal error." end
+
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Teleport failed: spawn in first, then try again."
+    end
+
+    local ok, err = pcall(function()
+        pawn:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, nil, true)
+    end)
+    if not ok then
+        log("Hotzone teleport: K2_SetActorLocation failed: " .. tostring(err))
+        return false, "Teleport failed: could not move you there."
+    end
+    pcall(function() pawn:ForceNetUpdate() end)
+
+    return true, "Teleported to a populated area."
+end
+
+local function checkWebsiteHotzoneTeleportRequest(steam)
+    local path = hotzoneTeleportRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local x = jsonReadNumber(body, "x")
+    local y = jsonReadNumber(body, "y")
+    local z = jsonReadNumber(body, "z")
+    if requestId == nil or x == nil or y == nil or z == nil then return end
+
+    local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    safeNotify(steam, message)
+    log("Hotzone teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(hotzoneTeleportResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Website-triggered growth pause/resume (Live Dino tab) ──
 --
 -- ATIDinosaurBase carries its own uint8 bIsGrowthPaused flag plus an
@@ -2003,6 +2072,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteTeleportRequest(steam)
                     checkWebsiteGrowthPauseRequest(steam)
                     checkWebsiteSetPrimeRequest(steam)
+                    checkWebsiteHotzoneTeleportRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)
                     if pawn ~= nil then
