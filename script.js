@@ -151,6 +151,110 @@ const updateDinoMascotForTab = (tabName) => {
   if (!mascot.getAttribute('src')?.endsWith(nextSrc)) mascot.setAttribute('src', nextSrc);
 };
 
+// ── Secret mascot click animations ──
+//
+// 1 click: a "paused, hop, resume" beat. There's no way to actually pause
+// a native animated <img> GIF, so this swaps to a static first-frame PNG
+// for the duration of a small scale pulse, then swaps back to the live
+// GIF — reassigning the same GIF src restarts its loop from frame 1 in
+// every modern browser, which doubles as the "resume" here.
+// 2 clicks: a "look left, right, left" head-check via scaleX mirroring,
+// like checking both ways before crossing a road, ending back at the
+// sprite's normal (unflipped) facing.
+// 3+ clicks: dashes off the right edge (every sprite here faces right by
+// default — confirmed against each GIF's own first frame), instantly
+// reappears just past the left edge, then dashes back in to rest.
+//
+// All three are purely transient — none change the mascot's steady-state
+// src/transform, so updateDinoMascotForTab above doesn't need to know
+// anything happened.
+const DINO_MASCOT_FRAME_SRC = {
+  'assets/logo/Pterodactyl_animated_3_1.gif': 'assets/logo/Pterodactyl_animated_3_1_frame0.png',
+  'assets/logo/REX.gif': 'assets/logo/REX_frame0.png',
+  'assets/logo/TRICERATOPS_1.gif': 'assets/logo/TRICERATOPS_1_frame0.png',
+};
+
+const playDinoMascotBump = async (mascot) => {
+  const liveSrc = mascot.getAttribute('src');
+  const frameSrc = DINO_MASCOT_FRAME_SRC[liveSrc];
+  if (frameSrc) mascot.setAttribute('src', frameSrc);
+  await mascot.animate(
+    [
+      { transform: 'scale(1)' },
+      { transform: 'scale(1.22)' },
+      { transform: 'scale(1)' },
+    ],
+    { duration: 420, easing: 'ease-in-out' },
+  ).finished;
+  if (frameSrc) mascot.setAttribute('src', liveSrc);
+};
+
+const playDinoMascotLook = async (mascot) => {
+  await mascot.animate(
+    [
+      { transform: 'scaleX(1)' },
+      { transform: 'scaleX(-1)' },
+      { transform: 'scaleX(1)' },
+      { transform: 'scaleX(-1)' },
+      { transform: 'scaleX(1)' },
+    ],
+    { duration: 900, easing: 'ease-in-out' },
+  ).finished;
+};
+
+const playDinoMascotDash = async (mascot) => {
+  const rect = mascot.getBoundingClientRect();
+  const clearRight = Math.round(window.innerWidth - rect.left + 60);
+  const clearLeft = Math.round(-(rect.right + 60));
+
+  await mascot.animate(
+    [{ transform: 'translateX(0px)' }, { transform: `translateX(${clearRight}px)` }],
+    { duration: 320, easing: 'ease-in' },
+  ).finished;
+
+  // Instant reappear just past the opposite edge — a plain style write
+  // (plus a forced reflow read right after) rather than another
+  // animate() call, which would interpolate the jump instead of cutting.
+  mascot.style.transform = `translateX(${clearLeft}px)`;
+  mascot.getBoundingClientRect();
+
+  await mascot.animate(
+    [{ transform: `translateX(${clearLeft}px)` }, { transform: 'translateX(0px)' }],
+    { duration: 420, easing: 'ease-out' },
+  ).finished;
+  mascot.style.transform = '';
+};
+
+let dinoMascotClickCount = 0;
+let dinoMascotClickTimer = null;
+let dinoMascotAnimating = false;
+const DINO_MASCOT_CLICK_WINDOW_MS = 400;
+
+const handleDinoMascotClickBurst = async () => {
+  const mascot = document.getElementById('dinoMascot');
+  const count = dinoMascotClickCount;
+  dinoMascotClickCount = 0;
+  if (!mascot || dinoMascotAnimating || count < 1) return;
+  dinoMascotAnimating = true;
+  try {
+    if (count === 1) await playDinoMascotBump(mascot);
+    else if (count === 2) await playDinoMascotLook(mascot);
+    else await playDinoMascotDash(mascot);
+  } catch (error) {
+    console.debug('Dino mascot animation failed:', error);
+  } finally {
+    mascot.style.transform = '';
+    dinoMascotAnimating = false;
+  }
+};
+
+document.getElementById('dinoMascot')?.addEventListener('click', () => {
+  if (dinoMascotAnimating) return;
+  dinoMascotClickCount += 1;
+  clearTimeout(dinoMascotClickTimer);
+  dinoMascotClickTimer = setTimeout(handleDinoMascotClickBurst, DINO_MASCOT_CLICK_WINDOW_MS);
+});
+
 const activateTab = (tabName) => {
   tabButtons.forEach((button) => {
     const isActive = button.dataset.tab === tabName;

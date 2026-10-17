@@ -555,7 +555,12 @@ body::before {
   width: 110px;
   height: 110px;
   object-fit: contain;
-  pointer-events: none;
+  /* Secretly clickable (see script.js's dino mascot click handlers) —
+     cursor is the only hint on purpose, no label or hover glow, so it
+     stays a thing players stumble onto rather than an obvious button. */
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
 }
 
