@@ -174,21 +174,45 @@ const DINO_MASCOT_FRAME_SRC = {
   'assets/logo/TRICERATOPS_1.gif': 'assets/logo/TRICERATOPS_1_frame0.png',
 };
 
+// Per request: pterodactyl and rex dash off to the LEFT, triceratops
+// still dashes RIGHT — not a "which way does the sprite face" rule, just
+// what reads right per-creature, so this stays its own explicit map
+// rather than reusing any "facing" logic.
+const DINO_MASCOT_DASH_DIRECTION = {
+  'assets/logo/Pterodactyl_animated_3_1.gif': 'left',
+  'assets/logo/REX.gif': 'left',
+  'assets/logo/TRICERATOPS_1.gif': 'right',
+};
+
+// Grow quickly, then a rapid rotate shake while enlarged ("angry" at
+// being clicked), then shrink back — longer overall than a plain bump so
+// the shake actually reads before it's over.
 const playDinoMascotBump = async (mascot) => {
   const liveSrc = mascot.getAttribute('src');
   const frameSrc = DINO_MASCOT_FRAME_SRC[liveSrc];
   if (frameSrc) mascot.setAttribute('src', frameSrc);
   await mascot.animate(
     [
-      { transform: 'scale(1)' },
-      { transform: 'scale(1.22)' },
-      { transform: 'scale(1)' },
+      { transform: 'scale(1) rotate(0deg)', offset: 0 },
+      { transform: 'scale(1.22) rotate(0deg)', offset: 0.14 },
+      { transform: 'scale(1.22) rotate(-9deg)', offset: 0.22 },
+      { transform: 'scale(1.22) rotate(9deg)', offset: 0.3 },
+      { transform: 'scale(1.22) rotate(-9deg)', offset: 0.38 },
+      { transform: 'scale(1.22) rotate(9deg)', offset: 0.46 },
+      { transform: 'scale(1.22) rotate(-9deg)', offset: 0.54 },
+      { transform: 'scale(1.22) rotate(9deg)', offset: 0.62 },
+      { transform: 'scale(1.22) rotate(-9deg)', offset: 0.7 },
+      { transform: 'scale(1.22) rotate(9deg)', offset: 0.78 },
+      { transform: 'scale(1.22) rotate(0deg)', offset: 0.86 },
+      { transform: 'scale(1) rotate(0deg)', offset: 1 },
     ],
-    { duration: 420, easing: 'ease-in-out' },
+    { duration: 1300, easing: 'ease-in-out' },
   ).finished;
   if (frameSrc) mascot.setAttribute('src', liveSrc);
 };
 
+// Same scaleX mirror as before, just slowed way down so it reads as a
+// deliberate "no" head-shake rather than a quick double-take.
 const playDinoMascotLook = async (mascot) => {
   await mascot.animate(
     [
@@ -198,28 +222,32 @@ const playDinoMascotLook = async (mascot) => {
       { transform: 'scaleX(-1)' },
       { transform: 'scaleX(1)' },
     ],
-    { duration: 900, easing: 'ease-in-out' },
+    { duration: 1800, easing: 'ease-in-out' },
   ).finished;
 };
 
 const playDinoMascotDash = async (mascot) => {
+  const liveSrc = mascot.getAttribute('src');
+  const direction = DINO_MASCOT_DASH_DIRECTION[liveSrc] || 'right';
   const rect = mascot.getBoundingClientRect();
   const clearRight = Math.round(window.innerWidth - rect.left + 60);
   const clearLeft = Math.round(-(rect.right + 60));
+  const exitX = direction === 'left' ? clearLeft : clearRight;
+  const enterFromX = direction === 'left' ? clearRight : clearLeft;
 
   await mascot.animate(
-    [{ transform: 'translateX(0px)' }, { transform: `translateX(${clearRight}px)` }],
+    [{ transform: 'translateX(0px)' }, { transform: `translateX(${exitX}px)` }],
     { duration: 320, easing: 'ease-in' },
   ).finished;
 
   // Instant reappear just past the opposite edge — a plain style write
   // (plus a forced reflow read right after) rather than another
   // animate() call, which would interpolate the jump instead of cutting.
-  mascot.style.transform = `translateX(${clearLeft}px)`;
+  mascot.style.transform = `translateX(${enterFromX}px)`;
   mascot.getBoundingClientRect();
 
   await mascot.animate(
-    [{ transform: `translateX(${clearLeft}px)` }, { transform: 'translateX(0px)' }],
+    [{ transform: `translateX(${enterFromX}px)` }, { transform: 'translateX(0px)' }],
     { duration: 420, easing: 'ease-out' },
   ).finished;
   mascot.style.transform = '';
