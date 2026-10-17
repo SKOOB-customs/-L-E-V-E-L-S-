@@ -610,6 +610,22 @@ const findDensestCircleCenter = (points, radius) => {
   return { center: best, count: bestCount };
 };
 
+// ── PermExceptions ──
+//
+// A standing allowlist of specific Steam IDs who get individual features
+// normally restricted to some narrower rule (a name prefix, an admin
+// tier, etc.) without actually being an admin and without meeting that
+// narrower rule themselves. Not tied to any one feature — each gate that
+// wants to honor it just adds `|| isPermException(steamId)` to its own
+// existing check, same as Dome Teleport does below (the first feature to
+// use this). Deliberately separate from admin_tiers.json: this is "this
+// specific account gets this specific thing," not an admin grant.
+const PERM_EXCEPTIONS = new Set([
+  '76561198162800719',
+]);
+
+const isPermException = (steamId) => PERM_EXCEPTIONS.has(steamId);
+
 // ── Dome Teleport ──
 //
 // Same request/result mechanism as Hotzone (reuses the identical
@@ -621,12 +637,26 @@ const findDensestCircleCenter = (points, radius) => {
 // here the way Hotzone's computed destinations have.
 //
 // Gated to players whose Steam display name starts with the exact
-// 3-character prefix "Ayo" (capital A, lowercase y/o) — re-checked here
-// server-side against player_directory:index regardless of whether the
-// website hid the button, same "client hint, server re-verifies"
-// posture as every other gated action in this file.
+// 3-character prefix "Ayo" (capital A, lowercase y/o), OR anyone in
+// PermExceptions above — re-checked here server-side against
+// player_directory:index regardless of whether the website hid the
+// button, same "client hint, server re-verifies" posture as every other
+// gated action in this file.
 const DOME_DESTINATION = { x: -34605, y: 116398, z: 37042 };
 const DOME_NAME_PREFIX = 'Ayo';
+
+const hasDomeAccess = async (env, steamId) => {
+  if (isPermException(steamId)) return true;
+  let players = {};
+  try {
+    const raw = await env.PARKED_KV.get('player_directory:index');
+    if (raw) players = JSON.parse(raw).players || {};
+  } catch {
+    players = {};
+  }
+  const displayName = players[steamId]?.name || '';
+  return displayName.startsWith(DOME_NAME_PREFIX);
+};
 
 const domeTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/dome_teleport_request_${steamId}.json`;
 const domeTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/dome_teleport_result_${steamId}.json`;
@@ -4432,15 +4462,7 @@ export default {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
 
-      let players = {};
-      try {
-        const raw = await env.PARKED_KV.get('player_directory:index');
-        if (raw) players = JSON.parse(raw).players || {};
-      } catch {
-        players = {};
-      }
-      const displayName = players[steamId]?.name || '';
-      if (!displayName.startsWith(DOME_NAME_PREFIX)) {
+      if (!(await hasDomeAccess(env, steamId))) {
         return json({ error: 'Not available for your account.' }, 403);
       }
 
@@ -4463,6 +4485,26 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Dome teleport result lookup failed' }, 502);
+      }
+    }
+
+    // So the website can decide whether to show the Dome button at all —
+    // the same hasDomeAccess check /dome-teleport-request re-verifies
+    // before actually acting, just surfaced for a UI-only "would this
+    // even work" read. Replaces the old client-side `profile.username.
+    // startsWith('Ayo')` guess, which used the OAuth-cached display name
+    // rather than player_directory's authoritative one and had no way to
+    // know about PermExceptions at all.
+    if (url.pathname === '/dome-access' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ access: false });
+      try {
+        return json({ access: await hasDomeAccess(env, steamId) });
+      } catch (error) {
+        return json({ error: error.message || 'Dome access check failed' }, 502);
       }
     }
 

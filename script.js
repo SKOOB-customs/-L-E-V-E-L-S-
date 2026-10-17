@@ -2755,17 +2755,30 @@ document.querySelector('[data-hotzone-teleport]')?.addEventListener('click', (ev
   });
 });
 
-// Dome Teleport — only shown for accounts whose Steam display name
-// starts with the exact 3-character prefix "Ayo" (capital A, lowercase
-// y/o). This is a client-side convenience only; the Worker re-checks the
-// same prefix against its own player directory regardless of what this
-// hides, so tampering with this check via devtools can't get a request
-// through for anyone it's not meant for.
-const updateDomeTeleportButtonVisibility = () => {
+// Dome Teleport — shown for accounts whose Steam display name starts
+// with the exact 3-character prefix "Ayo" (capital A, lowercase y/o),
+// or anyone in the Worker's PermExceptions allowlist. Asks /api/dome-
+// access rather than checking profile.username locally (that was the
+// OAuth-cached name, not player_directory's authoritative one, and had
+// no way to know about PermExceptions at all) — this is still only a
+// visibility convenience either way, the Worker re-checks the same
+// thing server-side regardless of what this hides.
+const updateDomeTeleportButtonVisibility = async () => {
   const btn = document.querySelector('[data-dome-teleport]');
   if (!btn) return;
   const profile = getSteamProfile();
-  btn.hidden = !profile?.username?.startsWith('Ayo');
+  if (!profile?.steamId) {
+    btn.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch('/api/dome-access');
+    const data = await response.json();
+    btn.hidden = !data.access;
+  } catch (error) {
+    console.debug('Dome access check failed:', error);
+    btn.hidden = true;
+  }
 };
 
 document.querySelector('[data-dome-teleport]')?.addEventListener('click', (event) => {
