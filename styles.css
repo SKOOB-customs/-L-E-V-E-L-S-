@@ -541,6 +541,30 @@ body::before {
   box-shadow: 4px 0 14px rgba(0, 0, 0, 0.28);
 }
 
+/* Fixed foreground mascot — see index.html's own comment on #dinoMascot.
+   top/left below are only the fallback shown before script.js measures
+   the Home-hub cards and locks in a real position (or if that measurement
+   can't run, e.g. a deep link landing on a non-Home tab on load) — picked
+   to roughly match where "between Support and Friends" usually falls. */
+.dino-mascot {
+  position: fixed;
+  top: 22%;
+  left: 14px;
+  z-index: 15;
+  width: 110px;
+  height: 110px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
+}
+
+@media (max-width: 720px) {
+  .dino-mascot {
+    width: 72px;
+    height: 72px;
+  }
+}
+
 .friends-sidebar {
   position: fixed;
   top: 0;

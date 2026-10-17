@@ -133,6 +133,52 @@ const fitTextToBox = (el, { minFontPx = 11, step = 1 } = {}) => {
 const tabButtons = document.querySelectorAll('.tab-button');
 const tabPanels = document.querySelectorAll('.tab-panel');
 
+// ── Fixed foreground mascot (#dinoMascot) ──
+//
+// Pterodactyl everywhere by default; swapped for the triceratops/rex on
+// the Community/Support tabs specifically, same element just a different
+// src so there's never two mascots on screen at once.
+const DINO_MASCOT_DEFAULT_SRC = 'assets/logo/Pterodactyl_animated_3_1.gif';
+const DINO_MASCOT_TAB_SRC = {
+  community: 'assets/logo/TRICERATOPS_1.gif',
+  tickets: 'assets/logo/REX.gif',
+};
+
+const updateDinoMascotForTab = (tabName) => {
+  const mascot = document.getElementById('dinoMascot');
+  if (!mascot) return;
+  const nextSrc = DINO_MASCOT_TAB_SRC[tabName] || DINO_MASCOT_DEFAULT_SRC;
+  if (!mascot.getAttribute('src')?.endsWith(nextSrc)) mascot.setAttribute('src', nextSrc);
+};
+
+// Positioned once, "exactly between" the Support and Friends Home-hub
+// cards as they actually sit on load, then left alone — position:fixed
+// means it then stays put as the player scrolls or switches tabs, even
+// though the hub cards themselves only exist (visibly) on the Home tab
+// and can be dragged to a different order afterward. Guarded by
+// dinoMascotPositioned so a later Home-tab visit (e.g. after the player
+// has reordered their hub cards) never jumps it somewhere new.
+let dinoMascotPositioned = false;
+const positionDinoMascotFromHub = () => {
+  if (dinoMascotPositioned) return;
+  const mascot = document.getElementById('dinoMascot');
+  const supportCard = document.querySelector('[data-hub-card="tickets"]');
+  const friendsCard = document.querySelector('[data-hub-card="friends"]');
+  if (!mascot || !supportCard || !friendsCard) return;
+  const a = supportCard.getBoundingClientRect();
+  const b = friendsCard.getBoundingClientRect();
+  // Zero-sized rects mean the hub grid isn't actually visible right now
+  // (e.g. a reload deep-linked straight to another tab) — leave the CSS
+  // fallback position in place rather than locking in (0, 0).
+  if (!a.width || !a.height || !b.width || !b.height) return;
+  const midX = ((a.left + a.right) / 2 + (b.left + b.right) / 2) / 2;
+  const midY = ((a.top + a.bottom) / 2 + (b.top + b.bottom) / 2) / 2;
+  const size = mascot.getBoundingClientRect().width || 110;
+  mascot.style.left = `${Math.round(midX - size / 2)}px`;
+  mascot.style.top = `${Math.round(midY - size / 2)}px`;
+  dinoMascotPositioned = true;
+};
+
 const activateTab = (tabName) => {
   tabButtons.forEach((button) => {
     const isActive = button.dataset.tab === tabName;
@@ -144,6 +190,9 @@ const activateTab = (tabName) => {
     panel.classList.toggle('is-active', isActive);
     panel.style.display = isActive ? 'grid' : 'none';
   });
+
+  updateDinoMascotForTab(tabName);
+  if (tabName === 'hub') positionDinoMascotFromHub();
 
   // Persists the active tab into the URL hash so a plain page reload
   // restores whatever page you were actually on (see the bootstrap
@@ -397,6 +446,7 @@ const renderHub = () => {
 };
 
 renderHub();
+positionDinoMascotFromHub();
 
 document.getElementById('headerSteamBtn')?.addEventListener('click', (event) => {
   if (!getSteamProfile()) return; // not logged in yet, let the link go to /api/steam-login
@@ -3668,6 +3718,7 @@ const checkAdminPanelAccess = async () => {
       return;
     }
     renderHub();
+    positionDinoMascotFromHub();
 
     if (data.unlocked) {
       setAdminPanelGateState('unlocked');
