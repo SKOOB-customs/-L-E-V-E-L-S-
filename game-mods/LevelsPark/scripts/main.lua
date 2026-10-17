@@ -1698,7 +1698,11 @@ local function tryTeleportToFriend(moverSteam, referenceSteam)
     end
 
     local ok, err = pcall(function()
-        moverPawn:K2_SetActorLocation(location, false, nil, true)
+        -- Third arg is FHitResult& OutSweepHitResult — an out-param struct
+        -- the engine writes into. UE4SS's marshaling needs a real table
+        -- there, not nil, or the native call throws (this was the actual
+        -- cause behind "could not move you there" failures).
+        moverPawn:K2_SetActorLocation(location, false, {}, true)
     end)
     if not ok then
         log("Teleport: K2_SetActorLocation failed: " .. tostring(err))
@@ -1760,7 +1764,9 @@ local function tryHotzoneTeleport(steam, x, y, z)
     end
 
     local ok, err = pcall(function()
-        pawn:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, nil, true)
+        -- Same out-param fix as friend-teleport above — {} not nil for
+        -- the FHitResult& the engine writes into.
+        pawn:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
     end)
     if not ok then
         log("Hotzone teleport: K2_SetActorLocation failed: " .. tostring(err))
