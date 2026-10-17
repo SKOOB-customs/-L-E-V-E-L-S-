@@ -133,11 +133,11 @@
 
     <!-- Fixed, foreground mascot — pterodactyl everywhere by default, swapped
          for the triceratops/rex on the Community/Support tabs specifically
-         (see updateDinoMascotForTab in script.js). Positioned once in JS,
-         computed from where the Support/Friends Home-hub cards sit on load
-         (positionDinoMascotFromHub), then left alone so it stays put as the
-         player scrolls or switches tabs. pointer-events:none so it never
-         blocks clicks on whatever it visually overlaps. -->
+         (see updateDinoMascotForTab in script.js). Position is plain CSS
+         (.dino-mascot, top-right with a gap below the header/tab-switcher)
+         so it stays put as the player scrolls or switches tabs regardless
+         of viewport size or hub-card layout. pointer-events:none so it
+         never blocks clicks on whatever it visually overlaps. -->
     <img class="dino-mascot" id="dinoMascot" src="assets/logo/Pterodactyl_animated_3_1.gif" alt="" aria-hidden="true" />
 
     <!-- Owner-only: every player-submitted skin idea, viewable/repliable from

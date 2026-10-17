@@ -542,14 +542,15 @@ body::before {
 }
 
 /* Fixed foreground mascot — see index.html's own comment on #dinoMascot.
-   top/left below are only the fallback shown before script.js measures
-   the Home-hub cards and locks in a real position (or if that measurement
-   can't run, e.g. a deep link landing on a non-Home tab on load) — picked
-   to roughly match where "between Support and Friends" usually falls. */
+   Anchored top-right with a real gap below the header/tab-switcher bar
+   (not flush against the top edge) — originally computed dynamically
+   from the Home-hub card positions, but that drifted all over the page
+   depending on each player's own drag-reordered card layout, so it's a
+   plain fixed offset now. Nudge top/right here per feedback. */
 .dino-mascot {
   position: fixed;
-  top: 22%;
-  left: 14px;
+  top: 140px;
+  right: 40px;
   z-index: 15;
   width: 110px;
   height: 110px;
