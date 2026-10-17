@@ -3778,7 +3778,41 @@ document.querySelector('[data-admin-passkey-reset-form]')?.addEventListener('sub
   }
 });
 
+// ── Skin Lab tab ──
+//
+// A separate surface from the Admin Panel/Owner tier system entirely —
+// combines the Owner tab's Skin Library (create/edit/delete/test) with
+// none of the Admin Panel's grant-to-other-players power, gated by
+// hasSkinLabAccess on the Worker (owner tier, plus one specific
+// whitelisted non-admin Steam ID — see bridge-worker.js's own comment).
+// Checked independently of checkAdminPanelAccess so it works for an
+// account with no admin passkey and no admin_tiers.json entry at all.
+const checkSkinLabAccess = async () => {
+  const tabButton = document.querySelector('.skin-lab-tab-button');
+  const panel = document.getElementById('skin-lab');
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    if (tabButton) tabButton.hidden = true;
+    if (panel) panel.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch('/api/skin-lab-access');
+    const data = await response.json();
+    const access = !!data.access;
+    if (tabButton) tabButton.hidden = !access;
+    if (panel) panel.hidden = !access;
+    if (access) {
+      loadSkinLabLibrary();
+      loadSkinLabLibraryTrash();
+    }
+  } catch (error) {
+    console.debug('Skin Lab access check failed:', error);
+  }
+};
+
 checkAdminPanelAccess();
+checkSkinLabAccess();
 // Now open to any signed-in player (not admin-gated server-side anymore)
 // since the Friends tab's "Add a friend" field needs the same name-search
 // lookup — loadPlayerDirectory() itself already no-ops for a signed-out
@@ -5002,6 +5036,347 @@ document.querySelector('[data-skin-library-form]')?.addEventListener('submit', (
 
 document.querySelector('[data-skin-library-save-changes]')?.addEventListener('click', (event) => {
   saveSkinToLibrary(event.target);
+});
+
+// ── Skin Lab tab's own Skin Library (create/edit/delete/test) ──
+//
+// Same shared skin_library:index/skin_library_trash:index data as the
+// Owner tab's Skin Library above, read/written through the separate
+// /api/skin-lab-* routes so a non-owner Skin Lab account (see
+// checkSkinLabAccess) can use this without ever touching the Admin
+// Panel/Owner passkey system. Deliberately no grant-to-another-player
+// form here — mirrors collectSkinLibraryColors/saveSkinToLibrary/
+// renderSkinLibraryList/loadSkinLibrary/loadSkinLibraryTrash above,
+// just against data-skinlab-* fields and endpoints instead.
+let skinLabLibraryCache = [];
+let editingSkinLabName = null;
+
+const setSkinLabEditingState = (name) => {
+  editingSkinLabName = name || null;
+  const saveBtn = document.querySelector('[data-skinlab-library-form] button[type="submit"]');
+  const saveChangesBtn = document.querySelector('[data-skinlab-library-save-changes]');
+  if (saveBtn) saveBtn.hidden = !!editingSkinLabName;
+  if (saveChangesBtn) saveChangesBtn.hidden = !editingSkinLabName;
+};
+
+const populateSkinLabEditSelect = (skins) => {
+  const select = document.querySelector('[data-skinlab-library-edit-select]');
+  if (!select) return;
+  const previousValue = select.value;
+  select.innerHTML = '<option value="">Start a new skin…</option>';
+  skins.forEach((skin) => {
+    const option = document.createElement('option');
+    option.value = skin.name;
+    option.textContent = skin.name;
+    select.appendChild(option);
+  });
+  if ([...select.options].some((opt) => opt.value === previousValue)) select.value = previousValue;
+};
+
+const renderSkinLabLibraryList = (skins) => {
+  const list = document.querySelector('[data-skinlab-library-list]');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!skins.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No saved skins yet.';
+    list.appendChild(empty);
+    return;
+  }
+  skins.forEach((skin) => {
+    const card = document.createElement('div');
+    card.className = 'panel skin-library-card';
+
+    const header = document.createElement('div');
+    header.className = 'skin-library-card-header';
+    const title = document.createElement('strong');
+    title.textContent = skin.name;
+    const swatch = document.createElement('span');
+    swatch.className = 'skin-library-swatch';
+    const bodyColor = skin.colors?.BodyColor;
+    if (bodyColor) {
+      const r = Math.round((bodyColor.r ?? 0.5) * 255);
+      const g = Math.round((bodyColor.g ?? 0.5) * 255);
+      const b = Math.round((bodyColor.b ?? 0.5) * 255);
+      swatch.style.background = `rgb(${r}, ${g}, ${b})`;
+      swatch.title = 'Body color preview';
+    } else {
+      swatch.classList.add('skin-library-swatch-empty');
+      swatch.title = 'No color preview';
+    }
+    header.append(title, swatch);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'skin-library-action-row';
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'skin-library-delete-btn';
+    deleteBtn.textContent = 'Delete';
+
+    const showConfirm = () => {
+      actionRow.innerHTML = '';
+      const prompt = document.createElement('span');
+      prompt.className = 'skin-library-confirm-text';
+      prompt.textContent = 'Delete this skin?';
+      const yesBtn = document.createElement('button');
+      yesBtn.type = 'button';
+      yesBtn.className = 'skin-library-confirm-yes';
+      yesBtn.textContent = 'Yes, delete';
+      const noBtn = document.createElement('button');
+      noBtn.type = 'button';
+      noBtn.className = 'skin-library-confirm-no';
+      noBtn.textContent = 'Cancel';
+
+      const showDeleteButton = () => {
+        actionRow.innerHTML = '';
+        actionRow.appendChild(deleteBtn);
+      };
+      noBtn.addEventListener('click', showDeleteButton);
+
+      yesBtn.addEventListener('click', async () => {
+        yesBtn.disabled = true;
+        noBtn.disabled = true;
+        try {
+          const response = await fetch('/api/skin-lab-library-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: skin.name }),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.ok) {
+            showToast(data.error || 'Could not delete that skin.');
+            showDeleteButton();
+          } else {
+            showToast(`Deleted "${skin.name}" — restorable from Deleted Skins below.`);
+            loadSkinLabLibrary();
+            loadSkinLabLibraryTrash();
+          }
+        } catch (error) {
+          console.debug('Skin Lab library delete failed:', error);
+          showToast('Could not reach the server right now.');
+          showDeleteButton();
+        }
+      });
+
+      actionRow.append(prompt, yesBtn, noBtn);
+    };
+    deleteBtn.addEventListener('click', showConfirm);
+    actionRow.appendChild(deleteBtn);
+
+    card.append(header, actionRow);
+    list.appendChild(card);
+  });
+};
+
+const loadSkinLabLibrary = async () => {
+  try {
+    const response = await fetch('/api/skin-lab-library');
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.skins)) {
+      skinLabLibraryCache = data.skins;
+      populateSkinLabEditSelect(skinLabLibraryCache);
+      renderSkinLabLibraryList(skinLabLibraryCache);
+    }
+  } catch (error) {
+    console.debug('Skin Lab library load failed:', error);
+  }
+};
+
+let skinLabTrashCache = [];
+
+const loadSkinLabLibraryTrash = async () => {
+  const selectEl = document.querySelector('[data-skinlab-trash-select]');
+  if (!selectEl) return;
+  try {
+    const response = await fetch('/api/skin-lab-library-trash');
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.trash)) return;
+    skinLabTrashCache = data.trash;
+    selectEl.innerHTML = '<option value="">— none —</option>' + skinLabTrashCache.map((entry) => {
+      const when = entry.deletedAt ? new Date(entry.deletedAt).toLocaleString() : '';
+      return `<option value="${entry.id}">${String(entry.name).replace(/</g, '&lt;')} — deleted ${when}</option>`;
+    }).join('');
+  } catch (error) {
+    console.debug('Skin Lab library trash load failed:', error);
+  }
+};
+
+document.querySelector('[data-skinlab-trash-restore]')?.addEventListener('click', async (event) => {
+  const selectEl = document.querySelector('[data-skinlab-trash-select]');
+  const id = selectEl?.value;
+  if (!id) {
+    showToast('Pick a deleted skin to restore.');
+    return;
+  }
+  const button = event.target;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/skin-lab-library-restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not restore that skin.');
+      return;
+    }
+    showToast(`Restored "${data.skin?.name || 'skin'}".`);
+    loadSkinLabLibraryTrash();
+    loadSkinLabLibrary();
+  } catch (error) {
+    console.debug('Skin Lab library restore failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector('[data-skinlab-library-edit-select]')?.addEventListener('change', (event) => {
+  const skinName = event.target.value;
+  const nameInput = document.querySelector('[data-skinlab-library-name]');
+  const jsonField = document.querySelector('[data-skinlab-library-json]');
+  const patternInput = document.querySelector('[data-skinlab-library-pattern-index]');
+  const variationInput = document.querySelector('[data-skinlab-library-skin-variation]');
+
+  if (!skinName) {
+    if (nameInput) nameInput.value = '';
+    if (jsonField) jsonField.value = '';
+    if (patternInput) patternInput.value = '';
+    if (variationInput) variationInput.value = '';
+    document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => { input.value = '#808080'; });
+    setSkinLabEditingState(null);
+    return;
+  }
+
+  const skin = skinLabLibraryCache.find((s) => s.name === skinName);
+  if (!skin) return;
+  if (nameInput) nameInput.value = skin.name;
+  if (jsonField) jsonField.value = JSON.stringify(skin.colors, null, 2);
+  document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => { input.value = '#808080'; });
+  if (patternInput) patternInput.value = skin.colors?.PatternIndex ?? '';
+  if (variationInput) variationInput.value = skin.colors?.SkinVariation ?? '';
+
+  setSkinLabEditingState(skin.name);
+});
+
+const collectSkinLabColors = () => {
+  let colors;
+  const jsonText = document.querySelector('[data-skinlab-library-json]')?.value.trim() || '';
+  if (jsonText) {
+    try {
+      colors = JSON.parse(jsonText);
+    } catch (error) {
+      showToast('Advanced JSON is not valid JSON.');
+      return null;
+    }
+  } else {
+    colors = {};
+    document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => {
+      colors[input.dataset.skinlabLibraryColor] = input.value;
+    });
+  }
+  const patternIndexValue = document.querySelector('[data-skinlab-library-pattern-index]')?.value;
+  if (patternIndexValue !== '' && patternIndexValue != null) colors.PatternIndex = Number(patternIndexValue);
+  const skinVariationValue = document.querySelector('[data-skinlab-library-skin-variation]')?.value;
+  if (skinVariationValue !== '' && skinVariationValue != null) colors.SkinVariation = Number(skinVariationValue);
+  return colors;
+};
+
+const saveSkinToSkinLab = async (buttonEl) => {
+  const name = document.querySelector('[data-skinlab-library-name]')?.value.trim() || '';
+  if (!name) {
+    showToast('Enter a skin name.');
+    return;
+  }
+
+  const colors = collectSkinLabColors();
+  if (colors === null) return;
+
+  if (buttonEl) buttonEl.disabled = true;
+  try {
+    const response = await fetch('/api/skin-lab-library-save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, colors }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not save that skin.');
+    } else {
+      showToast(editingSkinLabName ? `Saved changes to "${name}".` : `Saved "${name}" to the library.`);
+      if (!editingSkinLabName) {
+        document.querySelector('[data-skinlab-library-name]').value = '';
+        document.querySelector('[data-skinlab-library-json]').value = '';
+        document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => { input.value = '#808080'; });
+        const patternInput = document.querySelector('[data-skinlab-library-pattern-index]');
+        if (patternInput) patternInput.value = '';
+        const variationInput = document.querySelector('[data-skinlab-library-skin-variation]');
+        if (variationInput) variationInput.value = '';
+      }
+      loadSkinLabLibrary();
+    }
+  } catch (error) {
+    console.debug('Skin Lab library save failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (buttonEl) buttonEl.disabled = false;
+  }
+};
+
+document.querySelector('[data-skinlab-library-form]')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveSkinToSkinLab(event.target.querySelector('button[type="submit"]'));
+});
+
+document.querySelector('[data-skinlab-library-save-changes]')?.addEventListener('click', (event) => {
+  saveSkinToSkinLab(event.target);
+});
+
+document.querySelector('[data-skinlab-library-test]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const colors = collectSkinLabColors();
+  if (colors === null) return;
+  requestActionAndPoll({
+    endpoint: '/api/skin-lab-test',
+    body: { steamId: profile.steamId, colors },
+    buttonEl: event.target,
+    idleLabel: 'Test on my live dino',
+    waitingLabel: 'Waiting for in-game…',
+  });
+});
+
+document.querySelectorAll('[data-skinlab-library-test-step]').forEach((button) => {
+  button.addEventListener('click', (event) => {
+    const profile = getSteamProfile();
+    if (!profile?.steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    const patternInput = document.querySelector('[data-skinlab-library-pattern-index]');
+    if (!patternInput) return;
+    const step = Number(button.dataset.skinlabLibraryTestStep) || 0;
+    const current = Number(patternInput.value) || 0;
+    const min = Number(patternInput.min ?? 0);
+    const max = Number(patternInput.max ?? 9);
+    patternInput.value = String(Math.min(max, Math.max(min, current + step)));
+
+    const colors = collectSkinLabColors();
+    if (colors === null) return;
+    requestActionAndPoll({
+      endpoint: '/api/skin-lab-test',
+      body: { steamId: profile.steamId, colors },
+      buttonEl: event.target,
+      idleLabel: button.textContent,
+      waitingLabel: 'Waiting for in-game…',
+    });
+  });
 });
 
 const renderStrikeList = (strikes) => {

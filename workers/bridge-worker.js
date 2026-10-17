@@ -697,6 +697,22 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
+// ── Skin Lab access (owner tier, plus one specific non-admin account) ──
+//
+// A standalone tab combining the Owner tab's Skin Library (create/edit/
+// delete/test) with none of the Admin Panel's grant-to-other-players
+// power, built for a trusted skin designer who isn't an admin/owner at
+// all. Deliberately NOT wired through admin_tiers.json or the admin
+// passkey system — that account has neither, and isn't meant to get
+// either just to use this one tab.
+const SKIN_LAB_EXTRA_STEAM_IDS = ['76561199769552573'];
+
+const hasSkinLabAccess = async (env, steamId) => {
+  if (SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId)) return true;
+  const tier = await getAdminTier(env, steamId);
+  return tier === 'owner';
+};
+
 // See the /moderation-log route's own comment for the full picture — this
 // is the write side, called (best-effort, never blocking the real action)
 // from every route that counts as a website moderation action.
@@ -2658,6 +2674,239 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Skin test result lookup failed' }, 502);
+      }
+    }
+
+    // ── Skin Lab tab ──
+    //
+    // Reads/writes the exact same skin_library:index and
+    // skin_library_trash:index KV entries as the Owner tab's Skin Library
+    // above — one shared library either surface can manage — and reuses
+    // /skin-test-request's own result file (via readSkinTestResult), just
+    // gated by hasSkinLabAccess instead of owner tier. See that comment
+    // block above for why this account check is deliberately separate
+    // from admin_tiers.json.
+    if (url.pathname === '/skin-lab-access' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ access: false });
+      try {
+        return json({ access: await hasSkinLabAccess(env, steamId) });
+      } catch (error) {
+        return json({ error: error.message || 'Skin Lab access check failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-lab-library' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ ok: true, skins: [] });
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+      const raw = await env.PARKED_KV.get('skin_library:index');
+      let library = {};
+      if (raw) {
+        try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+      }
+      const skins = Object.entries(library)
+        .map(([name, entry]) => ({ name, colors: entry.colors }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return json({ ok: true, skins });
+    }
+
+    if (url.pathname === '/skin-lab-library-save' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, name, colors } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json({ error: 'Skin name is required' }, 400);
+      }
+      if (!colors || typeof colors !== 'object') {
+        return json({ error: 'Missing or invalid colors' }, 400);
+      }
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+
+      const normalized = normalizeSkinColors(colors);
+      if (Object.keys(normalized).length === 0) {
+        return json({ error: 'No valid color fields provided' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (raw) {
+          try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+        }
+        const trimmedName = name.trim().slice(0, 40);
+        library[trimmedName] = { colors: normalized, savedAt: Date.now(), savedBy: requesterSteamId };
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        return json({ ok: true, skin: { name: trimmedName, colors: normalized } });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library save failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-lab-library-delete' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, name } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (typeof name !== 'string' || name.trim() === '') {
+        return json({ error: 'Skin name is required' }, 400);
+      }
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+
+      try {
+        const raw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (raw) {
+          try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+        }
+        const trimmedName = name.trim();
+        const deletedEntry = library[trimmedName];
+        delete library[trimmedName];
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        if (deletedEntry) {
+          try {
+            const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+            let trash = [];
+            if (trashRaw) {
+              try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+            }
+            trash.unshift({
+              id: crypto.randomUUID(),
+              name: trimmedName,
+              colors: deletedEntry.colors,
+              savedAt: deletedEntry.savedAt,
+              savedBy: deletedEntry.savedBy,
+              deletedAt: Date.now(),
+              deletedBy: requesterSteamId,
+            });
+            if (trash.length > SKIN_LIBRARY_TRASH_MAX_ENTRIES) trash.length = SKIN_LIBRARY_TRASH_MAX_ENTRIES;
+            await env.PARKED_KV.put('skin_library_trash:index', JSON.stringify(trash));
+          } catch (error) {
+            console.error('Skin library trash write failed:', error.message);
+          }
+        }
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library delete failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-lab-library-trash' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ trash: [] });
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+      try {
+        const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+        let trash = [];
+        if (trashRaw) {
+          try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+        }
+        return json({ trash });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library trash lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-lab-library-restore' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, id } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (typeof id !== 'string' || !id) {
+        return json({ error: 'Missing trash entry id' }, 400);
+      }
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+
+      try {
+        const trashRaw = await env.PARKED_KV.get('skin_library_trash:index');
+        let trash = [];
+        if (trashRaw) {
+          try { trash = JSON.parse(trashRaw) || []; } catch { trash = []; }
+        }
+        const entryIndex = trash.findIndex((entry) => entry.id === id);
+        if (entryIndex === -1) return json({ error: 'That trash entry no longer exists' }, 404);
+        const entry = trash[entryIndex];
+
+        const libraryRaw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (libraryRaw) {
+          try { library = JSON.parse(libraryRaw) || {}; } catch { library = {}; }
+        }
+        if (library[entry.name]) {
+          return json({ error: `A skin named "${entry.name}" already exists — rename or delete it first, then restore this one.` }, 409);
+        }
+        library[entry.name] = { colors: entry.colors, savedAt: entry.savedAt, savedBy: entry.savedBy };
+        trash.splice(entryIndex, 1);
+
+        await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
+        await env.PARKED_KV.put('skin_library_trash:index', JSON.stringify(trash));
+        return json({ ok: true, skin: { name: entry.name, colors: entry.colors } });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library restore failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/skin-lab-test-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, requesterSteamId, colors } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (requesterSteamId !== steamId) {
+        return json({ error: 'Can only test a skin on your own live dino' }, 403);
+      }
+      if (!colors || typeof colors !== 'object') {
+        return json({ error: 'Missing or invalid colors' }, 400);
+      }
+      if (!(await hasSkinLabAccess(env, requesterSteamId))) return json({ error: 'Skin Lab access required' }, 403);
+
+      const normalized = normalizeSkinColors(colors);
+      if (Object.keys(normalized).length === 0) {
+        return json({ error: 'No valid color fields provided' }, 400);
+      }
+      try {
+        const requestId = await requestSkinTest(env, steamId, normalized);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Skin test request failed' }, 502);
       }
     }
 

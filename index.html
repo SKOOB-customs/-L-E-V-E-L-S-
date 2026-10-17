@@ -185,6 +185,7 @@
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
         <button class="tab-button owner-tab-button" data-tab="owner" type="button" hidden>Owner</button>
+        <button class="tab-button skin-lab-tab-button" data-tab="skin-lab" type="button" hidden>Skin Lab</button>
         <button class="tab-button transfer-logs-tab-button" data-tab="transfer-logs" type="button" hidden>Transfer Logs</button>
         <button class="tab-button" data-tab="inventory" type="button">Inventory</button>
         <button class="tab-button" data-tab="live-dino" type="button">Live Dino</button>
@@ -1236,6 +1237,117 @@
             <div class="transfer-log-list" data-mod-log-list></div>
           </section>
           </div>
+        </section>
+
+        <section class="tab-panel" id="skin-lab" data-tab="skin-lab" hidden>
+          <div class="section-header">
+            <p class="eyebrow">SKIN LAB</p>
+            <h2>Design &amp; Test Skins</h2>
+          </div>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Skin Library</div>
+            <p class="dino-park-note">Save a reusable named skin here — it shows up in the Owner tab's and Admin Panel's "Load from library" dropdowns too, same shared library.</p>
+            <form class="submit-form" data-skinlab-library-form>
+              <div class="field-row">
+                <label>
+                  Edit an existing skin
+                  <select data-skinlab-library-edit-select>
+                    <option value="">Start a new skin…</option>
+                  </select>
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Skin name
+                  <input type="text" maxlength="40" placeholder="Neon Glitch" data-skinlab-library-name required />
+                </label>
+              </div>
+              <div class="field-row skin-color-grid">
+                <label>
+                  Body
+                  <input type="color" value="#808080" data-skinlab-library-color="BodyColor" />
+                </label>
+                <label>
+                  Pattern / Markings
+                  <input type="color" value="#808080" data-skinlab-library-color="MarkingsColor" />
+                </label>
+                <label>
+                  Flank / Sides
+                  <input type="color" value="#808080" data-skinlab-library-color="FlankColor" />
+                </label>
+                <label>
+                  Belly
+                  <input type="color" value="#808080" data-skinlab-library-color="UnderbellyColor" />
+                </label>
+                <label>
+                  Detail
+                  <input type="color" value="#808080" data-skinlab-library-color="Detail1Color" />
+                </label>
+                <label>
+                  Eyes
+                  <input type="color" value="#808080" data-skinlab-library-color="EyesColor" />
+                </label>
+                <label>
+                  Breed / Male display
+                  <input type="color" value="#808080" data-skinlab-library-color="MaleDisplayColor" />
+                </label>
+              </div>
+              <div class="field-row two-up">
+                <label>
+                  Pattern index
+                  <div class="field-stepper">
+                    <button type="button" class="field-stepper-btn" data-stepper-dec="[data-skinlab-library-pattern-index]" aria-label="Decrease pattern index">−</button>
+                    <input type="number" min="0" max="9" step="1" placeholder="e.g. 0-4, species-specific" data-skinlab-library-pattern-index />
+                    <button type="button" class="field-stepper-btn" data-stepper-inc="[data-skinlab-library-pattern-index]" aria-label="Increase pattern index">+</button>
+                  </div>
+                </label>
+                <label>
+                  Skin variation
+                  <input type="number" step="1" placeholder="optional" data-skinlab-library-skin-variation />
+                </label>
+              </div>
+              <p class="dino-park-note">Each species has its own valid pattern range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>. Use "Test −1"/"Test +1" below to step through 0, 1, 2, 3… on your own live dino until colors stop showing up — that's the real range for that species.</p>
+
+              <details class="skin-advanced">
+                <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
+                <div class="field-row">
+                  <label>
+                    Overrides the color pickers above if filled in — same shape as the grant form's Advanced JSON.
+                    <textarea rows="14" class="skin-json-editor" placeholder="Leave empty to use the color pickers above" data-skinlab-library-json></textarea>
+                  </label>
+                </div>
+              </details>
+
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Save to library</button>
+                <button class="action-button" type="button" data-skinlab-library-save-changes hidden>Save changes</button>
+                <button class="secondary-button" type="button" data-skinlab-library-test>Test on my live dino</button>
+                <button class="secondary-button" type="button" data-skinlab-library-test-step="-1">Test −1</button>
+                <button class="secondary-button" type="button" data-skinlab-library-test-step="1">Test +1</button>
+              </div>
+            </form>
+
+            <div class="dino-history-list" data-skinlab-library-list>
+              <p class="empty-state">No saved skins yet.</p>
+            </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Deleted Skins</div>
+            <p class="dino-park-note">Every skin deleted from the library above, kept here so a mistaken delete isn't permanent. Restoring puts it back in the live library under its original name.</p>
+            <div class="field-row two-up">
+              <label>
+                Deleted skin
+                <select data-skinlab-trash-select>
+                  <option value="">— none —</option>
+                </select>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-skinlab-trash-restore>Restore</button>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section class="tab-panel" id="transfer-logs" data-tab="transfer-logs" hidden>
