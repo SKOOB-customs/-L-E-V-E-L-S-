@@ -564,10 +564,23 @@ body::before {
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
 }
 
+/* Pterodactyl/triceratops only — rex stays at the base size (see
+   DINO_MASCOT_LARGE_SRC in script.js, which toggles this class). 110px
+   base * 1.35. */
+.dino-mascot.is-large {
+  width: 149px;
+  height: 149px;
+}
+
 @media (max-width: 720px) {
   .dino-mascot {
     width: 72px;
     height: 72px;
+  }
+
+  .dino-mascot.is-large {
+    width: 97px;
+    height: 97px;
   }
 }
 

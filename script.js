@@ -143,12 +143,19 @@ const DINO_MASCOT_TAB_SRC = {
   community: 'assets/logo/TRICERATOPS_1.gif',
   tickets: 'assets/logo/REX.gif',
 };
+// Pterodactyl/triceratops render 35% bigger (.is-large, in styles.css) —
+// rex is "good" at the base size per request.
+const DINO_MASCOT_LARGE_SRC = new Set([
+  'assets/logo/Pterodactyl_animated_3_1.gif',
+  'assets/logo/TRICERATOPS_1.gif',
+]);
 
 const updateDinoMascotForTab = (tabName) => {
   const mascot = document.getElementById('dinoMascot');
   if (!mascot) return;
   const nextSrc = DINO_MASCOT_TAB_SRC[tabName] || DINO_MASCOT_DEFAULT_SRC;
   if (!mascot.getAttribute('src')?.endsWith(nextSrc)) mascot.setAttribute('src', nextSrc);
+  mascot.classList.toggle('is-large', DINO_MASCOT_LARGE_SRC.has(nextSrc));
 };
 
 // ── Secret mascot click animations ──
@@ -226,7 +233,22 @@ const playDinoMascotLook = async (mascot) => {
   ).finished;
 };
 
-const playDinoMascotDash = async (mascot) => {
+// 3 clicks = base speed; each click beyond that speeds the dash up,
+// maxing out at 6+ clicks ("as fast as we can make it" — the floor
+// below is still a couple frames of actual motion, not an instant cut).
+const DINO_MASCOT_DASH_BASE_MS = { exit: 320, enter: 420 };
+const DINO_MASCOT_DASH_FASTEST_MS = { exit: 110, enter: 150 };
+const DINO_MASCOT_DASH_MAX_SPEED_CLICKS = 6;
+
+const dinoMascotDashDurations = (clickCount) => {
+  const t = Math.min(Math.max((clickCount - 3) / (DINO_MASCOT_DASH_MAX_SPEED_CLICKS - 3), 0), 1);
+  return {
+    exit: Math.round(DINO_MASCOT_DASH_BASE_MS.exit - t * (DINO_MASCOT_DASH_BASE_MS.exit - DINO_MASCOT_DASH_FASTEST_MS.exit)),
+    enter: Math.round(DINO_MASCOT_DASH_BASE_MS.enter - t * (DINO_MASCOT_DASH_BASE_MS.enter - DINO_MASCOT_DASH_FASTEST_MS.enter)),
+  };
+};
+
+const playDinoMascotDash = async (mascot, clickCount) => {
   const liveSrc = mascot.getAttribute('src');
   const direction = DINO_MASCOT_DASH_DIRECTION[liveSrc] || 'right';
   const rect = mascot.getBoundingClientRect();
@@ -234,10 +256,11 @@ const playDinoMascotDash = async (mascot) => {
   const clearLeft = Math.round(-(rect.right + 60));
   const exitX = direction === 'left' ? clearLeft : clearRight;
   const enterFromX = direction === 'left' ? clearRight : clearLeft;
+  const { exit: exitMs, enter: enterMs } = dinoMascotDashDurations(clickCount);
 
   await mascot.animate(
     [{ transform: 'translateX(0px)' }, { transform: `translateX(${exitX}px)` }],
-    { duration: 320, easing: 'ease-in' },
+    { duration: exitMs, easing: 'ease-in' },
   ).finished;
 
   // Instant reappear just past the opposite edge — a plain style write
@@ -248,7 +271,7 @@ const playDinoMascotDash = async (mascot) => {
 
   await mascot.animate(
     [{ transform: `translateX(${enterFromX}px)` }, { transform: 'translateX(0px)' }],
-    { duration: 420, easing: 'ease-out' },
+    { duration: enterMs, easing: 'ease-out' },
   ).finished;
   mascot.style.transform = '';
 };
@@ -267,7 +290,7 @@ const handleDinoMascotClickBurst = async () => {
   try {
     if (count === 1) await playDinoMascotBump(mascot);
     else if (count === 2) await playDinoMascotLook(mascot);
-    else await playDinoMascotDash(mascot);
+    else await playDinoMascotDash(mascot, count);
   } catch (error) {
     console.debug('Dino mascot animation failed:', error);
   } finally {
