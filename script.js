@@ -257,23 +257,29 @@ const playDinoMascotDash = async (mascot, clickCount) => {
   const exitX = direction === 'left' ? clearLeft : clearRight;
   const enterFromX = direction === 'left' ? clearRight : clearLeft;
   const { exit: exitMs, enter: enterMs } = dinoMascotDashDurations(clickCount);
+  // 3 clicks = 1 out-and-back round; each click past that adds another
+  // full round at the same (already click-count-scaled) speed — "4 = 2
+  // dash and so forth."
+  const rounds = Math.max(1, clickCount - 2);
 
-  await mascot.animate(
-    [{ transform: 'translateX(0px)' }, { transform: `translateX(${exitX}px)` }],
-    { duration: exitMs, easing: 'ease-in' },
-  ).finished;
+  for (let i = 0; i < rounds; i += 1) {
+    await mascot.animate(
+      [{ transform: 'translateX(0px)' }, { transform: `translateX(${exitX}px)` }],
+      { duration: exitMs, easing: 'ease-in' },
+    ).finished;
 
-  // Instant reappear just past the opposite edge — a plain style write
-  // (plus a forced reflow read right after) rather than another
-  // animate() call, which would interpolate the jump instead of cutting.
-  mascot.style.transform = `translateX(${enterFromX}px)`;
-  mascot.getBoundingClientRect();
+    // Instant reappear just past the opposite edge — a plain style write
+    // (plus a forced reflow read right after) rather than another
+    // animate() call, which would interpolate the jump instead of cutting.
+    mascot.style.transform = `translateX(${enterFromX}px)`;
+    mascot.getBoundingClientRect();
 
-  await mascot.animate(
-    [{ transform: `translateX(${enterFromX}px)` }, { transform: 'translateX(0px)' }],
-    { duration: enterMs, easing: 'ease-out' },
-  ).finished;
-  mascot.style.transform = '';
+    await mascot.animate(
+      [{ transform: `translateX(${enterFromX}px)` }, { transform: 'translateX(0px)' }],
+      { duration: enterMs, easing: 'ease-out' },
+    ).finished;
+    mascot.style.transform = '';
+  }
 };
 
 let dinoMascotClickCount = 0;
