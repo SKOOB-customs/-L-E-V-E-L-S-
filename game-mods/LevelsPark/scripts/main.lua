@@ -497,6 +497,16 @@ local function capturePawnState(pawn)
     pcall(function() state.maxHunger = pawn:GetMaxHunger() end)
     pcall(function() state.maxThirst = pawn:GetMaxThirst() end)
     pcall(function() state.maxStamina = pawn:GetMaxStamina() end)
+    -- Diagnostic for a reported bug (2026-10-26): redeemed dinos coming
+    -- back with 0 food/water. This logs what was actually read off the
+    -- live pawn at !park time, so a real park+redeem test tells us
+    -- whether the capture already got 0 (a GetHunger/GetThirst problem)
+    -- or captured the real value fine (pointing at the redeem-side apply
+    -- instead — see the matching log in applyStateToPawn).
+    log(string.format(
+        "capturePawnState: hunger=%s maxHunger=%s | thirst=%s maxThirst=%s",
+        tostring(state.hunger), tostring(state.maxHunger), tostring(state.thirst), tostring(state.maxThirst)
+    ))
     -- Display-only extras for the website gallery (not needed for restore,
     -- so a failed read here must never block !park — always pcall-guarded).
     pcall(function() state.primeElder = pawn:GetIsEligiblePrimeElder() end)
@@ -656,8 +666,24 @@ local function applyStateToPawn(pawn, state)
     if state.maxStamina then pcall(function() pawn:SetMaxStamina(state.maxStamina) end) end
     pcall(function() pawn:SetHealth(state.health) end)
     pcall(function() pawn:SetStamina(state.stamina) end)
-    pcall(function() pawn:SetHunger(state.hunger) end)
-    pcall(function() pawn:SetThirst(state.thirst) end)
+    -- Diagnostic for a reported bug (2026-10-26): redeemed dinos coming
+    -- back with 0 food/water instead of the captured values. Every Set*
+    -- call in this function was previously a bare pcall with the result
+    -- silently discarded — if SetHunger/SetThirst are failing (wrong
+    -- method signature, a clamp against a stale max, anything), there
+    -- was no way to tell from the log. This logs the actual post-write
+    -- readback so the next real redeem shows exactly what happened
+    -- instead of more guessing.
+    local okHunger, errHunger = pcall(function() pawn:SetHunger(state.hunger) end)
+    local okThirst, errThirst = pcall(function() pawn:SetThirst(state.thirst) end)
+    local readHunger, readThirst
+    pcall(function() readHunger = pawn:GetHunger() end)
+    pcall(function() readThirst = pawn:GetThirst() end)
+    log(string.format(
+        "applyStateToPawn: hunger wanted=%s okCall=%s err=%s readBack=%s | thirst wanted=%s okCall=%s err=%s readBack=%s",
+        tostring(state.hunger), tostring(okHunger), tostring(errHunger), tostring(readHunger),
+        tostring(state.thirst), tostring(okThirst), tostring(errThirst), tostring(readThirst)
+    ))
 end
 
 -- Restores entombment level + mutation slots (admin-granted via
