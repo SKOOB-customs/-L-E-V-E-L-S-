@@ -3121,7 +3121,7 @@ const openParkedDinoModal = (entry) => {
         const select = document.createElement('select');
         select.className = 'parked-modal-mutation-select';
         mutationCatalog
-          .filter((m) => mutationAllowedForSpecies(m.diet, entry.species))
+          .filter((m) => mutationAllowedForSpecies(m.diet, entry.species) && mutationAllowedForSlot(m, field))
           .forEach((m) => {
             const option = document.createElement('option');
             option.value = m.name;
@@ -4402,14 +4402,20 @@ const mutationAllowedForSpecies = (mutationDiet, species) => {
   return mutationDiet === 'generic' || speciesDiet === 'omnivore' || mutationDiet === speciesDiet;
 };
 
+// A few mutations (e.g. Gastronomic Regeneration) are further restricted
+// to specific slots within their tier (not every Parent/Elder slot — just
+// slots 2 and 4) — absent allowedSlots means no restriction, same as
+// every mutation before this existed.
+const mutationAllowedForSlot = (mutation, field) => !mutation.allowedSlots || mutation.allowedSlots.includes(field);
+
 const renderMutationSlots = () => {
   const container = document.querySelector('[data-comp-mutation-slots]');
   const entombmentsSelect = document.querySelector('[data-comp-entombments]');
   const species = document.querySelector('[data-comp-species]')?.value;
   if (!container || !entombmentsSelect) return;
   const level = Number(entombmentsSelect.value) || 0;
-  const optionsHtml = mutationCatalog
-    .filter((m) => mutationAllowedForSpecies(m.diet, species))
+  const optionsHtmlForField = (field) => mutationCatalog
+    .filter((m) => mutationAllowedForSpecies(m.diet, species) && mutationAllowedForSlot(m, field))
     .map((m) => `<option value="${String(m.name).replace(/"/g, '&quot;')}">${m.name}</option>`)
     .join('');
   container.innerHTML = mutationSlotTiers.slice(0, level + 1).map((fields, tierIndex) => `
@@ -4420,7 +4426,7 @@ const renderMutationSlots = () => {
           ${compMutationSlotLabel(field)}
           <select data-comp-mutation-field="${field}">
             <option value="">— none —</option>
-            ${optionsHtml}
+            ${optionsHtmlForField(field)}
           </select>
         </label>
       `).join('')}

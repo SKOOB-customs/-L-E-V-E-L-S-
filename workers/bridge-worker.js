@@ -1524,10 +1524,34 @@ const KNOWN_MUTATIONS = [
   { name: 'Prolific Reproduction', diet: 'generic' },
   { name: 'Enhanced Digestion', diet: 'generic' },
   { name: 'Heightened Ghrelin', diet: 'generic' },
-  { name: 'Gastronomic Regeneration', diet: 'generic' },
+  // Parent/Elder tier only, and only slots 2 or 4 within those tiers —
+  // confirmed by request, not every mutation here has (or needs) this
+  // restriction, hence it being optional on the entry rather than a
+  // required field every other mutation would need to spell out.
+  {
+    name: 'Gastronomic Regeneration',
+    diet: 'generic',
+    allowedSlots: [
+      'parentMutationSlot2', 'parentMutationSlot4',
+      'elderMutationSlot2A', 'elderMutationSlot4A',
+      'elderMutationSlot2B', 'elderMutationSlot4B',
+    ],
+  },
 ];
 const KNOWN_MUTATION_NAMES = new Set(KNOWN_MUTATIONS.map((m) => m.name));
 const KNOWN_MUTATION_DIET = new Map(KNOWN_MUTATIONS.map((m) => [m.name, m.diet]));
+const KNOWN_MUTATION_SLOTS = new Map(
+  KNOWN_MUTATIONS.filter((m) => m.allowedSlots).map((m) => [m.name, new Set(m.allowedSlots)]),
+);
+
+// True if a mutation (by name) is allowed in a given slot field — only
+// mutations with an explicit allowedSlots restriction (see
+// KNOWN_MUTATION_SLOTS) are limited at all; everything else is fine in
+// any slot its diet already permits, same as before this existed.
+const mutationSlotAllowed = (mutationName, field) => {
+  const restriction = KNOWN_MUTATION_SLOTS.get(mutationName);
+  return !restriction || restriction.has(field);
+};
 
 // Glitch skins: the 10 FCustomizerDataBase color fields (0.21.720+), same
 // set main.lua's applyCustomizer knows about. PatternIndex/SkinVariation are
@@ -2469,6 +2493,9 @@ export default {
           const speciesDiet = SPECIES_DIET[species] || 'omnivore';
           if (!mutationDietAllowed(KNOWN_MUTATION_DIET.get(value), speciesDiet)) {
             return json({ error: `${value} isn't available to a ${speciesDiet} species like ${species}` }, 400);
+          }
+          if (!mutationSlotAllowed(value, field)) {
+            return json({ error: `${value} can't go in ${field} — check which slots it allows` }, 400);
           }
           mutations[field] = value;
         }
@@ -3633,6 +3660,9 @@ export default {
         const speciesDiet = SPECIES_DIET[species] || 'omnivore';
         if (!mutationDietAllowed(KNOWN_MUTATION_DIET.get(mutationName), speciesDiet)) {
           return json({ error: `${mutationName} isn't available to a ${speciesDiet} species like ${species}` }, 400);
+        }
+        if (!mutationSlotAllowed(mutationName, field)) {
+          return json({ error: `${mutationName} can't go in that slot — check which slots it allows` }, 400);
         }
         dino[field] = mutationName;
         await writeParkedDinosArray(env, steamId, dinos);

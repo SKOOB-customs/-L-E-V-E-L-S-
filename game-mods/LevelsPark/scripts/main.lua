@@ -671,7 +671,19 @@ end
 -- pawn.ReplicatedMutationsData directly and pushes via
 -- SetReplicatedMutationsData instead.
 local function applyMutationsDeferred(steam, entombments, mutations)
-    if entombments == nil or entombments <= 0 or mutations == nil then return end
+    -- Bug fix: this used to also bail whenever entombments <= 0, which
+    -- silently skipped applying ANY mutations — including the base tier
+    -- (mutationSlot1-4), which needs zero entombment (see the
+    -- "0 — 4 mutation slots" option on the Compensation form, and
+    -- MUTATION_SLOT_TIERS's own "4 base" framing). entombments is only
+    -- relevant to which TIERS were unlockable when a slot got filled in
+    -- the first place — already enforced wherever that happened (park
+    -- capture, Compensation grant, or the website's own reassignment
+    -- endpoint, which only ever lets a player edit an ALREADY-filled
+    -- slot) — so it's not a valid precondition for "is there anything to
+    -- apply here," which the hasAny scan right below already determines
+    -- correctly on its own.
+    if mutations == nil then return end
     local hasAny = false
     for _, field in ipairs(MUTATION_SLOT_FIELDS) do
         if mutations[field] ~= nil and mutations[field] ~= "" then
