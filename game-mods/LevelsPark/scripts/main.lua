@@ -581,16 +581,17 @@ end
 -- history — shared by the Live Dino tab's Set Prime bypass (trySetPrime,
 -- further down) and a compensation/transfer grant's forcePrimeOnRedeem
 -- (applyStateToPawn below). See trySetPrime's own comment for the full
--- mechanism this is built on: the engine recomputes bIsEligiblePrime
--- from 10 bPrimeConditionN flags every tick UNLESS growth is already at
--- or above 75%, in which case it locks in whatever was last pushed and
--- stops recomputing — so forcing all 10 flags true only STAYS true
--- permanently once growth has already cleared that threshold. Both
--- callers are responsible for only invoking this when that's actually
--- true (trySetPrime rejects below 75% for a different, deliberate
--- reason — see its own comment; the compensation path validates the
--- opposite, that growth is ALREADY at or above 75%, on the Worker
--- before this ever runs).
+-- mechanism this is built on: the engine recomputes bIsEligiblePrime from
+-- 10 bPrimeConditionN flags every tick unless growth is already at or
+-- above 75%, in which case it locks in whatever was last pushed and
+-- stops recomputing. Either way this reads as Prime immediately — below
+-- 75% it keeps landing on true every tick (since all 10 flags stay
+-- true), at/above 75% it locks in permanently — so trySetPrime now calls
+-- this unconditionally at any growth. The compensation/transfer path
+-- still only sets forcePrimeOnRedeem when growth is already at or above
+-- 75% (validated on the Worker), specifically so a freshly-granted dino
+-- comes out permanently primed rather than only until its next regular
+-- growth-eligibility recompute.
 local function forcePrimeConditionFlags(pawn)
     local pe = pawn:GetEligiblePrimeElderData()
     pe.bPrimeCondition1 = true
@@ -1969,11 +1970,10 @@ end
 -- massively exceeded and keeps it true. Below 75% growth the engine keeps
 -- recomputing every tick, but since all 10 flags stay true, it keeps
 -- landing on true anyway; at/above 75% growth the result gets locked in
--- permanently and stops recomputing at all — this button is gated below
--- 75% specifically so a bypass grant doesn't instantly and permanently
--- lock in prime on an already-mature dino with a single click.
-local PRIME_BYPASS_GROWTH_CEILING = 0.75
-
+-- permanently and stops recomputing at all. Previously only allowed
+-- below 75% growth specifically so this couldn't instantly and
+-- permanently lock in prime on an already-mature dino with one click —
+-- removed per explicit request: works at any growth now, 100% included.
 local function trySetPrime(steam)
     local gm = findGameMode()
     if gm == nil then return false, "Failed: internal error." end
@@ -1982,17 +1982,6 @@ local function trySetPrime(steam)
     local pawn = livePawnFromCtrl(ctrl)
     if pawn == nil then
         return false, "Failed: spawn in first, then try again."
-    end
-
-    local growth
-    pcall(function() growth = pawn:GetGrowth() end)
-    if growth == nil then
-        return false, "Failed: could not read growth."
-    end
-    if growth >= PRIME_BYPASS_GROWTH_CEILING then
-        return false, string.format(
-            "Prime bypass only works below 75%% growth (currently %.0f%%).", growth * 100
-        )
     end
 
     local ok, err = pcall(function() forcePrimeConditionFlags(pawn) end)

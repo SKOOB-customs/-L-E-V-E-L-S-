@@ -2433,12 +2433,12 @@ const updateGrowthPauseButtonForLiveState = (isAlive, growth, paused) => {
   btn.textContent = 'Pause Growth';
 };
 
-// Mirrors the game's own 75% growth lock-in for Prime eligibility (see
-// EVRIMA_Prime_Elder_Mechanism.md) — only offered below that threshold.
-const SET_PRIME_GROWTH_CEILING = 0.75;
+// Used to require growth below 75% (mirroring the game's own lock-in
+// threshold — see EVRIMA_Prime_Elder_Mechanism.md) — removed per request,
+// works at any growth now, 100% included (see main.lua's trySetPrime).
 const SET_PRIME_BUSY_LABELS = new Set(['Requesting…', 'Waiting for in-game…']);
 
-const updateSetPrimeButtonForLiveState = (isAlive, growth, isPrime) => {
+const updateSetPrimeButtonForLiveState = (isAlive, isPrime) => {
   const btn = document.querySelector('[data-set-prime]');
   if (!btn || SET_PRIME_BUSY_LABELS.has(btn.textContent)) return;
   if (isPrime) {
@@ -2446,7 +2446,7 @@ const updateSetPrimeButtonForLiveState = (isAlive, growth, isPrime) => {
     btn.textContent = 'Already Prime';
     return;
   }
-  btn.disabled = !isAlive || growth >= SET_PRIME_GROWTH_CEILING;
+  btn.disabled = !isAlive;
   btn.textContent = 'Set Prime (Bypass)';
 };
 
@@ -2490,7 +2490,7 @@ const loadHotzoneStatus = async () => {
 const renderLiveDino = (dino) => {
   updateParkButtonForLiveState((dino.health || 0) * 100);
   updateGrowthPauseButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.growthPaused));
-  updateSetPrimeButtonForLiveState((dino.health || 0) > 0, dino.growth || 0, Boolean(dino.primeElder));
+  updateSetPrimeButtonForLiveState((dino.health || 0) > 0, Boolean(dino.primeElder));
   updateHotzoneTeleportButtonForLiveState((dino.health || 0) > 0, dino.health || 0);
 
   // querySelectorAll, not querySelector — the same stat/name/prime markup
