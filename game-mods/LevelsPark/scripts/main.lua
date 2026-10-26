@@ -1923,6 +1923,41 @@ local function checkWebsiteDomeTeleportRequest(steam)
     writeRequestResult(domeTeleportResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Sanctuary Teleport ──
+--
+-- Same generic tryHotzoneTeleport reuse as Dome — destination is
+-- whatever X/Y/Z the Worker sends (the caller's own faction's sanctuary
+-- point, decided server-side; this mod has no concept of factions at
+-- all, it just trusts the request the same way every other
+-- website-triggered request here is trusted).
+local function sanctuaryTeleportRequestFilePath(steam)
+    return SAVED_DIR .. "/sanctuary_teleport_request_" .. steam .. ".json"
+end
+
+local function sanctuaryTeleportResultFilePath(steam)
+    return SAVED_DIR .. "/sanctuary_teleport_result_" .. steam .. ".json"
+end
+
+local function checkWebsiteSanctuaryTeleportRequest(steam)
+    local path = sanctuaryTeleportRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local x = jsonReadNumber(body, "x")
+    local y = jsonReadNumber(body, "y")
+    local z = jsonReadNumber(body, "z")
+    if requestId == nil or x == nil or y == nil or z == nil then return end
+
+    local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    safeNotify(steam, message)
+    log("Sanctuary teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(sanctuaryTeleportResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Website-triggered growth pause/resume (Live Dino tab) ──
 --
 -- ATIDinosaurBase carries its own uint8 bIsGrowthPaused flag plus an
@@ -2206,6 +2241,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteSetPrimeRequest(steam)
                     checkWebsiteHotzoneTeleportRequest(steam)
                     checkWebsiteDomeTeleportRequest(steam)
+                    checkWebsiteSanctuaryTeleportRequest(steam)
                     checkWebsiteNotifyRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)

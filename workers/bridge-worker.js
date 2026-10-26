@@ -696,6 +696,21 @@ const requestDomeTeleport = (env, steamId) =>
 const readDomeTeleportResult = (env, steamId, requestId) =>
   readResult(env, domeTeleportResultPath, steamId, requestId);
 
+// ── Sanctuary Teleport ──
+//
+// Same mechanism as Hotzone/Dome (reuses the identical tryHotzoneTeleport
+// on the mod side), destination is whichever faction the caller is
+// currently in's own sanctuary point from war_zones:index. No cooldown,
+// no health requirement — unlike Hotzone this isn't a scarce once-a-day
+// resource, it's just "go home," so it's freely repeatable as long as
+// you're actually in a faction and that faction's sanctuary is set.
+const sanctuaryTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/sanctuary_teleport_request_${steamId}.json`;
+const sanctuaryTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/sanctuary_teleport_result_${steamId}.json`;
+const requestSanctuaryTeleport = (env, steamId, destination) =>
+  writeRequest(env, sanctuaryTeleportRequestPath, steamId, destination);
+const readSanctuaryTeleportResult = (env, steamId, requestId) =>
+  readResult(env, sanctuaryTeleportResultPath, steamId, requestId);
+
 // Generic website-triggered in-game toast — not faction-specific, reusable
 // by anything that wants to push a message to one online player. Reuses
 // main.lua's existing safeNotify, same request-file pattern as every
@@ -4910,6 +4925,48 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Dome teleport result lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/sanctuary-teleport-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const factionsData = await readFactionsIndex(env);
+        const factionId = factionsData.members[steamId]?.factionId;
+        if (!factionId) return json({ error: 'Join a faction first.' }, 403);
+        const zonesData = await readWarZonesIndex(env);
+        const sanctuary = zonesData.sanctuaries[factionId];
+        if (!sanctuary) return json({ error: "Your faction's sanctuary hasn't been set yet." }, 400);
+        const requestId = await requestSanctuaryTeleport(env, steamId, sanctuary);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Sanctuary teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/sanctuary-teleport-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readSanctuaryTeleportResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Sanctuary teleport result lookup failed' }, 502);
       }
     }
 

@@ -1227,6 +1227,7 @@ const displaySteamStatus = async () => {
   updateVoiceSectionVisibility();
   updateOverlayPairingSectionVisibility();
   updateDomeTeleportButtonVisibility();
+  updateSanctuaryTeleportButtonVisibility();
   initTicketForm();
   updateChatSignInState();
 
@@ -2799,6 +2800,48 @@ document.querySelector('[data-dome-teleport]')?.addEventListener('click', (event
     body: { steamId: profile.steamId },
     buttonEl: btn,
     idleLabel: 'Dome',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino();
+    },
+  });
+});
+
+// Sanctuary Teleport — shown once the player is actually in a faction
+// (reuses /api/faction-status rather than a dedicated access route, same
+// data the Factions tab already fetches). Worker re-checks faction
+// membership and that the sanctuary's actually been set regardless of
+// what this hides.
+const updateSanctuaryTeleportButtonVisibility = async () => {
+  const btn = document.querySelector('[data-sanctuary-teleport]');
+  if (!btn) return;
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    btn.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch('/api/faction-status');
+    const data = await response.json();
+    btn.hidden = !data.factionId;
+  } catch (error) {
+    console.debug('Faction status check for sanctuary button failed:', error);
+    btn.hidden = true;
+  }
+};
+
+document.querySelector('[data-sanctuary-teleport]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/sanctuary-teleport',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Sanctuary',
     waitingLabel: 'Waiting for in-game…',
     onSuccess: () => {
       pollLiveDino();
