@@ -577,11 +577,52 @@ local function sanitizeName(raw)
     return name
 end
 
+-- Forces Prime Elder status on regardless of this pawn's real growth
+-- history — shared by the Live Dino tab's Set Prime bypass (trySetPrime,
+-- further down) and a compensation/transfer grant's forcePrimeOnRedeem
+-- (applyStateToPawn below). See trySetPrime's own comment for the full
+-- mechanism this is built on: the engine recomputes bIsEligiblePrime
+-- from 10 bPrimeConditionN flags every tick UNLESS growth is already at
+-- or above 75%, in which case it locks in whatever was last pushed and
+-- stops recomputing — so forcing all 10 flags true only STAYS true
+-- permanently once growth has already cleared that threshold. Both
+-- callers are responsible for only invoking this when that's actually
+-- true (trySetPrime rejects below 75% for a different, deliberate
+-- reason — see its own comment; the compensation path validates the
+-- opposite, that growth is ALREADY at or above 75%, on the Worker
+-- before this ever runs).
+local function forcePrimeConditionFlags(pawn)
+    local pe = pawn:GetEligiblePrimeElderData()
+    pe.bPrimeCondition1 = true
+    pe.bPrimeCondition2 = true
+    pe.bPrimeCondition3 = true
+    pe.bPrimeCondition4 = true
+    pe.bPrimeCondition5 = true
+    pe.bPrimeCondition6 = true
+    pe.bPrimeCondition7 = true
+    pe.bPrimeCondition8 = true
+    pe.bPrimeCondition9 = true
+    pe.bPrimeCondition10 = true
+    pe.bIsEligiblePrime = true
+    pawn:SetEligiblePrimeElderData(pe)
+end
+
 -- Apply order matters (GAS-attribute auto-refill on growth change; see
 -- Safety Rule 8 / State Restore Cookbook): growth first, then max-vitals,
 -- then current vitals.
 local function applyStateToPawn(pawn, state)
     pcall(function() pawn:SetGrowth(state.growth) end)
+
+    -- Compensation/transfer grants only ("Grant as Primed" button on the
+    -- Admin Panel's Compensation form) — the Worker already rejected this
+    -- at grant time unless growth was at least 75%, which is why this
+    -- runs unconditionally here rather than re-checking growth itself.
+    if state.forcePrimeOnRedeem then
+        local ok, err = pcall(function() forcePrimeConditionFlags(pawn) end)
+        if not ok then
+            log("applyStateToPawn: forcePrimeOnRedeem failed: " .. tostring(err))
+        end
+    end
 
     if state.statsArePercentages then
         -- Compensation-granted dinos (website admin panel) store
@@ -1954,21 +1995,7 @@ local function trySetPrime(steam)
         )
     end
 
-    local ok, err = pcall(function()
-        local pe = pawn:GetEligiblePrimeElderData()
-        pe.bPrimeCondition1 = true
-        pe.bPrimeCondition2 = true
-        pe.bPrimeCondition3 = true
-        pe.bPrimeCondition4 = true
-        pe.bPrimeCondition5 = true
-        pe.bPrimeCondition6 = true
-        pe.bPrimeCondition7 = true
-        pe.bPrimeCondition8 = true
-        pe.bPrimeCondition9 = true
-        pe.bPrimeCondition10 = true
-        pe.bIsEligiblePrime = true
-        pawn:SetEligiblePrimeElderData(pe)
-    end)
+    local ok, err = pcall(function() forcePrimeConditionFlags(pawn) end)
     if not ok then
         log("Set-prime: write failed: " .. tostring(err))
         return false, "Failed: could not set Prime status."

@@ -4092,6 +4092,48 @@ document.querySelector('[data-comp-entombments]')?.addEventListener('change', re
 document.querySelector('[data-comp-species]')?.addEventListener('change', renderMutationSlots);
 loadMutationCatalog();
 
+// ── Compensation form: "Grant as Primed" ──
+//
+// Mirrors the Live Dino tab's Set Prime bypass mechanism in the OPPOSITE
+// growth direction — that one only works BELOW 75% growth (see main.lua's
+// trySetPrime); this hands out a brand-new dino already locked into Prime,
+// which per that same engine mechanism only sticks once growth is ALREADY
+// at or above 75%. Re-validated server-side in /compensation-grant
+// regardless of what this toggles — this is just the convenience of
+// bumping Growth % up to 75 and flagging the request, not the real gate.
+const COMP_FORCE_PRIME_MIN_GROWTH = 75;
+let compForcePrimeArmed = false;
+
+const updateCompForcePrimeButtonUI = () => {
+  const btn = document.querySelector('[data-comp-force-prime]');
+  if (!btn) return;
+  btn.classList.toggle('is-armed', compForcePrimeArmed);
+  btn.setAttribute('aria-pressed', compForcePrimeArmed ? 'true' : 'false');
+};
+
+document.querySelector('[data-comp-force-prime]')?.addEventListener('click', () => {
+  compForcePrimeArmed = !compForcePrimeArmed;
+  if (compForcePrimeArmed) {
+    const growthInput = document.querySelector('[data-comp-growth]');
+    if (growthInput && Number(growthInput.value) < COMP_FORCE_PRIME_MIN_GROWTH) {
+      growthInput.value = String(COMP_FORCE_PRIME_MIN_GROWTH);
+    }
+  }
+  updateCompForcePrimeButtonUI();
+});
+
+// Manually dropping Growth back below 75% while armed would otherwise
+// submit a request the Worker just rejects outright — turn it off instead
+// and say why, rather than letting the grant fail silently-ish at submit.
+document.querySelector('[data-comp-growth]')?.addEventListener('input', (event) => {
+  if (!compForcePrimeArmed) return;
+  if (Number(event.target.value) < COMP_FORCE_PRIME_MIN_GROWTH) {
+    compForcePrimeArmed = false;
+    updateCompForcePrimeButtonUI();
+    showToast('Growth dropped below 75% — "Grant as Primed" turned off.');
+  }
+});
+
 document.querySelector('[data-compensation-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const profile = getSteamProfile();
@@ -4121,6 +4163,7 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
     mutations,
     isTransfer: !!document.querySelector('[data-comp-is-transfer]')?.checked,
     reason: document.querySelector('[data-comp-reason]')?.value.trim() || '',
+    forcePrime: compForcePrimeArmed,
   };
 
   const submitBtn = event.target.querySelector('button[type="submit"]');
@@ -4145,6 +4188,8 @@ document.querySelector('[data-compensation-form]')?.addEventListener('submit', a
       if (transferCheckbox) transferCheckbox.checked = false;
       const reasonInput = document.querySelector('[data-comp-reason]');
       if (reasonInput) reasonInput.value = '';
+      compForcePrimeArmed = false;
+      updateCompForcePrimeButtonUI();
       updateCompTransferCheckboxVisibility();
       if (body.isTransfer) loadTransferLog();
     }

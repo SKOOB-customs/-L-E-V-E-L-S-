@@ -1137,6 +1137,13 @@ h6,
   border: 1px solid var(--line-strong);
 }
 
+/* Compensation form's "Grant as Primed" toggle, while armed. */
+.secondary-button.is-armed {
+  background: linear-gradient(135deg, #f4c868, #c98a2c);
+  color: #1a1206;
+  box-shadow: 0 8px 16px rgba(201, 138, 44, 0.3);
+}
+
 #headerSteamBtn {
   max-width: 220px;
   overflow: hidden;

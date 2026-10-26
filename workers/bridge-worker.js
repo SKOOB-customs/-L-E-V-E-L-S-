@@ -1168,6 +1168,7 @@ const KNOWN_MUTATIONS = [
   { name: 'Prolific Reproduction', diet: 'generic' },
   { name: 'Enhanced Digestion', diet: 'generic' },
   { name: 'Heightened Ghrelin', diet: 'generic' },
+  { name: 'Gastronomic Regeneration', diet: 'generic' },
 ];
 const KNOWN_MUTATION_NAMES = new Set(KNOWN_MUTATIONS.map((m) => m.name));
 const KNOWN_MUTATION_DIET = new Map(KNOWN_MUTATIONS.map((m) => [m.name, m.diet]));
@@ -2074,7 +2075,7 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput, isTransfer, isRecovery, reason } = body || {};
+      const { granterSteamId, targetSteamId, species, name, growthPct, healthPct, staminaPct, hungerPct, thirstPct, entombments: entombmentsRaw, mutations: mutationsInput, isTransfer, isRecovery, reason, forcePrime } = body || {};
       if (typeof granterSteamId !== 'string' || !/^\d{17}$/.test(granterSteamId)) {
         return json({ error: 'Missing or invalid granterSteamId' }, 400);
       }
@@ -2119,10 +2120,25 @@ export default {
       const tier = await getAdminTier(env, granterSteamId);
       if (!tier) return json({ error: 'Not an admin' }, 403);
 
+      // "Grant as Primed" button on the Compensation form — mirrors the
+      // Live Dino tab's Set Prime bypass mechanism (see main.lua's
+      // forcePrimeConditionFlags/trySetPrime) but in the OPPOSITE growth
+      // direction: that one only works BELOW 75% growth so a bypass grant
+      // can't instantly lock prime onto an already-mature live dino. This
+      // is a brand-new snapshot being handed out specifically AS an
+      // already-primed dino, so it requires the opposite — growth already
+      // AT OR ABOVE 75% — since per that same mechanism, forcing the
+      // condition flags true only STAYS true permanently once growth has
+      // already cleared that threshold.
+      const growthFraction = pctToFraction(growthPct ?? 100);
+      if (forcePrime && growthFraction < 0.75) {
+        return json({ error: 'Prime requires at least 75% growth — raise Growth % first.' }, 400);
+      }
+
       const dino = {
         name: typeof name === 'string' ? name.slice(0, 24) : '',
         classPath: classPathForSpecies(species),
-        growth: pctToFraction(growthPct ?? 100),
+        growth: growthFraction,
         health: pctToFraction(healthPct ?? 100),
         maxHealth: 1,
         stamina: pctToFraction(staminaPct ?? 100),
@@ -2132,6 +2148,7 @@ export default {
         maxThirst: 1,
         maxStamina: 1,
         primeElder: false,
+        forcePrimeOnRedeem: !!forcePrime,
         bodyColorR: 0,
         bodyColorG: 0,
         bodyColorB: 0,
