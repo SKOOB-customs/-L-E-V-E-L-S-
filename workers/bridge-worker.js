@@ -716,6 +716,14 @@ const requestNotify = (env, steamId, message) => writeRequest(env, notifyRequest
 // sweep /all-positions already uses.
 const FACTION_IDS = ['carcharo', 'dromaeosaur', 'mosasaur'];
 
+// Each account gets 3 self-service faction swaps for the lifetime of that
+// account, no matter what (no reset, no per-war refill) — tracked as
+// swapsUsed on factions:index.members[steamId], incremented by
+// /faction-join itself whenever it's used to switch rather than a first-
+// ever join. An admin override via /faction-admin-move-player is
+// separate and doesn't touch this counter at all.
+const FACTION_SWAP_LIFETIME_LIMIT = 3;
+
 // Minutes: 30m, 1h, 3h, 5h, 10h, 15h, 20h, 30h, 40h, 50h, 60h, 75h, 90h, 100h.
 const FACTION_RANK_THRESHOLDS = [30, 60, 180, 300, 600, 900, 1200, 1800, 2400, 3000, 3600, 4500, 5400, 6000];
 
@@ -859,6 +867,29 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // if it feels too generous/stingy once a real war actually runs.
 const WAR_CURRENCY_PER_MINUTE = 5;
 
+// War is tied to the calendar now — always the final 7 calendar days of
+// each month (28/29/30/31-day months all still get exactly 7 days,
+// anchored to midnight UTC on the 1st of the NEXT month rather than a
+// flat "day 24-30" guess, which would be wrong for a 28 or 31-day
+// month). No admin action needed month to month — syncFactionWar
+// auto-starts a war the moment this window opens if none is already
+// active (self-healing against a missed cron tick, since it just checks
+// "no active war + inside the window" every tick), and
+// /faction-admin-start-war is restricted to the same window so a
+// manually-triggered war can't drift from the schedule.
+const monthEndUtcMs = (date) => Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+
+const finalWeekWindow = (date = new Date()) => {
+  const endsAt = monthEndUtcMs(date);
+  return { startedAt: endsAt - WAR_DURATION_MS, endsAt };
+};
+
+const isInFinalWeekOfMonth = (date = new Date()) => {
+  const { startedAt, endsAt } = finalWeekWindow(date);
+  const now = date.getTime();
+  return now >= startedAt && now < endsAt;
+};
+
 const isWithinZone = (point, center, radius) => {
   if (!point || !center) return false;
   const dx = point.x - center.x;
@@ -957,6 +988,20 @@ const syncFactionWar = async (env) => {
 
   // 2. War scoring/sanctuaries/currency — only while a war is active.
   let warData = await readWarIndex(env);
+
+  // Auto-start: the final week of the month has begun and nothing's
+  // running yet. Zones must already be configured — if they're not, this
+  // just silently waits for an admin to set them rather than erroring
+  // every tick (same "quietly wait" posture Hotzone/Dome use when their
+  // own prerequisites aren't met yet).
+  if (!warData.current && isInFinalWeekOfMonth()) {
+    const zonesData = await readWarZonesIndex(env);
+    if (zonesData.staticZoneA && zonesData.staticZoneB && zonesData.movingZoneStart && zonesData.movingZoneEnd) {
+      warData.current = { ...finalWeekWindow(), scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
+      await putIndexIfChanged(env, 'war:index', warData);
+    }
+  }
+
   if (warData.current) {
     if (Date.now() >= warData.current.endsAt) {
       warData = finalizeWar(warData);
@@ -4894,11 +4939,11 @@ export default {
       if (!steamId || !/^\d{17}$/.test(steamId)) {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
-      if (!env.PARKED_KV) return json({ factionId: null });
+      if (!env.PARKED_KV) return json({ factionId: null, swapsRemaining: FACTION_SWAP_LIFETIME_LIMIT });
       try {
         const factionsData = await readFactionsIndex(env);
         const member = factionsData.members[steamId];
-        if (!member) return json({ factionId: null });
+        if (!member) return json({ factionId: null, swapsRemaining: FACTION_SWAP_LIFETIME_LIMIT });
         const playtimeData = await readFactionPlaytimeIndex(env);
         const minutes = playtimeData.totals[steamId] || 0;
         const rank = factionRankForMinutes(member.factionId, minutes);
@@ -4906,6 +4951,7 @@ export default {
           factionId: member.factionId,
           factionName: FACTIONS[member.factionId]?.name || member.factionId,
           joinedAt: member.joinedAt,
+          swapsRemaining: Math.max(0, FACTION_SWAP_LIFETIME_LIMIT - (member.swapsUsed || 0)),
           minutes,
           rankTitle: rank?.title || null,
           nextRankTitle: rank?.nextTitle || null,
@@ -4933,12 +4979,23 @@ export default {
       }
       try {
         const factionsData = await readFactionsIndex(env);
-        if (factionsData.members[steamId]) {
-          return json({ error: 'Already in a faction — ask an admin if you need to switch.' }, 409);
+        const existing = factionsData.members[steamId];
+        if (!existing) {
+          // First-ever join is always free — doesn't touch swapsUsed.
+          factionsData.members[steamId] = { factionId, joinedAt: Date.now(), swapsUsed: 0 };
+          await putIndexIfChanged(env, 'factions:index', factionsData);
+          return json({ ok: true, factionId, swapsRemaining: FACTION_SWAP_LIFETIME_LIMIT });
         }
-        factionsData.members[steamId] = { factionId, joinedAt: Date.now() };
+        if (existing.factionId === factionId) {
+          return json({ error: "You're already in that faction." }, 409);
+        }
+        const swapsUsed = existing.swapsUsed || 0;
+        if (swapsUsed >= FACTION_SWAP_LIFETIME_LIMIT) {
+          return json({ error: `You've used all ${FACTION_SWAP_LIFETIME_LIMIT} of your lifetime faction swaps — ask an admin if you need an exception.` }, 409);
+        }
+        factionsData.members[steamId] = { factionId, joinedAt: Date.now(), swapsUsed: swapsUsed + 1 };
         await putIndexIfChanged(env, 'factions:index', factionsData);
-        return json({ ok: true, factionId });
+        return json({ ok: true, factionId, swapsRemaining: FACTION_SWAP_LIFETIME_LIMIT - (swapsUsed + 1) });
       } catch (error) {
         return json({ error: error.message || 'Faction join failed' }, 502);
       }
@@ -5047,12 +5104,14 @@ export default {
       try {
         const warData = await readWarIndex(env);
         if (warData.current) return json({ error: 'A war is already active.' }, 409);
+        if (!isInFinalWeekOfMonth()) {
+          return json({ error: 'War only runs the final week of the month — it starts automatically once that window opens.' }, 400);
+        }
         const zonesData = await readWarZonesIndex(env);
         if (!zonesData.staticZoneA || !zonesData.staticZoneB || !zonesData.movingZoneStart || !zonesData.movingZoneEnd) {
           return json({ error: 'Set the war zones first.' }, 400);
         }
-        const startedAt = Date.now();
-        warData.current = { startedAt, endsAt: startedAt + WAR_DURATION_MS, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
+        warData.current = { ...finalWeekWindow(), scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
         await putIndexIfChanged(env, 'war:index', warData);
         return json({ ok: true, war: warData.current });
       } catch (error) {
@@ -5109,8 +5168,11 @@ export default {
 
       try {
         const factionsData = await readFactionsIndex(env);
-        const previousFactionId = factionsData.members[targetSteamId]?.factionId || null;
-        factionsData.members[targetSteamId] = { factionId, joinedAt: Date.now() };
+        const existing = factionsData.members[targetSteamId];
+        const previousFactionId = existing?.factionId || null;
+        // Preserves swapsUsed — an admin override is free and separate
+        // from the player's own 3 lifetime swap passes, never resets them.
+        factionsData.members[targetSteamId] = { factionId, joinedAt: Date.now(), swapsUsed: existing?.swapsUsed || 0 };
         await putIndexIfChanged(env, 'factions:index', factionsData);
         await logModerationAction(env, {
           action: 'faction_move',

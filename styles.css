@@ -3427,6 +3427,14 @@ textarea {
   cursor: pointer;
 }
 
+/* "Your Faction" / "No swaps remaining" — not clickable, so it shouldn't
+   look like a normal call-to-action button. */
+.faction-card button:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  cursor: default;
+}
+
 /* Small color badge shown next to a joined player's rank/identity —
    matches whichever faction accent is currently relevant. */
 .faction-badge {

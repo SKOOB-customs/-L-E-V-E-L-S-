@@ -4034,7 +4034,12 @@ const FACTION_DISPLAY = {
   mosasaur: { name: 'Mosasaur Thalassocracy', tagline: 'Discipline • Control • Domination', accent: '#1f6fd6' },
 };
 
-const renderFactionJoinCards = () => {
+// Mirrors FACTION_SWAP_LIFETIME_LIMIT in bridge-worker.js — display copy
+// only, the real cap is enforced server-side in /faction-join regardless
+// of what this shows.
+const FACTION_SWAP_LIFETIME_LIMIT = 3;
+
+const renderFactionJoinCards = (currentFactionId, swapsRemaining) => {
   const grid = document.querySelector('[data-faction-card-grid]');
   if (!grid) return;
   grid.innerHTML = '';
@@ -4048,8 +4053,21 @@ const renderFactionJoinCards = () => {
     tagline.textContent = info.tagline;
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = `Join ${info.name}`;
-    button.addEventListener('click', () => confirmJoinFaction(factionId, info.name, button));
+
+    if (factionId === currentFactionId) {
+      button.textContent = 'Your Faction';
+      button.disabled = true;
+    } else if (!currentFactionId) {
+      button.textContent = `Join ${info.name}`;
+      button.addEventListener('click', () => confirmJoinFaction(factionId, info.name, button, false));
+    } else if ((swapsRemaining || 0) > 0) {
+      button.textContent = `Swap to ${info.name} (${swapsRemaining} left)`;
+      button.addEventListener('click', () => confirmJoinFaction(factionId, info.name, button, true));
+    } else {
+      button.textContent = 'No swaps remaining';
+      button.disabled = true;
+    }
+
     card.append(title, tagline, button);
     grid.appendChild(card);
   });
@@ -4057,9 +4075,9 @@ const renderFactionJoinCards = () => {
 
 // Inline confirm (replaces the clicked button with a Yes/No row) — same
 // pattern as the Skin Library's delete confirmation, not a raw confirm()
-// dialog, so an accidental click can't lock someone into the wrong
-// faction permanently.
-const confirmJoinFaction = (factionId, factionName, button) => {
+// dialog, so an accidental click can't burn a swap pass (or lock in a
+// first faction) by mistake.
+const confirmJoinFaction = (factionId, factionName, button, isSwap) => {
   const card = button.closest('.faction-card');
   if (!card) return;
   button.hidden = true;
@@ -4067,11 +4085,13 @@ const confirmJoinFaction = (factionId, factionName, button) => {
   row.className = 'skin-library-action-row';
   const prompt = document.createElement('span');
   prompt.className = 'skin-library-confirm-text';
-  prompt.textContent = `Join ${factionName}? This is permanent.`;
+  prompt.textContent = isSwap
+    ? `Swap to ${factionName}? This spends one of your lifetime swap passes.`
+    : `Join ${factionName}?`;
   const yesBtn = document.createElement('button');
   yesBtn.type = 'button';
   yesBtn.className = 'skin-library-confirm-yes';
-  yesBtn.textContent = 'Yes, join';
+  yesBtn.textContent = isSwap ? 'Yes, swap' : 'Yes, join';
   const noBtn = document.createElement('button');
   noBtn.type = 'button';
   noBtn.className = 'skin-library-confirm-no';
@@ -4091,12 +4111,12 @@ const confirmJoinFaction = (factionId, factionName, button) => {
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
-        showToast(data.error || 'Could not join that faction.');
+        showToast(data.error || `Could not ${isSwap ? 'swap to' : 'join'} that faction.`);
         row.remove();
         button.hidden = false;
         return;
       }
-      showToast(`Welcome to ${factionName}.`);
+      showToast(isSwap ? `Switched to ${factionName}.` : `Welcome to ${factionName}.`);
       checkFactionStatus();
     } catch (error) {
       console.debug('Faction join failed:', error);
@@ -4116,15 +4136,19 @@ const formatMinutesAsHours = (minutes) => {
 };
 
 const renderFactionStatus = (data) => {
-  const joinSection = document.querySelector('[data-faction-join-section]');
   const statusSection = document.querySelector('[data-faction-status-section]');
+  renderFactionJoinCards(data.factionId, data.swapsRemaining);
+  const swapsNoteEl = document.querySelector('[data-faction-swaps-note]');
+  if (swapsNoteEl) {
+    swapsNoteEl.textContent = data.factionId
+      ? `${data.swapsRemaining ?? 0} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps remaining.`
+      : '';
+  }
   if (!data.factionId) {
-    if (joinSection) joinSection.hidden = false;
     if (statusSection) statusSection.hidden = true;
     delete document.body.dataset.faction;
     return;
   }
-  if (joinSection) joinSection.hidden = true;
   if (statusSection) statusSection.hidden = false;
   document.body.dataset.faction = data.factionId;
 
@@ -4215,15 +4239,13 @@ const loadFactionStandings = async () => {
 
 const checkFactionStatus = async () => {
   const profile = getSteamProfile();
-  const joinSection = document.querySelector('[data-faction-join-section]');
   const statusSection = document.querySelector('[data-faction-status-section]');
   if (!profile?.steamId) {
-    if (joinSection) joinSection.hidden = false;
+    renderFactionJoinCards(null, 0);
     if (statusSection) statusSection.hidden = true;
     delete document.body.dataset.faction;
     return;
   }
-  renderFactionJoinCards();
   try {
     const response = await fetch('/api/faction-status');
     const data = await response.json();
