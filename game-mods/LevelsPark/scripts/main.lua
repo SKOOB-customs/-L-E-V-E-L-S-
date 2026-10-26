@@ -2009,6 +2009,32 @@ local function checkWebsiteSetPrimeRequest(steam)
     writeRequestResult(setPrimeResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Website-triggered generic in-game notify ──
+--
+-- Not tied to any one feature — a plain request file containing just a
+-- message, picked up and shown via the existing safeNotify, then
+-- discarded. Fire-and-forget (no result file): the Worker-side caller
+-- (syncFactionWar's sanctuary-breach alert is the first user of this)
+-- doesn't need confirmation, just best-effort delivery while the player
+-- is online — which this already requires anyway, same as every other
+-- request file here only ever being discoverable while steamId is
+-- actually connected.
+local function notifyRequestFilePath(steam)
+    return SAVED_DIR .. "/notify_request_" .. steam .. ".json"
+end
+
+local function checkWebsiteNotifyRequest(steam)
+    local path = notifyRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local message = jsonReadString(body, "message")
+    if message == nil or message == "" then return end
+    safeNotify(steam, message)
+end
+
 -- Opportunistic status write, not request-driven — see growthStatusFilePath
 -- above for why the website needs this at all. Now called unconditionally
 -- for every online controller each poll tick (pawn may be nil), not just
@@ -2135,6 +2161,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteSetPrimeRequest(steam)
                     checkWebsiteHotzoneTeleportRequest(steam)
                     checkWebsiteDomeTeleportRequest(steam)
+                    checkWebsiteNotifyRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)
                     if pawn ~= nil then

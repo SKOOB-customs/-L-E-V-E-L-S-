@@ -266,6 +266,37 @@ const readCurrencyFile = async (env, filename) => {
 
 const CURRENCY_FILENAME_RE = /^currency_(\d+)\.json$/;
 
+// Shared by the admin /currency-grant route and syncFactionWar's
+// out-of-sanctuary payout — read-current/add/write-back against the same
+// currency_<steamid>.json file + currency:index KV mirror either caller
+// would otherwise duplicate.
+const grantCurrencyToPlayer = async (env, targetSteamId, amount) => {
+  const currencyPath = `${PARKED_SAVED_DIR}/currency_${targetSteamId}.json`;
+  let currentBalance = 0;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(currencyPath)}`);
+    const data = JSON.parse(await response.text());
+    if (typeof data?.balance === 'number') currentBalance = data.balance;
+  } catch {
+    // no existing file yet — starts at 0
+  }
+  const newBalance = currentBalance + amount;
+  await pterodactylWriteFile(env, currencyPath, JSON.stringify({ balance: newBalance, updatedAt: Date.now() }));
+
+  const existingRaw = await env.PARKED_KV.get('currency:index');
+  let balances = {};
+  if (existingRaw) {
+    try {
+      balances = JSON.parse(existingRaw).balances || {};
+    } catch {
+      balances = {};
+    }
+  }
+  balances[targetSteamId] = newBalance;
+  await env.PARKED_KV.put('currency:index', JSON.stringify({ updatedAt: Date.now(), balances }));
+  return newBalance;
+};
+
 const syncCurrency = async (env) => {
   const files = await listCurrencyFiles(env);
   const balances = {};
@@ -664,6 +695,331 @@ const requestDomeTeleport = (env, steamId) =>
   writeRequest(env, domeTeleportRequestPath, steamId, DOME_DESTINATION);
 const readDomeTeleportResult = (env, steamId, requestId) =>
   readResult(env, domeTeleportResultPath, steamId, requestId);
+
+// Generic website-triggered in-game toast — not faction-specific, reusable
+// by anything that wants to push a message to one online player. Reuses
+// main.lua's existing safeNotify, same request-file pattern as every
+// other feature here, just fire-and-forget (no result file — the caller
+// doesn't need confirmation, so there's nothing to poll for).
+const notifyRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/notify_request_${steamId}.json`;
+const requestNotify = (env, steamId, message) => writeRequest(env, notifyRequestPath, steamId, { message });
+
+// ── Factions & War ──
+//
+// Phase 1: join a faction (locked in — see hasAdminWarAccess below for the
+// only way to change it), earn a lifetime playtime-based rank, fight
+// week-long "King of the Hill" wars over hand-captured map zones. No kill/
+// combat tracking exists anywhere in this codebase (confirmed — the mod
+// has zero combat hooks), so war scoring is entirely position-based: who's
+// physically standing in a contested zone, sampled once a minute by
+// syncFactionWar (added to the cron below) via the same RCON position
+// sweep /all-positions already uses.
+const FACTION_IDS = ['carcharo', 'dromaeosaur', 'mosasaur'];
+
+// Minutes: 30m, 1h, 3h, 5h, 10h, 15h, 20h, 30h, 40h, 50h, 60h, 75h, 90h, 100h.
+const FACTION_RANK_THRESHOLDS = [30, 60, 180, 300, 600, 900, 1200, 1800, 2400, 3000, 3600, 4500, 5400, 6000];
+
+const FACTIONS = {
+  carcharo: {
+    name: 'Carcharo Dominion',
+    tagline: 'Aggression • Conquest • Destruction',
+    accent: '#d13d4d',
+    rankTitles: [
+      'Fresh Meat', 'Red Recruit', 'Blood Initiate', 'Fang Runner', 'Crimson Raider',
+      'Bloodhound', 'Carnage Enforcer', 'Dread Captain', 'Bloodfang Warlord',
+      'Crimson Executioner', 'Tyrant of the Pit', 'Blood Reaper', 'The Red Calamity',
+      'APEX BLOOD EMPEROR',
+    ],
+  },
+  dromaeosaur: {
+    name: 'Dromaeosaur Pact',
+    tagline: 'Territory • Ambush • Survival',
+    accent: '#2f9e44',
+    rankTitles: [
+      'Lost Hatchling', 'Green Recruit', 'Thorn Initiate', 'Jungle Stalker', 'Venom Scout',
+      'Mire Hunter', 'Wildfang Enforcer', 'Grove Commander', 'Emerald Warlord',
+      'Deathroot Reaper', 'Primeval Overlord', 'The Verdant Nightmare', 'The Ancient Devourer',
+      'PRIMORDIAL DEATHLORD',
+    ],
+  },
+  mosasaur: {
+    name: 'Mosasaur Thalassocracy',
+    tagline: 'Discipline • Control • Domination',
+    accent: '#1f6fd6',
+    rankTitles: [
+      'Unblooded', 'Blue Recruit', 'Depth Initiate', 'Tide Runner', 'Abyss Scout',
+      'Storm Hunter', 'Void Enforcer', 'Tidal Commander', 'Abyssal Warlord',
+      'Frostbite Executioner', "Leviathan's Chosen", 'The Drowned King', 'The Eternal Leviathan',
+      'ABYSSAL DEATH SOVEREIGN',
+    ],
+  },
+};
+
+// Only an owner/senior can start/end a war, edit zone coordinates, or
+// override someone's faction — same inline tier check every other
+// admin-gated route in this file already uses, no new tier table.
+const hasFactionAdminAccess = (tier) => tier === 'owner' || tier === 'senior';
+
+const factionRankForMinutes = (factionId, minutes) => {
+  const faction = FACTIONS[factionId];
+  if (!faction) return null;
+  let rankIndex = -1;
+  for (let i = 0; i < FACTION_RANK_THRESHOLDS.length; i += 1) {
+    if (minutes >= FACTION_RANK_THRESHOLDS[i]) rankIndex = i;
+  }
+  if (rankIndex === -1) {
+    return { title: null, nextTitle: faction.rankTitles[0], nextThreshold: FACTION_RANK_THRESHOLDS[0] };
+  }
+  const hasNext = rankIndex + 1 < FACTION_RANK_THRESHOLDS.length;
+  return {
+    title: faction.rankTitles[rankIndex],
+    nextTitle: hasNext ? faction.rankTitles[rankIndex + 1] : null,
+    nextThreshold: hasNext ? FACTION_RANK_THRESHOLDS[rankIndex + 1] : null,
+  };
+};
+
+// Generic compare-before-write KV index helper — every :index key in this
+// file follows {...data, updatedAt}, written only when the data itself
+// (excluding updatedAt) actually changed, so a per-minute cron task doesn't
+// burn the free-tier 1,000-writes/day KV quota on ticks where nothing
+// changed (see syncAdminTiers's own comment — the original case that
+// forced this convention on every sync in this file).
+const putIndexIfChanged = async (env, key, data) => {
+  const existingRaw = await env.PARKED_KV.get(key);
+  let existing = null;
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw);
+      delete parsed.updatedAt;
+      existing = parsed;
+    } catch {
+      existing = null;
+    }
+  }
+  if (JSON.stringify(existing) === JSON.stringify(data)) return false;
+  await env.PARKED_KV.put(key, JSON.stringify({ ...data, updatedAt: Date.now() }));
+  return true;
+};
+
+const readFactionsIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('factions:index');
+  if (!raw) return { members: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    return { members: parsed.members || {} };
+  } catch {
+    return { members: {} };
+  }
+};
+
+const readFactionPlaytimeIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('faction_playtime:index');
+  if (!raw) return { totals: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    return { totals: parsed.totals || {} };
+  } catch {
+    return { totals: {} };
+  }
+};
+
+const readWarZonesIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('war_zones:index');
+  if (!raw) return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      staticZoneA: parsed.staticZoneA || null,
+      staticZoneB: parsed.staticZoneB || null,
+      movingZoneStart: parsed.movingZoneStart || null,
+      movingZoneEnd: parsed.movingZoneEnd || null,
+      zoneRadius: parsed.zoneRadius || 4000,
+      sanctuaries: parsed.sanctuaries || {},
+    };
+  } catch {
+    return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: {} };
+  }
+};
+
+const readWarIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('war:index');
+  if (!raw) return { current: null, history: [] };
+  try {
+    const parsed = JSON.parse(raw);
+    return { current: parsed.current || null, history: parsed.history || [] };
+  } catch {
+    return { current: null, history: [] };
+  }
+};
+
+const WAR_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const WAR_STATIC_PHASE_DAYS = 6; // days 1-6: both static zones live; day 7: the moving zone
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Default out-of-sanctuary currency rate during an active war — tune this
+// if it feels too generous/stingy once a real war actually runs.
+const WAR_CURRENCY_PER_MINUTE = 5;
+
+const isWithinZone = (point, center, radius) => {
+  if (!point || !center) return false;
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return dx * dx + dy * dy <= radius * radius;
+};
+
+const lerpPoint = (a, b, t) => ({
+  x: a.x + (b.x - a.x) * t,
+  y: a.y + (b.y - a.y) * t,
+  z: a.z + (b.z - a.z) * t,
+});
+
+// Which zone(s) are live right now for a given war + zone config — days
+// 1-6 (0-indexed 0-5) both static zones are simultaneously active; day 7
+// (index 6+) is the single moving zone, its center interpolated across
+// that day's own elapsed time from movingZoneStart to movingZoneEnd.
+const activeZonesForWar = (war, zones) => {
+  if (!war || !zones) return [];
+  const dayIndex = Math.floor((Date.now() - war.startedAt) / DAY_MS);
+  if (dayIndex < WAR_STATIC_PHASE_DAYS) {
+    return [zones.staticZoneA, zones.staticZoneB].filter(Boolean);
+  }
+  if (!zones.movingZoneStart || !zones.movingZoneEnd) return [];
+  const dayStart = war.startedAt + WAR_STATIC_PHASE_DAYS * DAY_MS;
+  const t = Math.min(Math.max((Date.now() - dayStart) / DAY_MS, 0), 1);
+  return [lerpPoint(zones.movingZoneStart, zones.movingZoneEnd, t)];
+};
+
+// Tallies final scores, records history, clears current — shared by the
+// natural end-of-week rollover (syncFactionWar) and the manual admin
+// "End War" override, so the two can never disagree on how a winner gets
+// picked.
+const finalizeWar = (warData) => {
+  const current = warData.current;
+  if (!current) return warData;
+  const scores = current.scores || {};
+  let winner = null;
+  let best = -1;
+  for (const factionId of FACTION_IDS) {
+    const score = scores[factionId] || 0;
+    if (score > best) {
+      best = score;
+      winner = factionId;
+    }
+  }
+  const entry = { startedAt: current.startedAt, endsAt: Date.now(), finalScores: scores, winner };
+  warData.history = [entry, ...(warData.history || [])].slice(0, 50);
+  warData.current = null;
+  return warData;
+};
+
+// Per-minute cron task (added to scheduled() below) — one RCON position
+// sweep covers everything: lifetime playtime accrual (always, war or
+// not), hotzone/sanctuary scoring, sanctuary-breach alerts, and the
+// out-of-sanctuary currency payout (war-active only). Same RCON_BRIDGE
+// Durable Object + PLAYER_DATA_OPCODE + parseAllPlayerDinos the
+// /all-positions route already uses for this exact kind of sweep.
+const syncFactionWar = async (env) => {
+  if (!env.PARKED_KV || !env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD || !env.RCON_BRIDGE) return;
+
+  const factionsData = await readFactionsIndex(env);
+  if (Object.keys(factionsData.members).length === 0) return; // no one's joined yet — nothing to do
+
+  let dinos;
+  try {
+    const rconStub = env.RCON_BRIDGE.get(env.RCON_BRIDGE.idFromName('singleton'));
+    const doResponse = await rconStub.fetch('https://rcon-bridge/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opcode: PLAYER_DATA_OPCODE, doneMarkers: ['PlayerDataEnd'] }),
+    });
+    const doData = await doResponse.json();
+    if (!doResponse.ok || !doData.ok) return;
+    dinos = parseAllPlayerDinos(doData.response);
+  } catch (error) {
+    console.error('syncFactionWar: RCON sweep failed:', error.message);
+    return;
+  }
+
+  // Only spawned players who are actually in a faction count for anything
+  // below — everyone else (not joined, or connected but not spawned) is
+  // invisible to this whole system, same as every other RCON-position
+  // feature in this file.
+  const spawned = dinos
+    .map((dino) => ({ steamId: dino.playerId, location: dino.location, factionId: factionsData.members[dino.playerId]?.factionId || null }))
+    .filter((p) => p.factionId);
+  if (spawned.length === 0) return;
+
+  // 1. Lifetime playtime — always accrues, independent of any war.
+  const playtimeData = await readFactionPlaytimeIndex(env);
+  for (const p of spawned) {
+    playtimeData.totals[p.steamId] = (playtimeData.totals[p.steamId] || 0) + 1;
+  }
+  await putIndexIfChanged(env, 'faction_playtime:index', playtimeData);
+
+  // 2. War scoring/sanctuaries/currency — only while a war is active.
+  let warData = await readWarIndex(env);
+  if (warData.current) {
+    if (Date.now() >= warData.current.endsAt) {
+      warData = finalizeWar(warData);
+      await putIndexIfChanged(env, 'war:index', warData);
+      return; // this tick just closes the war out — scoring resumes next tick under whatever comes next
+    }
+
+    const zonesData = await readWarZonesIndex(env);
+    const activeZones = activeZonesForWar(warData.current, zonesData);
+    const radius = zonesData.zoneRadius || 4000;
+
+    // Per-capita: every faction member physically in ANY active zone
+    // banks their faction a point this minute (confirmed scoring model —
+    // not winner-take-all).
+    for (const p of spawned) {
+      const inAnyZone = activeZones.some((zone) => isWithinZone(p.location, zone, radius));
+      if (inAnyZone) {
+        warData.current.scores[p.factionId] = (warData.current.scores[p.factionId] || 0) + 1;
+      }
+    }
+
+    // Sanctuary breach — edge-triggered (only notify on the transition
+    // from clear to breached, not every tick an enemy lingers, so this
+    // doesn't spam the defending faction once a minute for as long as a
+    // raid sits there).
+    warData.current.sanctuaryBreached = warData.current.sanctuaryBreached || {};
+    for (const factionId of FACTION_IDS) {
+      const sanctuary = zonesData.sanctuaries[factionId];
+      if (!sanctuary) continue;
+      const intruders = spawned.filter((p) => p.factionId !== factionId && isWithinZone(p.location, sanctuary, radius));
+      const breached = intruders.length > 0;
+      const wasBreached = !!warData.current.sanctuaryBreached[factionId];
+      if (breached && !wasBreached) {
+        const defenders = spawned.filter((p) => p.factionId === factionId);
+        const message = `${FACTIONS[factionId]?.name || factionId} sanctuary is under attack!`;
+        for (const defender of defenders) {
+          try {
+            await requestNotify(env, defender.steamId, message);
+          } catch (error) {
+            console.error('syncFactionWar: sanctuary notify failed:', error.message);
+          }
+        }
+      }
+      warData.current.sanctuaryBreached[factionId] = breached;
+    }
+
+    // Currency — anyone spawned and factioned, anywhere but their OWN
+    // sanctuary, earns the war's out-in-the-world rate this minute.
+    for (const p of spawned) {
+      const ownSanctuary = zonesData.sanctuaries[p.factionId];
+      const inOwnSanctuary = ownSanctuary && isWithinZone(p.location, ownSanctuary, radius);
+      if (!inOwnSanctuary) {
+        try {
+          await grantCurrencyToPlayer(env, p.steamId, WAR_CURRENCY_PER_MINUTE);
+        } catch (error) {
+          console.error('syncFactionWar: currency grant failed:', error.message);
+        }
+      }
+    }
+
+    await putIndexIfChanged(env, 'war:index', warData);
+  }
+};
 
 // ── Website admin panel: admin-tier lookup, compensation, strikes ──
 //
@@ -2274,30 +2630,7 @@ export default {
       if (!tier) return json({ error: 'Not an admin' }, 403);
 
       try {
-        const currencyPath = `${PARKED_SAVED_DIR}/currency_${targetSteamId}.json`;
-        let currentBalance = 0;
-        try {
-          const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(currencyPath)}`);
-          const data = JSON.parse(await response.text());
-          if (typeof data?.balance === 'number') currentBalance = data.balance;
-        } catch {
-          // no existing file yet — starts at 0
-        }
-        const newBalance = currentBalance + grantAmount;
-        await pterodactylWriteFile(env, currencyPath, JSON.stringify({ balance: newBalance, updatedAt: Date.now() }));
-
-        const existingRaw = await env.PARKED_KV.get('currency:index');
-        let balances = {};
-        if (existingRaw) {
-          try {
-            balances = JSON.parse(existingRaw).balances || {};
-          } catch {
-            balances = {};
-          }
-        }
-        balances[targetSteamId] = newBalance;
-        await env.PARKED_KV.put('currency:index', JSON.stringify({ updatedAt: Date.now(), balances }));
-
+        const newBalance = await grantCurrencyToPlayer(env, targetSteamId, grantAmount);
         return json({ ok: true, balance: newBalance });
       } catch (error) {
         return json({ error: error.message || 'Currency grant failed' }, 502);
@@ -4525,6 +4858,242 @@ export default {
       }
     }
 
+    // ── Factions & War ──
+    if (url.pathname === '/faction-status' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ factionId: null });
+      try {
+        const factionsData = await readFactionsIndex(env);
+        const member = factionsData.members[steamId];
+        if (!member) return json({ factionId: null });
+        const playtimeData = await readFactionPlaytimeIndex(env);
+        const minutes = playtimeData.totals[steamId] || 0;
+        const rank = factionRankForMinutes(member.factionId, minutes);
+        return json({
+          factionId: member.factionId,
+          factionName: FACTIONS[member.factionId]?.name || member.factionId,
+          joinedAt: member.joinedAt,
+          minutes,
+          rankTitle: rank?.title || null,
+          nextRankTitle: rank?.nextTitle || null,
+          minutesToNext: rank?.nextThreshold != null ? Math.max(0, rank.nextThreshold - minutes) : null,
+        });
+      } catch (error) {
+        return json({ error: error.message || 'Faction status lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-join' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, factionId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!FACTION_IDS.includes(factionId)) {
+        return json({ error: 'Invalid faction' }, 400);
+      }
+      try {
+        const factionsData = await readFactionsIndex(env);
+        if (factionsData.members[steamId]) {
+          return json({ error: 'Already in a faction — ask an admin if you need to switch.' }, 409);
+        }
+        factionsData.members[steamId] = { factionId, joinedAt: Date.now() };
+        await putIndexIfChanged(env, 'factions:index', factionsData);
+        return json({ ok: true, factionId });
+      } catch (error) {
+        return json({ error: error.message || 'Faction join failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-standings' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ ok: true, war: null, history: [] });
+      try {
+        const warData = await readWarIndex(env);
+        const zonesData = await readWarZonesIndex(env);
+        let phase = null;
+        let zonesActive = 0;
+        if (warData.current) {
+          const dayIndex = Math.floor((Date.now() - warData.current.startedAt) / DAY_MS);
+          phase = dayIndex < WAR_STATIC_PHASE_DAYS ? 'static' : 'moving';
+          zonesActive = activeZonesForWar(warData.current, zonesData).length;
+        }
+        return json({
+          ok: true,
+          war: warData.current
+            ? { startedAt: warData.current.startedAt, endsAt: warData.current.endsAt, scores: warData.current.scores, phase, zonesActive }
+            : null,
+          history: warData.history,
+        });
+      } catch (error) {
+        return json({ error: error.message || 'Faction standings lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-war-zones' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ zones: null });
+      try {
+        const zonesData = await readWarZonesIndex(env);
+        const warData = await readWarIndex(env);
+        const activeZones = warData.current ? activeZonesForWar(warData.current, zonesData) : [];
+        return json({
+          ok: true,
+          staticZoneA: zonesData.staticZoneA,
+          staticZoneB: zonesData.staticZoneB,
+          movingZoneStart: zonesData.movingZoneStart,
+          movingZoneEnd: zonesData.movingZoneEnd,
+          zoneRadius: zonesData.zoneRadius,
+          sanctuaries: zonesData.sanctuaries,
+          activeZones,
+        });
+      } catch (error) {
+        return json({ error: error.message || 'War zone lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-set-zones' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, staticZoneA, staticZoneB, movingZoneStart, movingZoneEnd, zoneRadius, sanctuaries } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+
+      const isPoint = (p) => p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
+      if (!isPoint(staticZoneA) || !isPoint(staticZoneB) || !isPoint(movingZoneStart) || !isPoint(movingZoneEnd)) {
+        return json({ error: 'staticZoneA/staticZoneB/movingZoneStart/movingZoneEnd each need numeric x/y/z' }, 400);
+      }
+      const sanctuaryPoints = {};
+      for (const factionId of FACTION_IDS) {
+        const p = sanctuaries?.[factionId];
+        if (!isPoint(p)) return json({ error: `Missing sanctuary coordinates for ${factionId}` }, 400);
+        sanctuaryPoints[factionId] = { x: p.x, y: p.y, z: p.z };
+      }
+      try {
+        await putIndexIfChanged(env, 'war_zones:index', {
+          staticZoneA: { x: staticZoneA.x, y: staticZoneA.y, z: staticZoneA.z },
+          staticZoneB: { x: staticZoneB.x, y: staticZoneB.y, z: staticZoneB.z },
+          movingZoneStart: { x: movingZoneStart.x, y: movingZoneStart.y, z: movingZoneStart.z },
+          movingZoneEnd: { x: movingZoneEnd.x, y: movingZoneEnd.y, z: movingZoneEnd.z },
+          zoneRadius: Number(zoneRadius) || 4000,
+          sanctuaries: sanctuaryPoints,
+        });
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Zone save failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-start-war' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+
+      try {
+        const warData = await readWarIndex(env);
+        if (warData.current) return json({ error: 'A war is already active.' }, 409);
+        const zonesData = await readWarZonesIndex(env);
+        if (!zonesData.staticZoneA || !zonesData.staticZoneB || !zonesData.movingZoneStart || !zonesData.movingZoneEnd) {
+          return json({ error: 'Set the war zones first.' }, 400);
+        }
+        const startedAt = Date.now();
+        warData.current = { startedAt, endsAt: startedAt + WAR_DURATION_MS, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
+        await putIndexIfChanged(env, 'war:index', warData);
+        return json({ ok: true, war: warData.current });
+      } catch (error) {
+        return json({ error: error.message || 'Starting the war failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-end-war' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+
+      try {
+        let warData = await readWarIndex(env);
+        if (!warData.current) return json({ error: 'No war is currently active.' }, 409);
+        warData = finalizeWar(warData);
+        await putIndexIfChanged(env, 'war:index', warData);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Ending the war failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-move-player' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, targetSteamId, factionId } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (typeof targetSteamId !== 'string' || !/^\d{17}$/.test(targetSteamId)) {
+        return json({ error: 'Missing or invalid targetSteamId' }, 400);
+      }
+      if (!FACTION_IDS.includes(factionId)) {
+        return json({ error: 'Invalid faction' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+
+      try {
+        const factionsData = await readFactionsIndex(env);
+        const previousFactionId = factionsData.members[targetSteamId]?.factionId || null;
+        factionsData.members[targetSteamId] = { factionId, joinedAt: Date.now() };
+        await putIndexIfChanged(env, 'factions:index', factionsData);
+        await logModerationAction(env, {
+          action: 'faction_move',
+          actorSteamId: requesterSteamId,
+          targetSteamId,
+          detail: { previousFactionId, factionId },
+        });
+        return json({ ok: true, previousFactionId, factionId });
+      } catch (error) {
+        return json({ error: error.message || 'Moving that player failed' }, 502);
+      }
+    }
+
     // So the website can show the button's enabled/disabled state (and
     // "refreshes tomorrow" messaging) without spending an actual attempt
     // finding out.
@@ -4735,6 +5304,9 @@ export default {
     );
     ctx.waitUntil(
       syncUnnamedFriendSteamIds(env).catch((error) => console.error('syncUnnamedFriendSteamIds failed:', error.message)),
+    );
+    ctx.waitUntil(
+      syncFactionWar(env).catch((error) => console.error('syncFactionWar failed:', error.message)),
     );
   },
 };

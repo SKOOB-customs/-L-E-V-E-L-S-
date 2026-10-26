@@ -325,6 +325,12 @@ const activateTab = (tabName) => {
   });
 
   updateDinoMascotForTab(tabName);
+  // checkFactionStatus is declared later in this file — deferred via
+  // queueMicrotask (same TDZ-safe pattern used for displaySteamStatus
+  // elsewhere) so a deep-linked reload straight onto #factions, which
+  // calls activateTab synchronously during the bootstrap at the top of
+  // this file, can't reference it before its own declaration runs.
+  if (tabName === 'factions') queueMicrotask(() => checkFactionStatus());
 
   // Persists the active tab into the URL hash so a plain page reload
   // restores whatever page you were actually on (see the bootstrap
@@ -3821,6 +3827,7 @@ const checkAdminPanelAccess = async () => {
     if (ownerTabButton) ownerTabButton.hidden = true;
     if (ownerPanel) ownerPanel.hidden = true;
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = true; });
+    document.querySelectorAll('[data-faction-admin-only]').forEach((el) => { el.hidden = true; });
     hideSkinIdeasSidebar();
     viewerAdminTier = null;
     return;
@@ -3830,6 +3837,13 @@ const checkAdminPanelAccess = async () => {
     const data = await response.json();
     const hasAccess = Boolean(data.tier);
     viewerAdminTier = data.tier || null;
+    // Factions tab's admin sub-section: owner OR senior (not plain
+    // 'admin', unlike hasAccess above, and not owner-only like
+    // [data-owner-only]) — war control is a bigger lever than a regular
+    // admin's usual compensation/strike tools, so it's scoped one notch
+    // narrower than the general Admin Panel.
+    const isFactionAdmin = data.tier === 'owner' || data.tier === 'senior';
+    document.querySelectorAll('[data-faction-admin-only]').forEach((el) => { el.hidden = !isFactionAdmin; });
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
     if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
@@ -4005,8 +4019,347 @@ const checkSkinLabAccess = async () => {
   }
 };
 
+// ── Factions & War ──
+//
+// Join a faction (permanent — only an owner/senior admin override via
+// faction-admin-move-player.js can change it), earn a lifetime playtime-
+// based rank, and follow/participate in the current week-long war. See
+// FACTIONS in bridge-worker.js for the authoritative rank-title data;
+// this is just small display copy (name/tagline/accent) for the join
+// cards, kept local the same way DINO_MASCOT_TAB_SRC does rather than
+// fetching it from an endpoint that doesn't otherwise need to exist.
+const FACTION_DISPLAY = {
+  carcharo: { name: 'Carcharo Dominion', tagline: 'Aggression • Conquest • Destruction', accent: '#d13d4d' },
+  dromaeosaur: { name: 'Dromaeosaur Pact', tagline: 'Territory • Ambush • Survival', accent: '#2f9e44' },
+  mosasaur: { name: 'Mosasaur Thalassocracy', tagline: 'Discipline • Control • Domination', accent: '#1f6fd6' },
+};
+
+const renderFactionJoinCards = () => {
+  const grid = document.querySelector('[data-faction-card-grid]');
+  if (!grid) return;
+  grid.innerHTML = '';
+  Object.entries(FACTION_DISPLAY).forEach(([factionId, info]) => {
+    const card = document.createElement('div');
+    card.className = 'faction-card';
+    card.style.setProperty('--faction-card-accent', info.accent);
+    const title = document.createElement('h3');
+    title.textContent = info.name;
+    const tagline = document.createElement('p');
+    tagline.textContent = info.tagline;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `Join ${info.name}`;
+    button.addEventListener('click', () => confirmJoinFaction(factionId, info.name, button));
+    card.append(title, tagline, button);
+    grid.appendChild(card);
+  });
+};
+
+// Inline confirm (replaces the clicked button with a Yes/No row) — same
+// pattern as the Skin Library's delete confirmation, not a raw confirm()
+// dialog, so an accidental click can't lock someone into the wrong
+// faction permanently.
+const confirmJoinFaction = (factionId, factionName, button) => {
+  const card = button.closest('.faction-card');
+  if (!card) return;
+  button.hidden = true;
+  const row = document.createElement('div');
+  row.className = 'skin-library-action-row';
+  const prompt = document.createElement('span');
+  prompt.className = 'skin-library-confirm-text';
+  prompt.textContent = `Join ${factionName}? This is permanent.`;
+  const yesBtn = document.createElement('button');
+  yesBtn.type = 'button';
+  yesBtn.className = 'skin-library-confirm-yes';
+  yesBtn.textContent = 'Yes, join';
+  const noBtn = document.createElement('button');
+  noBtn.type = 'button';
+  noBtn.className = 'skin-library-confirm-no';
+  noBtn.textContent = 'Cancel';
+  noBtn.addEventListener('click', () => {
+    row.remove();
+    button.hidden = false;
+  });
+  yesBtn.addEventListener('click', async () => {
+    yesBtn.disabled = true;
+    noBtn.disabled = true;
+    try {
+      const response = await fetch('/api/faction-join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ factionId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        showToast(data.error || 'Could not join that faction.');
+        row.remove();
+        button.hidden = false;
+        return;
+      }
+      showToast(`Welcome to ${factionName}.`);
+      checkFactionStatus();
+    } catch (error) {
+      console.debug('Faction join failed:', error);
+      showToast('Could not reach the server right now.');
+      row.remove();
+      button.hidden = false;
+    }
+  });
+  row.append(prompt, yesBtn, noBtn);
+  card.appendChild(row);
+};
+
+const formatMinutesAsHours = (minutes) => {
+  if (minutes == null) return '—';
+  const hours = minutes / 60;
+  return hours >= 10 ? `${Math.round(hours)}h` : `${hours.toFixed(1)}h`;
+};
+
+const renderFactionStatus = (data) => {
+  const joinSection = document.querySelector('[data-faction-join-section]');
+  const statusSection = document.querySelector('[data-faction-status-section]');
+  if (!data.factionId) {
+    if (joinSection) joinSection.hidden = false;
+    if (statusSection) statusSection.hidden = true;
+    delete document.body.dataset.faction;
+    return;
+  }
+  if (joinSection) joinSection.hidden = true;
+  if (statusSection) statusSection.hidden = false;
+  document.body.dataset.faction = data.factionId;
+
+  const info = FACTION_DISPLAY[data.factionId];
+  const nameEl = document.querySelector('[data-faction-identity-name]');
+  if (nameEl) nameEl.textContent = info?.name || data.factionName || data.factionId;
+  const taglineEl = document.querySelector('[data-faction-identity-tagline]');
+  if (taglineEl) taglineEl.textContent = info?.tagline || '';
+  const rankEl = document.querySelector('[data-faction-rank-title]');
+  if (rankEl) rankEl.textContent = `${data.rankTitle || '—'} (${formatMinutesAsHours(data.minutes)} played)`;
+  const nextRankEl = document.querySelector('[data-faction-next-rank]');
+  if (nextRankEl) {
+    nextRankEl.textContent = data.nextRankTitle
+      ? `${data.nextRankTitle} — ${formatMinutesAsHours(data.minutesToNext)} to go`
+      : 'Max rank reached';
+  }
+};
+
+const FACTION_PHASE_LABEL = { static: 'Two hotzones active', moving: 'Final day — moving hotzone' };
+
+const renderFactionStandings = (data) => {
+  const emptyEl = document.querySelector('[data-faction-war-empty]');
+  const standingsEl = document.querySelector('[data-faction-war-standings]');
+  const scoresList = document.querySelector('[data-faction-scores-list]');
+  const phaseEl = document.querySelector('[data-faction-war-phase]');
+  const controlStatusEl = document.querySelector('[data-faction-war-control-status]');
+
+  if (!data.war) {
+    if (emptyEl) emptyEl.hidden = false;
+    if (standingsEl) standingsEl.hidden = true;
+    if (controlStatusEl) controlStatusEl.textContent = 'No war is currently active.';
+  } else {
+    if (emptyEl) emptyEl.hidden = true;
+    if (standingsEl) standingsEl.hidden = false;
+    if (scoresList) {
+      scoresList.innerHTML = '';
+      Object.keys(FACTION_DISPLAY).forEach((factionId) => {
+        const row = document.createElement('div');
+        const label = document.createElement('strong');
+        label.textContent = FACTION_DISPLAY[factionId].name;
+        const value = document.createElement('span');
+        value.textContent = `${data.war.scores?.[factionId] || 0} pts`;
+        row.append(label, value);
+        scoresList.appendChild(row);
+      });
+    }
+    if (phaseEl) {
+      const endsIn = Math.max(0, data.war.endsAt - Date.now());
+      const daysLeft = Math.ceil(endsIn / (24 * 60 * 60 * 1000));
+      phaseEl.textContent = `${FACTION_PHASE_LABEL[data.war.phase] || ''} — ${daysLeft} day(s) left.`;
+    }
+    if (controlStatusEl) controlStatusEl.textContent = 'A war is currently active.';
+  }
+
+  const historyList = document.querySelector('[data-faction-history-list]');
+  const historyEmpty = document.querySelector('[data-faction-history-empty]');
+  if (historyList) {
+    historyList.innerHTML = '';
+    const history = data.history || [];
+    if (history.length === 0) {
+      if (historyEmpty) historyEmpty.hidden = false;
+    } else {
+      if (historyEmpty) historyEmpty.hidden = true;
+      history.forEach((entry) => {
+        const row = document.createElement('div');
+        const label = document.createElement('strong');
+        label.textContent = new Date(entry.startedAt).toLocaleDateString();
+        const value = document.createElement('span');
+        value.textContent = `Winner: ${FACTION_DISPLAY[entry.winner]?.name || entry.winner || '—'}`;
+        row.append(label, value);
+        historyList.appendChild(row);
+      });
+    }
+  }
+};
+
+const loadFactionStandings = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch('/api/faction-standings');
+    const data = await response.json();
+    if (response.ok && data.ok) renderFactionStandings(data);
+  } catch (error) {
+    console.debug('Faction standings load failed:', error);
+  }
+};
+
+const checkFactionStatus = async () => {
+  const profile = getSteamProfile();
+  const joinSection = document.querySelector('[data-faction-join-section]');
+  const statusSection = document.querySelector('[data-faction-status-section]');
+  if (!profile?.steamId) {
+    if (joinSection) joinSection.hidden = false;
+    if (statusSection) statusSection.hidden = true;
+    delete document.body.dataset.faction;
+    return;
+  }
+  renderFactionJoinCards();
+  try {
+    const response = await fetch('/api/faction-status');
+    const data = await response.json();
+    renderFactionStatus(data);
+  } catch (error) {
+    console.debug('Faction status load failed:', error);
+  }
+  loadFactionStandings();
+};
+
+// ── Factions tab: owner/senior admin tools ──
+const collectFactionZonePayload = () => {
+  const payload = {};
+  document.querySelectorAll('[data-faction-zone]').forEach((input) => {
+    const path = input.dataset.factionZone.split('.');
+    let node = payload;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      node[path[i]] = node[path[i]] || {};
+      node = node[path[i]];
+    }
+    node[path[path.length - 1]] = Number(input.value);
+  });
+  return payload;
+};
+
+document.querySelector('[data-faction-zones-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-set-zones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectFactionZonePayload()),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not save the zones.');
+    } else {
+      showToast('War zones saved.');
+    }
+  } catch (error) {
+    console.debug('Faction zone save failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+document.querySelector('[data-faction-start-war]')?.addEventListener('click', async (event) => {
+  const button = event.target;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-start-war', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not start the war.');
+    } else {
+      showToast('War started — runs 7 days.');
+      loadFactionStandings();
+    }
+  } catch (error) {
+    console.debug('Start war failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector('[data-faction-end-war]')?.addEventListener('click', async (event) => {
+  const button = event.target;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-end-war', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not end the war.');
+    } else {
+      showToast('War ended.');
+      loadFactionStandings();
+    }
+  } catch (error) {
+    console.debug('End war failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector('[data-faction-move-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const targetSteamId = extractSteamId(document.querySelector('[data-faction-move-target]')?.value);
+  if (!/^\d{17}$/.test(targetSteamId)) {
+    showToast('Enter a valid 17-digit Steam ID.');
+    return;
+  }
+  const factionId = document.querySelector('[data-faction-move-select]')?.value;
+  if (!factionId) {
+    showToast('Pick a faction.');
+    return;
+  }
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-move-player', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetSteamId, factionId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not move that player.');
+    } else {
+      showToast(`Moved ${targetSteamId} to ${FACTION_DISPLAY[factionId]?.name || factionId}.`);
+      document.querySelector('[data-faction-move-target]').value = '';
+      document.querySelector('[data-faction-move-select]').value = '';
+    }
+  } catch (error) {
+    console.debug('Faction move failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
 checkAdminPanelAccess();
 checkSkinLabAccess();
+checkFactionStatus();
 // Now open to any signed-in player (not admin-gated server-side anymore)
 // since the Friends tab's "Add a friend" field needs the same name-search
 // lookup — loadPlayerDirectory() itself already no-ops for a signed-out

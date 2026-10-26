@@ -190,6 +190,7 @@
         <button class="tab-button" data-tab="skins" type="button">Skins</button>
         <button class="tab-button" data-tab="map" type="button">Map</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
+        <button class="tab-button" data-tab="factions" type="button">Factions</button>
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
@@ -476,6 +477,147 @@
             <p class="dino-park-note">A few lines from each staff member, in their own words — written and kept up to date by them from the Admin Panel.</p>
             <div class="staff-bio-grid" data-staff-bio-grid></div>
           </div>
+        </section>
+
+        <section class="tab-panel" id="factions" data-tab="factions">
+          <div class="section-header">
+            <p class="eyebrow">CHOOSE YOUR SIDE</p>
+            <h2>Factions &amp; War</h2>
+          </div>
+
+          <div data-faction-join-section>
+            <p class="dino-park-note">Join a faction to start earning rank and fighting for it in the weekly war. This is permanent — ask an admin if you ever need to switch.</p>
+            <div class="faction-card-grid" data-faction-card-grid></div>
+          </div>
+
+          <div data-faction-status-section hidden>
+            <section class="panel content-box">
+              <div class="mini-heading" data-faction-identity-name></div>
+              <p class="dino-park-note" data-faction-identity-tagline></p>
+              <div class="info-list">
+                <div><strong>Rank</strong><span data-faction-rank-title>—</span></div>
+                <div><strong>Next rank</strong><span data-faction-next-rank>—</span></div>
+              </div>
+            </section>
+
+            <section class="panel content-box">
+              <div class="mini-heading">Current War</div>
+              <p class="dino-park-note" data-faction-war-empty>No war is currently active.</p>
+              <div data-faction-war-standings hidden>
+                <div class="info-list" data-faction-scores-list></div>
+                <p class="dino-park-note" data-faction-war-phase></p>
+              </div>
+            </section>
+
+            <section class="panel content-box">
+              <div class="mini-heading">War History</div>
+              <div class="info-list" data-faction-history-list></div>
+              <p class="dino-park-note empty-state" data-faction-history-empty hidden>No wars fought yet.</p>
+            </section>
+          </div>
+
+          <section class="panel content-box" data-faction-admin-only hidden>
+            <div class="mini-heading">War Zone Coordinates</div>
+            <p class="dino-park-note">Capture these live in-game, same as every other coordinate on this site. Sanctuary points below are pre-filled from the real spawn points already captured — the 4 hotzone points still need capturing.</p>
+            <form class="submit-form" data-faction-zones-form>
+              <div class="field-row two-up">
+                <label>Static Hotzone A — X <input type="number" step="any" data-faction-zone="staticZoneA.x" required /></label>
+                <label>Y <input type="number" step="any" data-faction-zone="staticZoneA.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" data-faction-zone="staticZoneA.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+              <div class="field-row two-up">
+                <label>Static Hotzone B — X <input type="number" step="any" data-faction-zone="staticZoneB.x" required /></label>
+                <label>Y <input type="number" step="any" data-faction-zone="staticZoneB.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" data-faction-zone="staticZoneB.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+              <div class="field-row two-up">
+                <label>Day 7 Moving Zone — Start X <input type="number" step="any" data-faction-zone="movingZoneStart.x" required /></label>
+                <label>Start Y <input type="number" step="any" data-faction-zone="movingZoneStart.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Start Z <input type="number" step="any" data-faction-zone="movingZoneStart.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+              <div class="field-row two-up">
+                <label>End X <input type="number" step="any" data-faction-zone="movingZoneEnd.x" required /></label>
+                <label>End Y <input type="number" step="any" data-faction-zone="movingZoneEnd.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>End Z <input type="number" step="any" data-faction-zone="movingZoneEnd.z" required /></label>
+                <label>Zone radius <input type="number" step="any" value="4000" data-faction-zone="zoneRadius" /></label>
+              </div>
+
+              <div class="field-row two-up">
+                <label>Carcharo Dominion sanctuary — X <input type="number" step="any" value="304450.792" data-faction-zone="sanctuaries.carcharo.x" required /></label>
+                <label>Y <input type="number" step="any" value="-395191.048" data-faction-zone="sanctuaries.carcharo.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" value="22343.062" data-faction-zone="sanctuaries.carcharo.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+              <div class="field-row two-up">
+                <label>Dromaeosaur Pact sanctuary — X <input type="number" step="any" value="-321205.446" data-faction-zone="sanctuaries.dromaeosaur.x" required /></label>
+                <label>Y <input type="number" step="any" value="102218.296" data-faction-zone="sanctuaries.dromaeosaur.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" value="22151.242" data-faction-zone="sanctuaries.dromaeosaur.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+              <div class="field-row two-up">
+                <label>Mosasaur Thalassocracy sanctuary — X <input type="number" step="any" value="-293096.653" data-faction-zone="sanctuaries.mosasaur.x" required /></label>
+                <label>Y <input type="number" step="any" value="504991.026" data-faction-zone="sanctuaries.mosasaur.y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" value="20757.805" data-faction-zone="sanctuaries.mosasaur.z" required /></label>
+                <label>&nbsp;</label>
+              </div>
+
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Save zones</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel content-box" data-faction-admin-only hidden>
+            <div class="mini-heading">War Control</div>
+            <p class="dino-park-note" data-faction-war-control-status></p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-faction-start-war>Start War</button>
+              <button class="secondary-button" type="button" data-faction-end-war>End War Early</button>
+            </div>
+          </section>
+
+          <section class="panel content-box" data-faction-admin-only hidden>
+            <div class="mini-heading">Move a Player's Faction</div>
+            <form class="submit-form" data-faction-move-form>
+              <div class="field-row two-up">
+                <label>
+                  Player Steam ID or name
+                  <div class="player-search">
+                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-faction-move-target required />
+                  </div>
+                </label>
+                <label>
+                  New faction
+                  <select data-faction-move-select required>
+                    <option value="">Pick a faction…</option>
+                    <option value="carcharo">Carcharo Dominion</option>
+                    <option value="dromaeosaur">Dromaeosaur Pact</option>
+                    <option value="mosasaur">Mosasaur Thalassocracy</option>
+                  </select>
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Move player</button>
+              </div>
+            </form>
+          </section>
         </section>
 
         <section class="tab-panel" id="profile" data-tab="profile">
