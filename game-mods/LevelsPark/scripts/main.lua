@@ -1720,6 +1720,13 @@ local function checkWebsiteSkinTestRequest(steam)
         local color = jsonReadColorField(colorsSection, field)
         if color ~= nil then colors[field] = color end
     end
+    -- Bug fix (2026-10-26): PatternIndex/SkinVariation were never read
+    -- here at all, unlike loadSkinCharges' identical parsing (used by the
+    -- grant-charges -> use path, which is why that one "worked
+    -- flawlessly" while Test silently dropped pattern changes) — same
+    -- two fields, same source JSON shape, just missing from this parser.
+    colors.PatternIndex = jsonReadNumber(colorsSection, "PatternIndex")
+    colors.SkinVariation = jsonReadNumber(colorsSection, "SkinVariation")
 
     local ok, message = trySkinTest(steam, colors)
     safeNotify(steam, message)
