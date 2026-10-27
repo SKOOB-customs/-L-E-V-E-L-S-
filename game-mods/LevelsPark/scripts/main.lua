@@ -1122,13 +1122,10 @@ local lastKnownVitals = {}
 -- juvenile) without opening the door to parking at any real injury.
 local PARK_MIN_HEALTH_PCT = 99.99
 
--- Mirrors DOME_DESTINATION in bridge-worker.js — duplicated here (not
--- sent via a request file) since tryPark needs it synchronously and
--- unconditionally, not just when a website action triggers one. Also
--- used by the Ayo Rex/Trike loadouts further down this file. Declared
--- here (ahead of tryPark) rather than down near the Ayo section so both
--- can see it as a real upvalue, not a stray global.
-local DOME_DESTINATION_LUA = { X = -34605, Y = 116398, Z = 37042 }
+-- Precise Dome-structure center, captured in-game (distinct from the
+-- Ayo teleport target in bridge-worker.js's DOME_DESTINATION, which is a
+-- separate, nearby point) — used only for the no-park-radius check below.
+local DOME_DESTINATION_LUA = { X = -39605, Y = 114760, Z = 37721 }
 -- Parking inside this radius of the Dome is blocked outright — without
 -- it, a player could grab an Ayo loadout (Prime, 88% growth, 12
 -- mutations) and immediately !park it, banking a permanently reusable,
@@ -1136,7 +1133,9 @@ local DOME_DESTINATION_LUA = { X = -34605, Y = 116398, Z = 37042 }
 -- run. Purely geographic (anyone parking here hits this, not just an
 -- actual TRAINING'DINO), which is also simpler and harder to route
 -- around than trying to detect "is this specific dino a training grant."
-local DOME_NO_PARK_RADIUS = 8500
+-- Radius derived from a second captured point on the Dome's outer edge
+-- (x=3384, y=160386): distance from DOME_DESTINATION_LUA ≈ 62688.
+local DOME_NO_PARK_RADIUS = 62688
 
 -- Core park logic shared by the in-game !park command and website-
 -- triggered park requests (the Live Dino tab's Park button — see the
