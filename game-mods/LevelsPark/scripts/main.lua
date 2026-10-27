@@ -644,20 +644,25 @@ local function applyStateToPawn(pawn, state)
         -- stores the exact absolute point values GetHealth()/etc. returned
         -- (e.g. 125, 61.5) — those two are NOT the same scale, and calling
         -- SetHealth() with a raw 0-1 fraction here used to leave a redeemed
-        -- comp dino at ~1 hp (real bug, fixed 2026-09-11). Growth is set
-        -- first above specifically so GAS's auto-refill-to-new-max already
-        -- ran, then this reads the freshly-computed native max back out
-        -- and scales by the stored fraction, rather than trusting any
-        -- stored max value (there isn't one — comp grants never set one).
-        local maxHealth, maxStamina, maxHunger, maxThirst = 1, 1, 1, 1
-        pcall(function() maxHealth = pawn:GetMaxHealth() or 1 end)
-        pcall(function() maxStamina = pawn:GetMaxStamina() or 1 end)
-        pcall(function() maxHunger = pawn:GetMaxHunger() or 1 end)
-        pcall(function() maxThirst = pawn:GetMaxThirst() or 1 end)
-        pcall(function() pawn:SetHealth(maxHealth * (state.health or 1)) end)
-        pcall(function() pawn:SetStamina(maxStamina * (state.stamina or 1)) end)
-        pcall(function() pawn:SetHunger(maxHunger * (state.hunger or 1)) end)
-        pcall(function() pawn:SetThirst(maxThirst * (state.thirst or 1)) end)
+        -- comp dino at ~1 hp (real bug, fixed 2026-09-11).
+        --
+        -- The actual Max*/Set* work now happens in
+        -- applyPercentageVitalsDeferred (called from tryRedeem, same
+        -- 500ms-later/re-resolved-pawn pattern as applyMutationsDeferred)
+        -- instead of right here — reported bug (2026-10-26): granted
+        -- dinos spawning with 0 hunger/0 thirst specifically (never
+        -- normal !park dinos, which don't go through this branch at
+        -- all). Health already reads/applies fine via this exact
+        -- recipe (see the 2026-09-11 fix above), so the difference
+        -- isn't the recipe itself — it's that GetMaxHunger/GetMaxThirst
+        -- read SYNCHRONOUSLY, immediately after SetGrowth on a pawn
+        -- that was JUST spawned this same tick by redeem, may not have
+        -- finished GAS's growth-triggered max-attribute recompute yet,
+        -- unlike a normal !park's capture (which reads a live pawn
+        -- that's been stable for a while, never freshly spawned).
+        -- Deferring by 500ms on a freshly re-resolved pawn is the exact
+        -- fix mutations already needed for an analogous freshly-spawned-
+        -- pawn staleness problem.
         return
     end
 
@@ -684,6 +689,56 @@ local function applyStateToPawn(pawn, state)
         tostring(state.hunger), tostring(okHunger), tostring(errHunger), tostring(readHunger),
         tostring(state.thirst), tostring(okThirst), tostring(errThirst), tostring(readThirst)
     ))
+end
+
+-- Restores health/stamina/hunger/thirst for a compensation/transfer-
+-- granted dino (statsArePercentages) on a deferred, freshly re-resolved
+-- pawn — same 500ms-later/re-resolve-via-steamId pattern
+-- applyMutationsDeferred below already uses, for the same underlying
+-- reason: this pawn was JUST spawned this tick by redeem, and GAS's
+-- growth-triggered max-attribute recompute may not have finished yet if
+-- read synchronously right after SetGrowth (see applyStateToPawn's own
+-- comment on its statsArePercentages branch, which used to do this
+-- inline — reported bug, 2026-10-26: granted dinos spawning with 0
+-- hunger/0 thirst specifically, never normal !park dinos, which never
+-- hit this branch and read a long-stable live pawn instead of a
+-- freshly-spawned one).
+local function applyPercentageVitalsDeferred(steam, state)
+    if not state.statsArePercentages then return end
+    local fired = false
+    local handle
+    handle = LoopInGameThreadWithDelay(500, function()
+        if fired then return end
+        fired = true
+        pcall(function()
+            if handle ~= nil and CancelDelayedAction ~= nil then CancelDelayedAction(handle) end
+        end)
+
+        local gm = findGameMode()
+        if gm == nil then return end
+        local ctrl
+        pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+        local pawn = livePawnFromCtrl(ctrl)
+        if pawn == nil then return end
+
+        local maxHealth, maxStamina, maxHunger, maxThirst = 1, 1, 1, 1
+        pcall(function() maxHealth = pawn:GetMaxHealth() or 1 end)
+        pcall(function() maxStamina = pawn:GetMaxStamina() or 1 end)
+        pcall(function() maxHunger = pawn:GetMaxHunger() or 1 end)
+        pcall(function() maxThirst = pawn:GetMaxThirst() or 1 end)
+        pcall(function() pawn:SetHealth(maxHealth * (state.health or 1)) end)
+        pcall(function() pawn:SetStamina(maxStamina * (state.stamina or 1)) end)
+        local okHunger, errHunger = pcall(function() pawn:SetHunger(maxHunger * (state.hunger or 1)) end)
+        local okThirst, errThirst = pcall(function() pawn:SetThirst(maxThirst * (state.thirst or 1)) end)
+        local readHunger, readThirst
+        pcall(function() readHunger = pawn:GetHunger() end)
+        pcall(function() readThirst = pawn:GetThirst() end)
+        log(string.format(
+            "applyPercentageVitalsDeferred: maxHunger=%s wantFraction=%s okCall=%s err=%s readBack=%s | maxThirst=%s wantFraction=%s okCall=%s err=%s readBack=%s",
+            tostring(maxHunger), tostring(state.hunger), tostring(okHunger), tostring(errHunger), tostring(readHunger),
+            tostring(maxThirst), tostring(state.thirst), tostring(okThirst), tostring(errThirst), tostring(readThirst)
+        ))
+    end)
 end
 
 -- Restores entombment level + mutation slots (admin-granted via
@@ -1204,6 +1259,7 @@ local function tryRedeem(steam, snapshotId, name)
     end
 
     applyStateToPawn(pawn, target)
+    applyPercentageVitalsDeferred(steam, target)
     applyMutationsDeferred(steam, target.entombments, target.mutations)
     -- A skin attached to this specific snapshot (via the website's
     -- Attach action, spending a charge) travels with it — applied once,
