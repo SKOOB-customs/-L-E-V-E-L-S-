@@ -4193,6 +4193,29 @@ const formatMinutesAsHours = (minutes) => {
   return hours >= 10 ? `${Math.round(hours)}h` : `${hours.toFixed(1)}h`;
 };
 
+// Rank table thresholds are clean minute values (30, 60, 180, ...) —
+// this reads as "30m" for the one sub-hour tier and a plain "Nh" for
+// every other (all exact multiples of 60), matching how the ranks were
+// originally specified (30 Minutes, 1 Hour, 3 Hours, ...).
+const formatRankThreshold = (minutes) => (minutes < 60 ? `${minutes}m` : `${minutes / 60}h`);
+
+const renderFactionRankTable = (ranks) => {
+  const container = document.querySelector('[data-faction-rank-table]');
+  if (!container) return;
+  container.innerHTML = '';
+  (ranks || []).forEach((rankEntry) => {
+    const row = document.createElement('div');
+    row.className = `faction-rank-table-row${rankEntry.achieved ? ' is-achieved' : ''}`;
+    const title = document.createElement('span');
+    title.textContent = rankEntry.title;
+    const hours = document.createElement('span');
+    hours.className = 'faction-rank-table-hours';
+    hours.textContent = formatRankThreshold(rankEntry.minutes);
+    row.append(title, hours);
+    container.appendChild(row);
+  });
+};
+
 const renderFactionStatus = (data) => {
   const statusSection = document.querySelector('[data-faction-status-section]');
   renderFactionJoinCards(data.factionId, data.swapsRemaining);
@@ -4223,6 +4246,7 @@ const renderFactionStatus = (data) => {
       ? `${data.nextRankTitle} — ${formatMinutesAsHours(data.minutesToNext)} to go`
       : 'Max rank reached';
   }
+  renderFactionRankTable(data.ranks);
 };
 
 const FACTION_PHASE_LABEL = { static: 'Two hotzones active', moving: 'Final day — moving hotzone' };

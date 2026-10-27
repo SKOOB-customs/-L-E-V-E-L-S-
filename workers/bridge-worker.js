@@ -5124,15 +5124,27 @@ export default {
         const playtimeData = await readFactionPlaytimeIndex(env);
         const minutes = playtimeData.totals[steamId] || 0;
         const rank = factionRankForMinutes(member.factionId, minutes);
+        const faction = FACTIONS[member.factionId];
         return json({
           factionId: member.factionId,
-          factionName: FACTIONS[member.factionId]?.name || member.factionId,
+          factionName: faction?.name || member.factionId,
           joinedAt: member.joinedAt,
           swapsRemaining: Math.max(0, FACTION_SWAP_LIFETIME_LIMIT - (member.swapsUsed || 0)),
           minutes,
           rankTitle: rank?.title || null,
           nextRankTitle: rank?.nextTitle || null,
           minutesToNext: rank?.nextThreshold != null ? Math.max(0, rank.nextThreshold - minutes) : null,
+          // Full progression table for the Factions tab's rank display —
+          // every tier's title + the minutes it needs, plus whether the
+          // caller has reached it yet, so the client never needs its own
+          // copy of FACTION_RANK_THRESHOLDS/rankTitles duplicated from here.
+          ranks: faction
+            ? FACTION_RANK_THRESHOLDS.map((threshold, i) => ({
+                title: faction.rankTitles[i],
+                minutes: threshold,
+                achieved: minutes >= threshold,
+              }))
+            : [],
         });
       } catch (error) {
         return json({ error: error.message || 'Faction status lookup failed' }, 502);

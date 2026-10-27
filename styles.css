@@ -3447,6 +3447,57 @@ textarea {
   background: var(--faction-card-accent, var(--accent));
 }
 
+/* Rank/Next-rank rows — .info-list's own `strong` is styled as a small
+   fixed-size circular badge (built for a different use elsewhere), which
+   squashed "Rank"/"Next rank" against their value with no gap at all.
+   Overridden here rather than touching .info-list itself, which other
+   pages still rely on for that badge look. */
+.faction-rank-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.faction-rank-row strong {
+  width: auto;
+  height: auto;
+  display: inline;
+  flex-shrink: 0;
+}
+
+.faction-rank-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.faction-rank-table-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* var(--accent) here (not --faction-card-accent) — this table only ever
+   renders for the viewer's OWN already-joined faction, which already
+   overrides --accent at the body level (see the theming block below),
+   unlike the join cards which show all 3 factions side by side and need
+   their own per-card accent instead. */
+.faction-rank-table-row.is-achieved {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+
+.faction-rank-table-hours {
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 /* ── Per-faction site theming ──
    Set once script.js knows the viewer's faction (document.body.dataset.
    faction = 'carcharo'|'dromaeosaur'|'mosasaur') — overrides the same
