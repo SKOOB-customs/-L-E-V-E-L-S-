@@ -3643,6 +3643,12 @@ export default {
         const fromDinos = await readParkedDinosArray(env, fromSteamId);
         const dinoIndex = fromDinos.findIndex((d) => d.capturedAt === capturedAt);
         if (dinoIndex === -1) return json({ error: 'Dino not found in your inventory' }, 404);
+        // Training dinos (the Ayo Rex/Trike loadouts' species-mismatch
+        // fallback grant) are flagged noGift at creation — blocked
+        // unconditionally, not just hidden client-side.
+        if (fromDinos[dinoIndex].noGift) {
+          return json({ error: 'Training dinos cannot be gifted.' }, 403);
+        }
         const [dino] = fromDinos.splice(dinoIndex, 1);
 
         // capturedAt doubles as that file's per-dino id (see

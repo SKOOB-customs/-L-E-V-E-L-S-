@@ -367,17 +367,28 @@ local function mutationsToJsonFragment(mutations)
 end
 
 local function dinoToJson(state)
+    -- statsArePercentages/forcePrimeOnRedeem/noGift were previously only
+    -- ever produced Worker-side (compensation grants, via plain
+    -- JSON.stringify) — added here too so this mod's OWN writer
+    -- (saveParkedState, used by tryPark and the Ayo loadout training-dino
+    -- fallback) can also stamp them. Always present now, defaulting to
+    -- false for every normal !park capture (state.* is nil there), so
+    -- this is a no-op for the ordinary case.
     return string.format(
         '{"name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
         '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
         '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
-        '"capturedAt":%d,"entombments":%d,"dinoId":"%s",%s}',
+        '"capturedAt":%d,"entombments":%d,"dinoId":"%s",' ..
+        '"statsArePercentages":%s,"forcePrimeOnRedeem":%s,"noGift":%s,%s}',
         jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
         state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
         state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
         state.primeElder and "true" or "false", state.bodyColorR or 0, state.bodyColorG or 0,
         state.bodyColorB or 0, state.capturedAt, state.entombments or 0,
         jsonEscape(state.dinoId or ""),
+        state.statsArePercentages and "true" or "false",
+        state.forcePrimeOnRedeem and "true" or "false",
+        state.noGift and "true" or "false",
         mutationsToJsonFragment(state.mutations)
     )
 end
@@ -460,6 +471,16 @@ local function loadParkedDinos(steam)
             -- health/stamina/hunger/thirst as 0-1 fractions, not the
             -- absolute point values a real !park capture stores.
             statsArePercentages = jsonReadBool(objStr, "statsArePercentages") or false,
+            -- Bug fix (2026-10-27): forcePrimeOnRedeem was written by
+            -- /compensation-grant's "Grant as Primed" button and by this
+            -- mod's own training-dino grant, but was never actually read
+            -- back here — meaning applyStateToPawn's forcePrimeOnRedeem
+            -- check always saw nil/false at redeem time regardless of
+            -- what was granted. Same class of bug as the earlier
+            -- entombments<=0 mutation-skip fix: a field written on one
+            -- side and silently dropped on the read side.
+            forcePrimeOnRedeem = jsonReadBool(objStr, "forcePrimeOnRedeem") or false,
+            noGift = jsonReadBool(objStr, "noGift") or false,
         })
     end
     return dinos
@@ -1101,6 +1122,22 @@ local lastKnownVitals = {}
 -- juvenile) without opening the door to parking at any real injury.
 local PARK_MIN_HEALTH_PCT = 99.99
 
+-- Mirrors DOME_DESTINATION in bridge-worker.js — duplicated here (not
+-- sent via a request file) since tryPark needs it synchronously and
+-- unconditionally, not just when a website action triggers one. Also
+-- used by the Ayo Rex/Trike loadouts further down this file. Declared
+-- here (ahead of tryPark) rather than down near the Ayo section so both
+-- can see it as a real upvalue, not a stray global.
+local DOME_DESTINATION_LUA = { X = -34605, Y = 116398, Z = 37042 }
+-- Parking inside this radius of the Dome is blocked outright — without
+-- it, a player could grab an Ayo loadout (Prime, 88% growth, 12
+-- mutations) and immediately !park it, banking a permanently reusable,
+-- overpowered dino for free instead of it staying a one-time practice
+-- run. Purely geographic (anyone parking here hits this, not just an
+-- actual TRAINING'DINO), which is also simpler and harder to route
+-- around than trying to detect "is this specific dino a training grant."
+local DOME_NO_PARK_RADIUS = 8500
+
 -- Core park logic shared by the in-game !park command and website-
 -- triggered park requests (the Live Dino tab's Park button — see the
 -- website-bridge section below). Returns ok (bool), message (string).
@@ -1112,6 +1149,16 @@ local function tryPark(steam, name)
     local pawn = livePawnFromCtrl(ctrl)
     if pawn == nil then
         return false, "Park failed: no live dino found."
+    end
+
+    local location
+    pcall(function() location = pawn:K2_GetActorLocation() end)
+    if location ~= nil then
+        local dx = location.X - DOME_DESTINATION_LUA.X
+        local dy = location.Y - DOME_DESTINATION_LUA.Y
+        if (dx * dx + dy * dy) <= (DOME_NO_PARK_RADIUS * DOME_NO_PARK_RADIUS) then
+            return false, "Cannot park training dinos"
+        end
     end
 
     local health, maxHealth
@@ -2019,12 +2066,17 @@ end
 -- Replaces the single "Dome" button for Ayo-prefixed/PermException
 -- accounts — same Dome destination, but also transforms the caller's
 -- CURRENT live dino into a fixed loadout (growth/Prime/mutations) in one
--- click. Gated like redeem: the live pawn's species has to already
--- match what was requested (classPath comes from the Worker's own
--- classPathForSpecies, same value tryRedeem already compares against a
--- live pawn's class) — this mod has no concept of "spawn as a different
--- species on demand," so it fails with a clear message instead of
--- silently doing nothing if the species doesn't match.
+-- click, IF their live species already matches what was requested
+-- (classPath comes from the Worker's own classPathForSpecies, same value
+-- tryRedeem already compares against a live pawn's class) — this mod has
+-- no concept of "spawn as a different species on demand." The teleport
+-- always happens regardless of species match; if it doesn't match, a
+-- redeemable TRAINING'DINO snapshot is granted to inventory instead
+-- (same machinery saveParkedState/!park already uses), redeemable next
+-- time they're actually spawned as the right species. (DOME_DESTINATION_LUA/
+-- DOME_NO_PARK_RADIUS are declared up near tryPark, not here, so both
+-- can see them.)
+
 local function ayoLoadoutRequestFilePath(steam)
     return SAVED_DIR .. "/ayo_loadout_request_" .. steam .. ".json"
 end
@@ -2033,7 +2085,42 @@ local function ayoLoadoutResultFilePath(steam)
     return SAVED_DIR .. "/ayo_loadout_result_" .. steam .. ".json"
 end
 
-local function tryAyoLoadout(steam, classPath, species, growth, x, y, z)
+-- Appends a redeemable TRAINING'DINO snapshot to this player's parked
+-- file — fixed name always, forced to Prime + the given mutations on
+-- redeem (forcePrimeOnRedeem/statsArePercentages, same fields
+-- /compensation-grant's "Grant as Primed" uses), and flagged noGift so
+-- /gift-dino rejects it unconditionally regardless of who owns it later.
+local function grantTrainingDino(steam, classPath, growth, mutations)
+    local dinos = loadParkedDinos(steam)
+    local capturedAt = os.time()
+    local taken = {}
+    for _, d in ipairs(dinos) do taken[d.capturedAt] = true end
+    while taken[capturedAt] do
+        capturedAt = capturedAt + 1
+    end
+    table.insert(dinos, {
+        name = "TRAINING'DINO",
+        classPath = classPath,
+        growth = growth,
+        health = 1.0,
+        stamina = 1.0,
+        hunger = 1.0,
+        thirst = 1.0,
+        primeElder = false,
+        bodyColorR = 0,
+        bodyColorG = 0,
+        bodyColorB = 0,
+        capturedAt = capturedAt,
+        entombments = 3,
+        mutations = mutations,
+        statsArePercentages = true,
+        forcePrimeOnRedeem = true,
+        noGift = true,
+    })
+    return writeParkedDinos(steam, dinos)
+end
+
+local function tryAyoLoadout(steam, classPath, species, growth, x, y, z, mutations)
     local gm = findGameMode()
     if gm == nil then return false, "Failed: internal error." end
     local ctrl
@@ -2045,27 +2132,39 @@ local function tryAyoLoadout(steam, classPath, species, growth, x, y, z)
 
     local liveClassPath
     pcall(function() liveClassPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
-    if liveClassPath ~= classPath then
-        return false, "Spawn in as a " .. (species or "matching species") .. " first."
+    local speciesMatches = (liveClassPath == classPath)
+
+    if speciesMatches then
+        pcall(function() pawn:SetGrowth(growth) end)
+        local okPrime, errPrime = pcall(function() forcePrimeConditionFlags(pawn) end)
+        if not okPrime then
+            log("Ayo loadout: forcePrimeConditionFlags failed: " .. tostring(errPrime))
+        end
+        applyMutationsDeferred(steam, 3, mutations)
+    else
+        local okGrant = grantTrainingDino(steam, classPath, growth, mutations)
+        if not okGrant then
+            return false, "Could not grant the training dino — try the button again."
+        end
     end
 
-    pcall(function() pawn:SetGrowth(growth) end)
-
-    local okPrime, errPrime = pcall(function() forcePrimeConditionFlags(pawn) end)
-    if not okPrime then
-        log("Ayo loadout: forcePrimeConditionFlags failed: " .. tostring(errPrime))
-    end
-
-    local ok, err = pcall(function()
+    local okTp, errTp = pcall(function()
         pawn:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
     end)
-    if not ok then
-        log("Ayo loadout: K2_SetActorLocation failed: " .. tostring(err))
-        return false, "Growth and Prime applied, but the teleport failed — try again."
+    if not okTp then
+        log("Ayo loadout: K2_SetActorLocation failed: " .. tostring(errTp))
+        if speciesMatches then
+            return false, "Growth, Prime, and mutations applied — teleport failed, try again."
+        end
+        return false, "Training dino granted to your inventory — teleport failed, try again."
     end
     pcall(function() pawn:ForceNetUpdate() end)
 
-    return true, "Loadout applied — growth, Prime, and teleport complete. Mutations arriving shortly."
+    if speciesMatches then
+        return true, "Loadout applied — growth, Prime, mutations, and teleport complete."
+    end
+    return true, "Teleported. Not currently a " .. (species or "matching species")
+        .. " — a TRAINING'DINO was added to your inventory, redeem it next time you spawn as one."
 end
 
 local function checkWebsiteAyoLoadoutRequest(steam)
@@ -2092,13 +2191,7 @@ local function checkWebsiteAyoLoadoutRequest(steam)
         if value ~= nil and value ~= "" then mutations[field] = value end
     end
 
-    local ok, message = tryAyoLoadout(steam, classPath, species, growth, x, y, z)
-    if ok then
-        -- Entombments hardcoded to 3 ("2 elder stacks" — unlocks base +
-        -- parent + both elder tiers) regardless of how many of the 16
-        -- slots this specific loadout actually fills.
-        applyMutationsDeferred(steam, 3, mutations)
-    end
+    local ok, message = tryAyoLoadout(steam, classPath, species, growth, x, y, z, mutations)
     safeNotify(steam, message)
     log("Ayo loadout request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))

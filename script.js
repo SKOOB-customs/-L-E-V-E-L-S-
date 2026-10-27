@@ -6515,7 +6515,11 @@ const buildFriendCard = (friend) => {
   const giftSelect = document.createElement('select');
   const rebuildGiftOptions = () => {
     const viewerSteamId = getSteamProfile()?.steamId;
-    const ownDinos = parkedEntries.filter((entry) => entry.steam === viewerSteamId);
+    // Training dinos (Ayo Rex/Trike loadouts' species-mismatch fallback
+    // grant) can't be gifted — same noGift flag the Worker rejects on
+    // regardless of what this hides, just filtered out here too so it's
+    // never offered as an option in the first place.
+    const ownDinos = parkedEntries.filter((entry) => entry.steam === viewerSteamId && !entry.noGift);
     giftSelect.innerHTML = '';
     if (ownDinos.length === 0) {
       const option = document.createElement('option');
