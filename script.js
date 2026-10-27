@@ -2251,7 +2251,7 @@ const worldToMapFraction = (worldX, worldY) => {
 // north slightly per live feedback — the marker landed just south of the
 // Dome ring's true center.
 const MAP_MARKER_OFFSET_X_PCT = 0;
-const MAP_MARKER_OFFSET_Y_PCT = -1.5;
+const MAP_MARKER_OFFSET_Y_PCT = -3;
 
 // Snaps the marker to one of 8 compass headings (N/NE/E/SE/S/SW/W/NW) based on
 // movement since the last poll, rather than pointing at an arbitrary angle.
