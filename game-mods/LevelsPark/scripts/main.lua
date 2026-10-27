@@ -1122,9 +1122,11 @@ local lastKnownVitals = {}
 -- juvenile) without opening the door to parking at any real injury.
 local PARK_MIN_HEALTH_PCT = 99.99
 
--- Precise Dome-structure center, captured in-game (distinct from the
--- Ayo teleport target in bridge-worker.js's DOME_DESTINATION, which is a
--- separate, nearby point) — used only for the no-park-radius check below.
+-- Precise Dome-structure center, captured in-game — mirrors
+-- bridge-worker.js's DOME_DESTINATION (same coordinate, duplicated here
+-- since tryPark needs it synchronously and unconditionally, not just
+-- when a website action triggers one). Used for the no-park-radius
+-- check below, and is also what the Ayo Rex/Trike loadouts teleport to.
 local DOME_DESTINATION_LUA = { X = -39605, Y = 114760, Z = 37721 }
 -- Parking inside this radius of the Dome is blocked outright — without
 -- it, a player could grab an Ayo loadout (Prime, 88% growth, 12

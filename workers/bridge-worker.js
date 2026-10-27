@@ -673,7 +673,7 @@ const isPermException = (steamId) => PERM_EXCEPTIONS.has(steamId);
 // player_directory:index regardless of whether the website hid the
 // button, same "client hint, server re-verifies" posture as every other
 // gated action in this file.
-const DOME_DESTINATION = { x: -34605, y: 116398, z: 37042 };
+const DOME_DESTINATION = { x: -39605, y: 114760, z: 37721 };
 const DOME_NAME_PREFIX = 'Ayo';
 
 const hasDomeAccess = async (env, steamId) => {
