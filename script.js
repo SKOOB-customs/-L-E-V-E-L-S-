@@ -1226,7 +1226,7 @@ const displaySteamStatus = async () => {
   loadSkinIdeaInbox();
   updateVoiceSectionVisibility();
   updateOverlayPairingSectionVisibility();
-  updateDomeTeleportButtonVisibility();
+  updateAyoLoadoutButtonsVisibility();
   updateSanctuaryTeleportButtonVisibility();
   initTicketForm();
   updateChatSignInState();
@@ -2762,48 +2762,52 @@ document.querySelector('[data-hotzone-teleport]')?.addEventListener('click', (ev
   });
 });
 
-// Dome Teleport — shown for accounts whose Steam display name starts
-// with the exact 3-character prefix "Ayo" (capital A, lowercase y/o),
-// or anyone in the Worker's PermExceptions allowlist. Asks /api/dome-
-// access rather than checking profile.username locally (that was the
-// OAuth-cached name, not player_directory's authoritative one, and had
-// no way to know about PermExceptions at all) — this is still only a
-// visibility convenience either way, the Worker re-checks the same
-// thing server-side regardless of what this hides.
-const updateDomeTeleportButtonVisibility = async () => {
-  const btn = document.querySelector('[data-dome-teleport]');
-  if (!btn) return;
+// Ayo(R)/Ayo(T) loadout buttons — replaces the old single Dome button.
+// Shown for accounts whose Steam display name starts with the exact
+// 3-character prefix "Ayo" (capital A, lowercase y/o), or anyone in the
+// Worker's PermExceptions allowlist. Still asks /api/dome-access (same
+// gate, same Dome destination under the hood) rather than checking
+// profile.username locally — this is still only a visibility
+// convenience either way, the Worker re-checks the same thing
+// server-side regardless of what this hides.
+const updateAyoLoadoutButtonsVisibility = async () => {
+  const buttons = document.querySelectorAll('[data-ayo-loadout]');
+  if (!buttons.length) return;
   const profile = getSteamProfile();
   if (!profile?.steamId) {
-    btn.hidden = true;
+    buttons.forEach((btn) => { btn.hidden = true; });
     return;
   }
   try {
     const response = await fetch('/api/dome-access');
     const data = await response.json();
-    btn.hidden = !data.access;
+    buttons.forEach((btn) => { btn.hidden = !data.access; });
   } catch (error) {
-    console.debug('Dome access check failed:', error);
-    btn.hidden = true;
+    console.debug('Ayo loadout access check failed:', error);
+    buttons.forEach((btn) => { btn.hidden = true; });
   }
 };
 
-document.querySelector('[data-dome-teleport]')?.addEventListener('click', (event) => {
-  const profile = getSteamProfile();
-  if (!profile?.steamId) {
-    showToast('Sign in with Steam first.');
-    return;
-  }
-  const btn = event.currentTarget;
-  requestActionAndPoll({
-    endpoint: '/api/dome-teleport',
-    body: { steamId: profile.steamId },
-    buttonEl: btn,
-    idleLabel: 'Dome',
-    waitingLabel: 'Waiting for in-game…',
-    onSuccess: () => {
-      pollLiveDino();
-    },
+document.querySelectorAll('[data-ayo-loadout]').forEach((button) => {
+  button.addEventListener('click', (event) => {
+    const profile = getSteamProfile();
+    if (!profile?.steamId) {
+      showToast('Sign in with Steam first.');
+      return;
+    }
+    const btn = event.currentTarget;
+    const loadoutId = btn.dataset.ayoLoadout;
+    const idleLabel = btn.textContent;
+    requestActionAndPoll({
+      endpoint: '/api/ayo-loadout',
+      body: { steamId: profile.steamId, loadoutId },
+      buttonEl: btn,
+      idleLabel,
+      waitingLabel: 'Waiting for in-game…',
+      onSuccess: () => {
+        pollLiveDino();
+      },
+    });
   });
 });
 

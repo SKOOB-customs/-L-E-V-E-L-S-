@@ -711,6 +711,71 @@ const requestSanctuaryTeleport = (env, steamId, destination) =>
 const readSanctuaryTeleportResult = (env, steamId, requestId) =>
   readResult(env, sanctuaryTeleportResultPath, steamId, requestId);
 
+// ── Ayo Rex / Ayo Trike loadouts ──
+//
+// Split out of the single Dome button per request — same Dome
+// destination and access gate (hasDomeAccess), but also instantly
+// transforms the caller's CURRENT live dino into a fixed prebuilt
+// loadout (growth/prime/mutations), exactly how redeem already
+// overwrites a live pawn's stats — just without the park/inventory step,
+// and gated the same way redeem is: the caller's live species has to
+// already match (mod rejects with a clear "spawn in as the right
+// species first" message otherwise, same shape as every other
+// species-gated action here). classPath values are classPathForSpecies'
+// own output, confirmed elsewhere against real log lines — same
+// comparison tryRedeem already does against a live pawn's class.
+//
+// Mutation slot layout (entombments=3 — "2 elder stacks" — but only 12
+// of the 16 unlocked slots are actually filled; base+parent+elderA used,
+// elderB left unlocked-but-empty): Gastronomic Regeneration is
+// slot-restricted (see KNOWN_MUTATIONS) so it's placed in
+// parentMutationSlot2, same for both loadouts.
+const AYO_LOADOUTS = {
+  rex: {
+    species: 'Tyrannosaurus',
+    growth: 0.88,
+    mutations: {
+      mutationSlot1: 'Hypermetabolic Inanition',
+      mutationSlot2: 'Congenital Hypoalgesia',
+      mutationSlot3: 'Osteosclerosis',
+      mutationSlot4: 'Cellular Regeneration',
+      parentMutationSlot1: 'Cannibalistic',
+      parentMutationSlot2: 'Gastronomic Regeneration',
+      parentMutationSlot3: 'Hemomania',
+      parentMutationSlot4: 'Hydrodynamic',
+      elderMutationSlot1A: 'Epidermal Fibrosis',
+      elderMutationSlot2A: 'Photosynthetic Tissue',
+      elderMutationSlot3A: 'Nocturnal',
+      elderMutationSlot4A: 'Augmented Tapetum',
+    },
+  },
+  trike: {
+    species: 'Triceratops',
+    growth: 0.88,
+    mutations: {
+      mutationSlot1: 'Photosynthetic Regeneration',
+      mutationSlot2: 'Tactile Endurance',
+      mutationSlot3: 'Multichambered Lungs',
+      mutationSlot4: 'Osteosclerosis',
+      parentMutationSlot1: 'Cellular Regeneration',
+      parentMutationSlot2: 'Gastronomic Regeneration',
+      parentMutationSlot3: 'Enhanced Digestion',
+      parentMutationSlot4: 'Hydrodynamic',
+      elderMutationSlot1A: 'Epidermal Fibrosis',
+      elderMutationSlot2A: 'Photosynthetic Tissue',
+      elderMutationSlot3A: 'Nocturnal',
+      elderMutationSlot4A: 'Augmented Tapetum',
+    },
+  },
+};
+
+const ayoLoadoutRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/ayo_loadout_request_${steamId}.json`;
+const ayoLoadoutResultPath = (steamId) => `${REDEEM_SAVED_DIR}/ayo_loadout_result_${steamId}.json`;
+const requestAyoLoadout = (env, steamId, payload) =>
+  writeRequest(env, ayoLoadoutRequestPath, steamId, payload);
+const readAyoLoadoutResult = (env, steamId, requestId) =>
+  readResult(env, ayoLoadoutResultPath, steamId, requestId);
+
 // Generic website-triggered in-game toast — not faction-specific, reusable
 // by anything that wants to push a message to one online player. Reuses
 // main.lua's existing safeNotify, same request-file pattern as every
@@ -1597,6 +1662,7 @@ const KNOWN_MUTATIONS = [
       'elderMutationSlot2B', 'elderMutationSlot4B',
     ],
   },
+  { name: 'Nocturnal', diet: 'generic' },
 ];
 const KNOWN_MUTATION_NAMES = new Set(KNOWN_MUTATIONS.map((m) => m.name));
 const KNOWN_MUTATION_DIET = new Map(KNOWN_MUTATIONS.map((m) => [m.name, m.diet]));
@@ -4967,6 +5033,53 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Sanctuary teleport result lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/ayo-loadout-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, loadoutId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      const loadout = AYO_LOADOUTS[loadoutId];
+      if (!loadout) return json({ error: 'Invalid loadout' }, 400);
+      if (!(await hasDomeAccess(env, steamId))) {
+        return json({ error: 'Not available for your account.' }, 403);
+      }
+      try {
+        const requestId = await requestAyoLoadout(env, steamId, {
+          classPath: classPathForSpecies(loadout.species),
+          species: loadout.species,
+          growth: loadout.growth,
+          destination: DOME_DESTINATION,
+          mutations: loadout.mutations,
+        });
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Ayo loadout request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/ayo-loadout-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readAyoLoadoutResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Ayo loadout result lookup failed' }, 502);
       }
     }
 

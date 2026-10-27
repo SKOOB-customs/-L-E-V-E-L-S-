@@ -2014,6 +2014,97 @@ local function checkWebsiteSanctuaryTeleportRequest(steam)
     writeRequestResult(sanctuaryTeleportResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Ayo Rex / Ayo Trike loadouts ──
+--
+-- Replaces the single "Dome" button for Ayo-prefixed/PermException
+-- accounts — same Dome destination, but also transforms the caller's
+-- CURRENT live dino into a fixed loadout (growth/Prime/mutations) in one
+-- click. Gated like redeem: the live pawn's species has to already
+-- match what was requested (classPath comes from the Worker's own
+-- classPathForSpecies, same value tryRedeem already compares against a
+-- live pawn's class) — this mod has no concept of "spawn as a different
+-- species on demand," so it fails with a clear message instead of
+-- silently doing nothing if the species doesn't match.
+local function ayoLoadoutRequestFilePath(steam)
+    return SAVED_DIR .. "/ayo_loadout_request_" .. steam .. ".json"
+end
+
+local function ayoLoadoutResultFilePath(steam)
+    return SAVED_DIR .. "/ayo_loadout_result_" .. steam .. ".json"
+end
+
+local function tryAyoLoadout(steam, classPath, species, growth, x, y, z)
+    local gm = findGameMode()
+    if gm == nil then return false, "Failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Failed: spawn in first, then try again."
+    end
+
+    local liveClassPath
+    pcall(function() liveClassPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
+    if liveClassPath ~= classPath then
+        return false, "Spawn in as a " .. (species or "matching species") .. " first."
+    end
+
+    pcall(function() pawn:SetGrowth(growth) end)
+
+    local okPrime, errPrime = pcall(function() forcePrimeConditionFlags(pawn) end)
+    if not okPrime then
+        log("Ayo loadout: forcePrimeConditionFlags failed: " .. tostring(errPrime))
+    end
+
+    local ok, err = pcall(function()
+        pawn:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
+    end)
+    if not ok then
+        log("Ayo loadout: K2_SetActorLocation failed: " .. tostring(err))
+        return false, "Growth and Prime applied, but the teleport failed — try again."
+    end
+    pcall(function() pawn:ForceNetUpdate() end)
+
+    return true, "Loadout applied — growth, Prime, and teleport complete. Mutations arriving shortly."
+end
+
+local function checkWebsiteAyoLoadoutRequest(steam)
+    local path = ayoLoadoutRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local classPath = jsonReadString(body, "classPath")
+    local species = jsonReadString(body, "species")
+    local growth = jsonReadNumber(body, "growth")
+    local destSection = body:match('"destination"%s*:%s*(%b{})') or "{}"
+    local x = jsonReadNumber(destSection, "x")
+    local y = jsonReadNumber(destSection, "y")
+    local z = jsonReadNumber(destSection, "z")
+    if requestId == nil or classPath == nil or growth == nil or x == nil or y == nil or z == nil then return end
+
+    local mutationsSection = body:match('"mutations"%s*:%s*(%b{})') or "{}"
+    local mutations = {}
+    for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+        local value = jsonReadString(mutationsSection, mutationJsonKey(field))
+        if value ~= nil and value ~= "" then mutations[field] = value end
+    end
+
+    local ok, message = tryAyoLoadout(steam, classPath, species, growth, x, y, z)
+    if ok then
+        -- Entombments hardcoded to 3 ("2 elder stacks" — unlocks base +
+        -- parent + both elder tiers) regardless of how many of the 16
+        -- slots this specific loadout actually fills.
+        applyMutationsDeferred(steam, 3, mutations)
+    end
+    safeNotify(steam, message)
+    log("Ayo loadout request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(ayoLoadoutResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Website-triggered growth pause/resume (Live Dino tab) ──
 --
 -- ATIDinosaurBase carries its own uint8 bIsGrowthPaused flag plus an
@@ -2298,6 +2389,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteHotzoneTeleportRequest(steam)
                     checkWebsiteDomeTeleportRequest(steam)
                     checkWebsiteSanctuaryTeleportRequest(steam)
+                    checkWebsiteAyoLoadoutRequest(steam)
                     checkWebsiteNotifyRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)
