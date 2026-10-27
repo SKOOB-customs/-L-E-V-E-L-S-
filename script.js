@@ -3897,13 +3897,6 @@ const checkAdminPanelAccess = async () => {
     const data = await response.json();
     const hasAccess = Boolean(data.tier);
     viewerAdminTier = data.tier || null;
-    // Factions tab's admin sub-section: owner OR senior (not plain
-    // 'admin', unlike hasAccess above, and not owner-only like
-    // [data-owner-only]) — war control is a bigger lever than a regular
-    // admin's usual compensation/strike tools, so it's scoped one notch
-    // narrower than the general Admin Panel.
-    const isFactionAdmin = data.tier === 'owner' || data.tier === 'senior';
-    document.querySelectorAll('[data-faction-admin-only]').forEach((el) => { el.hidden = !isFactionAdmin; });
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
     if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
@@ -3917,6 +3910,11 @@ const checkAdminPanelAccess = async () => {
     // fields via devtools still can't get a custom color through.
     const isOwner = data.tier === 'owner';
     document.querySelectorAll('[data-owner-only]').forEach((el) => { el.hidden = !isOwner; });
+    // Factions tab's admin sub-section (War Control, zone coordinates,
+    // move-a-player's-faction) — owner tier ONLY, same gate as
+    // [data-owner-only], per explicit request ("only me and skoob...
+    // NOONE ELSE").
+    document.querySelectorAll('[data-faction-admin-only]').forEach((el) => { el.hidden = !isOwner; });
     if (ownerTabButton) ownerTabButton.hidden = !isOwner;
     if (ownerPanel) ownerPanel.hidden = !isOwner;
     const skinNonOwnerNote = document.querySelector('[data-skin-non-owner-note]');

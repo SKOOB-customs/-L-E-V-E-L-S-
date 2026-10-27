@@ -843,10 +843,11 @@ const FACTIONS = {
   },
 };
 
-// Only an owner/senior can start/end a war, edit zone coordinates, or
-// override someone's faction — same inline tier check every other
-// admin-gated route in this file already uses, no new tier table.
-const hasFactionAdminAccess = (tier) => tier === 'owner' || tier === 'senior';
+// Owner-tier ONLY — explicitly scoped narrower than the general Admin
+// Panel (which includes senior/admin tiers): war control, zone
+// coordinates, and faction overrides are owner-only, full stop, per
+// explicit request ("only me and skoob... NOONE ELSE").
+const hasFactionAdminAccess = (tier) => tier === 'owner';
 
 const factionRankForMinutes = (factionId, minutes) => {
   const faction = FACTIONS[factionId];
@@ -5201,6 +5202,14 @@ export default {
       }
     }
 
+    // Public (any signed-in player) — but sanctuary coordinates are
+    // deliberately NEVER included here, unlike the battlefield zones
+    // (static/moving hotzones), which are meant to be visible to
+    // everyone once a map overlay exists. Sanctuary coordinates only
+    // ever get used server-side (sanctuary-teleport-request already
+    // resolves them internally without echoing the numbers back) or
+    // shown to an owner via the admin zone-coordinates form — never
+    // serialized into any player-facing response.
     if (url.pathname === '/faction-war-zones' && request.method === 'GET') {
       if (!env.PARKED_KV) return json({ zones: null });
       try {
@@ -5214,7 +5223,6 @@ export default {
           movingZoneStart: zonesData.movingZoneStart,
           movingZoneEnd: zonesData.movingZoneEnd,
           zoneRadius: zonesData.zoneRadius,
-          sanctuaries: zonesData.sanctuaries,
           activeZones,
         });
       } catch (error) {
@@ -5235,7 +5243,7 @@ export default {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
       const tier = await getAdminTier(env, requesterSteamId);
-      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
 
       const isPoint = (p) => p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
       if (!isPoint(staticZoneA) || !isPoint(staticZoneB) || !isPoint(movingZoneStart) || !isPoint(movingZoneEnd)) {
@@ -5275,7 +5283,7 @@ export default {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
       const tier = await getAdminTier(env, requesterSteamId);
-      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
 
       try {
         const warData = await readWarIndex(env);
@@ -5308,7 +5316,7 @@ export default {
         return json({ error: 'Missing or invalid requesterSteamId' }, 400);
       }
       const tier = await getAdminTier(env, requesterSteamId);
-      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
 
       try {
         let warData = await readWarIndex(env);
@@ -5340,7 +5348,7 @@ export default {
         return json({ error: 'Invalid faction' }, 400);
       }
       const tier = await getAdminTier(env, requesterSteamId);
-      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner or senior tier required' }, 403);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
 
       try {
         const factionsData = await readFactionsIndex(env);
