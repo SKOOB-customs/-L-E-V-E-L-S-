@@ -2142,6 +2142,18 @@ local function tryAyoLoadout(steam, classPath, species, growth, x, y, z, mutatio
             log("Ayo loadout: forcePrimeConditionFlags failed: " .. tostring(errPrime))
         end
         applyMutationsDeferred(steam, 3, mutations)
+        -- Same growth-jump vitals bug fixed for redeem (see
+        -- applyPercentageVitalsDeferred's own comment) — SetGrowth's
+        -- Max*/current desync can zero out hunger immediately after a
+        -- big growth jump, so reset to full on a freshly re-resolved
+        -- pawn 500ms later instead of leaving whatever SetGrowth left.
+        applyPercentageVitalsDeferred(steam, {
+            statsArePercentages = true,
+            health = 1,
+            stamina = 1,
+            hunger = 1,
+            thirst = 1,
+        })
     else
         local okGrant = grantTrainingDino(steam, classPath, growth, mutations)
         if not okGrant then
