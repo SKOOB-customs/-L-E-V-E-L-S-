@@ -2247,12 +2247,11 @@ const worldToMapFraction = (worldX, worldY) => {
 // width/height, applied only to where the dot is drawn — never to the
 // heading arrow's bearing calculation below, since that's derived from
 // frame-to-frame deltas and a constant offset cancels out of a delta
-// anyway. Reset to 0 for THE_DINO_ISLE_MAP.jpg (2026-10-27) — the old
-// +3/+2 was tuned specifically for gateway.png's own registration quirk
-// and has no reason to carry over to different art; the MIN/MAX bounds
-// above already place the Dome correctly on their own.
+// anyway. Reset to 0 for THE_DINO_ISLE_MAP.jpg (2026-10-27), then nudged
+// north slightly per live feedback — the marker landed just south of the
+// Dome ring's true center.
 const MAP_MARKER_OFFSET_X_PCT = 0;
-const MAP_MARKER_OFFSET_Y_PCT = 0;
+const MAP_MARKER_OFFSET_Y_PCT = -1.5;
 
 // Snaps the marker to one of 8 compass headings (N/NE/E/SE/S/SW/W/NW) based on
 // movement since the last poll, rather than pointing at an arbitrary angle.
