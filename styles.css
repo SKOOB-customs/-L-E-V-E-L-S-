@@ -2526,7 +2526,7 @@ strong.stat-critical {
 .map-viewport {
   position: relative;
   width: 100%;
-  aspect-ratio: 1226 / 1131;
+  aspect-ratio: 2048 / 1536;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.16);

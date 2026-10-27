@@ -2204,11 +2204,22 @@ const setDinoView = (view, message) => {
   }
 };
 
-// Gateway map calibration (Vulnona-sourced, matches workers/bridge-worker.js's world bounds)
-const MAP_MIN_X = -607;
-const MAP_MAX_X = 509;
-const MAP_MIN_Y = -505;
-const MAP_MAX_Y = 607;
+// Map calibration for THE_DINO_ISLE_MAP.jpg (2026-10-27) — re-derived
+// when the map art changed from gateway.png. Anchored on one precise,
+// live-captured point: standing exactly at the Dome's center reported
+// world (x: -40299, y: 114257), matched against that structure's own
+// pixel position on the new art (visually estimated — the large
+// thick-walled ring near "Highlands J Sector", roughly 35.25% across /
+// 69% down the image). Only one anchor point was available, so the
+// world-span (MAX-MIN) each axis covers is carried over unchanged from
+// the previous gateway.png calibration — that fixes the Dome's position
+// exactly right, but the overall scale is inherited, not independently
+// re-verified, so nudge these (or ask for a shift) if anything else on
+// the map reads off.
+const MAP_MIN_X = -434;
+const MAP_MAX_X = 682;
+const MAP_MIN_Y = -653;
+const MAP_MAX_Y = 459;
 
 const worldToMapFraction = (worldX, worldY) => {
   const sx = worldX / 1000;
@@ -2236,9 +2247,12 @@ const worldToMapFraction = (worldX, worldY) => {
 // width/height, applied only to where the dot is drawn — never to the
 // heading arrow's bearing calculation below, since that's derived from
 // frame-to-frame deltas and a constant offset cancels out of a delta
-// anyway.
-const MAP_MARKER_OFFSET_X_PCT = 3;
-const MAP_MARKER_OFFSET_Y_PCT = 2;
+// anyway. Reset to 0 for THE_DINO_ISLE_MAP.jpg (2026-10-27) — the old
+// +3/+2 was tuned specifically for gateway.png's own registration quirk
+// and has no reason to carry over to different art; the MIN/MAX bounds
+// above already place the Dome correctly on their own.
+const MAP_MARKER_OFFSET_X_PCT = 0;
+const MAP_MARKER_OFFSET_Y_PCT = 0;
 
 // Snaps the marker to one of 8 compass headings (N/NE/E/SE/S/SW/W/NW) based on
 // movement since the last poll, rather than pointing at an arbitrary angle.
