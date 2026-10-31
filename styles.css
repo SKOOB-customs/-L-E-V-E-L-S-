@@ -3563,9 +3563,12 @@ body[data-faction="mosasaur"]::before {
   box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-.warzone-entry-hint {
-  margin: 0;
-  font-size: 0.8rem;
+.warzone-countdown {
+  margin: 6px 0 0;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Faction Zones map (Warzone tab) ──

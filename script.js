@@ -4104,10 +4104,25 @@ const FACTION_SWAP_LIFETIME_LIMIT = 3;
 // deliberately not a persistent nav tab.
 const WARZONE_PORTAL_DURATION_MS = 10 * 60 * 1000;
 let warzonePortalTimer = null;
+let warzonePortalCountdownInterval = null;
+
+const updateWarzoneCountdown = (expiresAt) => {
+  const countdownEl = document.querySelector('[data-warzone-countdown]');
+  if (!countdownEl) return;
+  const remainingMs = Math.max(0, expiresAt - Date.now());
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  countdownEl.textContent = `Portal closes in ${minutes}:${String(seconds).padStart(2, '0')}`;
+};
 
 const closeWarzonePortal = () => {
   clearTimeout(warzonePortalTimer);
   warzonePortalTimer = null;
+  clearInterval(warzonePortalCountdownInterval);
+  warzonePortalCountdownInterval = null;
+  const countdownEl = document.querySelector('[data-warzone-countdown]');
+  if (countdownEl) countdownEl.textContent = '';
   const tabButton = document.querySelector('.warzone-tab-button');
   if (tabButton) tabButton.hidden = true;
   const warzonePanel = document.querySelector('.tab-panel[data-tab="warzone"]');
@@ -4121,6 +4136,10 @@ const enterWarzonePortal = () => {
   if (tabButton) tabButton.hidden = false;
   document.querySelector('.tab-button[data-tab="warzone"]')?.click();
   clearTimeout(warzonePortalTimer);
+  clearInterval(warzonePortalCountdownInterval);
+  const expiresAt = Date.now() + WARZONE_PORTAL_DURATION_MS;
+  updateWarzoneCountdown(expiresAt);
+  warzonePortalCountdownInterval = setInterval(() => updateWarzoneCountdown(expiresAt), 1000);
   warzonePortalTimer = setTimeout(() => {
     warzonePortalTimer = null;
     closeWarzonePortal();
