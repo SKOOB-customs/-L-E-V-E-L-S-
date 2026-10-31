@@ -4097,6 +4097,39 @@ const FACTION_DISPLAY = {
 // of what this shows.
 const FACTION_SWAP_LIFETIME_LIMIT = 3;
 
+// "Enter the Warzone" — the Warzone tab-button stays hidden (like Skin
+// Lab/Owner's own gated tabs) until this opens it, and auto-closes 10
+// minutes later, bouncing back to Factions if that's still the open tab.
+// Re-clicking Enter the Warzone is required each time, per request —
+// deliberately not a persistent nav tab.
+const WARZONE_PORTAL_DURATION_MS = 10 * 60 * 1000;
+let warzonePortalTimer = null;
+
+const closeWarzonePortal = () => {
+  clearTimeout(warzonePortalTimer);
+  warzonePortalTimer = null;
+  const tabButton = document.querySelector('.warzone-tab-button');
+  if (tabButton) tabButton.hidden = true;
+  const warzonePanel = document.querySelector('.tab-panel[data-tab="warzone"]');
+  if (warzonePanel?.classList.contains('is-active')) {
+    document.querySelector('.tab-button[data-tab="factions"]')?.click();
+  }
+};
+
+const enterWarzonePortal = () => {
+  const tabButton = document.querySelector('.warzone-tab-button');
+  if (tabButton) tabButton.hidden = false;
+  document.querySelector('.tab-button[data-tab="warzone"]')?.click();
+  clearTimeout(warzonePortalTimer);
+  warzonePortalTimer = setTimeout(() => {
+    warzonePortalTimer = null;
+    closeWarzonePortal();
+    showToast('The Warzone portal closed — enter again to continue.');
+  }, WARZONE_PORTAL_DURATION_MS);
+};
+
+document.querySelector('[data-enter-warzone]')?.addEventListener('click', enterWarzonePortal);
+
 const renderFactionJoinCards = (currentFactionId, swapsRemaining) => {
   const grid = document.querySelector('[data-faction-card-grid]');
   if (!grid) return;
@@ -4228,16 +4261,24 @@ const renderFactionStatus = (data) => {
   if (!data.factionId) {
     if (statusSection) statusSection.hidden = true;
     delete document.body.dataset.faction;
+    closeWarzonePortal();
     return;
   }
   if (statusSection) statusSection.hidden = false;
   document.body.dataset.faction = data.factionId;
 
   const info = FACTION_DISPLAY[data.factionId];
+  const entryNameEl = document.querySelector('[data-faction-entry-name]');
+  if (entryNameEl) entryNameEl.textContent = info?.name || data.factionName || data.factionId;
+  const entryTaglineEl = document.querySelector('[data-faction-entry-tagline]');
+  if (entryTaglineEl) entryTaglineEl.textContent = info?.tagline || '';
+
   const nameEl = document.querySelector('[data-faction-identity-name]');
   if (nameEl) nameEl.textContent = info?.name || data.factionName || data.factionId;
   const taglineEl = document.querySelector('[data-faction-identity-tagline]');
   if (taglineEl) taglineEl.textContent = info?.tagline || '';
+  const warzoneHeadingEl = document.querySelector('[data-warzone-heading]');
+  if (warzoneHeadingEl) warzoneHeadingEl.textContent = `${info?.name || data.factionId} Warzone`;
   const rankEl = document.querySelector('[data-faction-rank-title]');
   if (rankEl) rankEl.textContent = `${data.rankTitle || '—'} (${formatMinutesAsHours(data.minutes)} played)`;
   const nextRankEl = document.querySelector('[data-faction-next-rank]');

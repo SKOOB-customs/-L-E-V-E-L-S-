@@ -3528,3 +3528,120 @@ body[data-faction="mosasaur"]::before {
   background: radial-gradient(circle at 50% 0%, rgba(31, 111, 214, 0.14), transparent 60%);
 }
 
+/* Factions tab only — everyone sees this, faction or not. Inner panels
+   use --panel-strong (near-opaque) already, so no extra overlay is
+   needed to keep their text legible over the art. */
+#factions.tab-panel {
+  border-radius: 18px;
+  padding: 24px;
+  background-image: linear-gradient(rgba(4, 6, 10, 0.55), rgba(4, 6, 10, 0.72)), url('assets/logo/levels_new_background.webp');
+  background-size: cover;
+  background-position: center;
+}
+
+.warzone-entry-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.warzone-enter-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 0.9rem 1.8rem;
+  font-weight: 800;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.warzone-entry-hint {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* ── Faction Zones map (Warzone tab) ──
+   The base image already draws all 3 factions' zones as colored
+   outlines; it's desaturated/dimmed here so non-owned zones read as
+   faint, half-hidden markers. A bright pulsing glow blob is layered on
+   top, positioned over whichever zone matches the viewer's own faction
+   (toggled via body[data-faction], same mechanism the site-wide accent
+   swap already uses) — everyone else's zone stays just the dim outline. */
+.faction-zone-map {
+  position: relative;
+  width: 100%;
+  max-width: 497px;
+  margin: 12px auto 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+}
+
+.faction-zone-map-base {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: saturate(0.5) brightness(0.78);
+}
+
+.faction-zone-glow {
+  position: absolute;
+  width: 16%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.faction-zone-glow-carcharo {
+  left: 59.4%;
+  top: 32.1%;
+  background: radial-gradient(circle, rgba(209, 61, 77, 0.95), rgba(209, 61, 77, 0) 70%);
+}
+
+.faction-zone-glow-dromaeosaur {
+  left: 90.5%;
+  top: 23.4%;
+  background: radial-gradient(circle, rgba(47, 158, 68, 0.95), rgba(47, 158, 68, 0) 70%);
+}
+
+.faction-zone-glow-mosasaur {
+  left: 19.9%;
+  top: 85.8%;
+  background: radial-gradient(circle, rgba(31, 111, 214, 0.95), rgba(31, 111, 214, 0) 70%);
+}
+
+body[data-faction="carcharo"] .faction-zone-glow-carcharo,
+body[data-faction="dromaeosaur"] .faction-zone-glow-dromaeosaur,
+body[data-faction="mosasaur"] .faction-zone-glow-mosasaur {
+  opacity: 1;
+  animation: faction-zone-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes faction-zone-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.88); }
+  50% { transform: translate(-50%, -50%) scale(1.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faction-zone-glow {
+    transition: none;
+  }
+  body[data-faction="carcharo"] .faction-zone-glow-carcharo,
+  body[data-faction="dromaeosaur"] .faction-zone-glow-dromaeosaur,
+  body[data-faction="mosasaur"] .faction-zone-glow-mosasaur {
+    animation: none;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+

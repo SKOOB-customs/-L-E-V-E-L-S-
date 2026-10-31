@@ -191,6 +191,7 @@
         <button class="tab-button" data-tab="map" type="button">Map</button>
         <button class="tab-button" data-tab="community" type="button">Community</button>
         <button class="tab-button" data-tab="factions" type="button">Factions</button>
+        <button class="tab-button warzone-tab-button" data-tab="warzone" type="button" hidden>Warzone</button>
         <button class="tab-button staff-tab-button" data-tab="staff" type="button" hidden>Staff</button>
         <button class="tab-button dev-tools-tab-button" data-tab="dev-tools" type="button" hidden>Dev Tools</button>
         <button class="tab-button admin-panel-tab-button" data-tab="admin-panel" type="button" hidden>Admin Panel</button>
@@ -492,33 +493,11 @@
           </div>
 
           <div data-faction-status-section hidden>
-            <section class="panel content-box">
-              <div class="mini-heading" data-faction-identity-name></div>
-              <p class="dino-park-note" data-faction-identity-tagline></p>
-              <div class="info-list">
-                <div class="faction-rank-row"><strong>Rank</strong><span data-faction-rank-title>—</span></div>
-                <div class="faction-rank-row"><strong>Next rank</strong><span data-faction-next-rank>—</span></div>
-              </div>
-            </section>
-
-            <section class="panel content-box">
-              <div class="mini-heading">Rank Progression</div>
-              <div class="faction-rank-table" data-faction-rank-table></div>
-            </section>
-
-            <section class="panel content-box">
-              <div class="mini-heading">Current War</div>
-              <p class="dino-park-note" data-faction-war-empty>No war is currently active.</p>
-              <div data-faction-war-standings hidden>
-                <div class="info-list" data-faction-scores-list></div>
-                <p class="dino-park-note" data-faction-war-phase></p>
-              </div>
-            </section>
-
-            <section class="panel content-box">
-              <div class="mini-heading">War History</div>
-              <div class="info-list" data-faction-history-list></div>
-              <p class="dino-park-note empty-state" data-faction-history-empty hidden>No wars fought yet.</p>
+            <section class="panel content-box warzone-entry-box">
+              <div class="mini-heading" data-faction-entry-name></div>
+              <p class="dino-park-note" data-faction-entry-tagline></p>
+              <button class="warzone-enter-button" type="button" data-enter-warzone>Enter the Warzone</button>
+              <p class="dino-park-note warzone-entry-hint">Opens for 10 minutes, then closes until you enter again.</p>
             </section>
           </div>
 
@@ -624,6 +603,53 @@
                 <button class="action-button" type="submit">Move player</button>
               </div>
             </form>
+          </section>
+        </section>
+
+        <section class="tab-panel" id="warzone" data-tab="warzone">
+          <div class="section-header">
+            <p class="eyebrow">THE WAR ROOM</p>
+            <h2 data-warzone-heading>Warzone</h2>
+          </div>
+
+          <section class="panel content-box">
+            <div class="mini-heading" data-faction-identity-name></div>
+            <p class="dino-park-note" data-faction-identity-tagline></p>
+            <div class="info-list">
+              <div class="faction-rank-row"><strong>Rank</strong><span data-faction-rank-title>—</span></div>
+              <div class="faction-rank-row"><strong>Next rank</strong><span data-faction-next-rank>—</span></div>
+            </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Faction Zones</div>
+            <p class="dino-park-note">Your faction's zone glows below. The others stay hidden in the mist.</p>
+            <div class="faction-zone-map">
+              <img class="faction-zone-map-base" src="assets/logo/factionzones.png" alt="Faction zone map" />
+              <div class="faction-zone-glow faction-zone-glow-carcharo"></div>
+              <div class="faction-zone-glow faction-zone-glow-dromaeosaur"></div>
+              <div class="faction-zone-glow faction-zone-glow-mosasaur"></div>
+            </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Rank Progression</div>
+            <div class="faction-rank-table" data-faction-rank-table></div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Current War</div>
+            <p class="dino-park-note" data-faction-war-empty>No war is currently active.</p>
+            <div data-faction-war-standings hidden>
+              <div class="info-list" data-faction-scores-list></div>
+              <p class="dino-park-note" data-faction-war-phase></p>
+            </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">War History</div>
+            <div class="info-list" data-faction-history-list></div>
+            <p class="dino-park-note empty-state" data-faction-history-empty hidden>No wars fought yet.</p>
           </section>
         </section>
 
