@@ -1188,6 +1188,49 @@ h6,
   gap: 30px;
 }
 
+/* ── Admin Panel sub-tabs ──
+   A second, smaller tab row nested inside the Admin Panel tab itself —
+   organizes Strikes/Comp/Recovery/Glitch Skins/Currency into their own
+   panels instead of one long scroll. Deliberately a separate class from
+   .tab-button/.tab-panel (not reusing them) so this local switcher can't
+   get caught up in the top-level tabButtons/tabPanels/activateTab logic. */
+.admin-subtab-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line-strong);
+}
+
+.admin-subtab-button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-subtab-button.active {
+  background: var(--panel-strong);
+  color: var(--text);
+}
+
+.admin-subtab-panel {
+  display: grid;
+  gap: 28px;
+}
+
+.admin-subtab-panel[hidden] {
+  display: none;
+}
+
 .tab-panel {
   display: none;
   gap: 28px;

@@ -2785,9 +2785,45 @@ export default {
 
       try {
         const newBalance = await grantCurrencyToPlayer(env, targetSteamId, grantAmount);
+        await logModerationAction(env, {
+          action: 'currency_grant',
+          actorSteamId: granterSteamId,
+          targetSteamId,
+          detail: { amount: grantAmount, newBalance },
+        });
         return json({ ok: true, balance: newBalance });
       } catch (error) {
         return json({ error: error.message || 'Currency grant failed' }, 502);
+      }
+    }
+
+    // Admin Panel's Currency sub-tab: Currency Log — reads the same
+    // website_mod_log:index Moderation Log writes into, filtered to just
+    // currency_grant (and, if a spend/use feature is ever built,
+    // currency_spend) entries. Deliberately NOT the natural playtime/war-
+    // payout accrual — that path (main.lua's writeCurrencyBalance,
+    // syncFactionWar's WAR_CURRENCY_PER_MINUTE payout) never calls
+    // logModerationAction at all, so it can never show up here. Available
+    // to any admin tier (matches who can grant currency in the first
+    // place), unlike /moderation-log which is owner-only.
+    if (url.pathname === '/currency-log' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      if (!env.PARKED_KV) return json({ entries: [] });
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!tier) return json({ error: 'Not an admin' }, 403);
+      try {
+        const raw = await env.PARKED_KV.get('website_mod_log:index');
+        let entries = [];
+        if (raw) {
+          try { entries = JSON.parse(raw) || []; } catch { entries = []; }
+        }
+        const currencyEntries = entries.filter((entry) => entry.action === 'currency_grant' || entry.action === 'currency_spend');
+        return json({ entries: currencyEntries });
+      } catch (error) {
+        return json({ error: error.message || 'Currency log lookup failed' }, 502);
       }
     }
 

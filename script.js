@@ -371,6 +371,21 @@ if (tabButtons.length) {
   activateTab(hasHashTab ? hashTab : 'hub');
 }
 
+// Admin Panel's own small nested tab row (Strikes/Comp/Recovery/Glitch
+// Skins/Currency) — deliberately separate from the top-level
+// tabButtons/tabPanels/activateTab machinery above, since this switcher
+// only ever needs to toggle panels within the already-active Admin
+// Panel tab.
+document.querySelectorAll('.admin-subtab-button').forEach((button) => {
+  button.addEventListener('click', () => {
+    const target = button.dataset.adminSubtab;
+    document.querySelectorAll('.admin-subtab-button').forEach((b) => b.classList.toggle('active', b === button));
+    document.querySelectorAll('[data-admin-subtab-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.adminSubtabPanel !== target;
+    });
+  });
+});
+
 // ── Home hub: a customizable, drag-reorderable grid of every real page on
 // the site, shown first on every load. Order is a pure per-browser
 // preference (not gameplay data), so it's just localStorage — no need to
@@ -3942,6 +3957,7 @@ const checkAdminPanelAccess = async () => {
       loadSkinLibrary();
       loadOwnStaffBio();
       loadTransferLog();
+      loadCurrencyLog();
       if (isOwner) {
         loadModerationLog();
         loadSkinLibraryTrash();
@@ -5055,6 +5071,7 @@ const MODERATION_ACTION_LABELS = {
   compensation_grant: 'Granted compensation',
   transfer_grant: 'Granted transfer dino',
   dino_recovery: 'Recovered dino',
+  currency_grant: 'Granted currency',
 };
 
 let modLogFilterSteamId = null;
@@ -5123,6 +5140,46 @@ const loadModerationLog = async () => {
     renderModerationLog(lastModerationLogData);
   } catch (error) {
     console.debug('Moderation log load failed:', error);
+  }
+};
+
+// ── Admin Panel's Currency sub-tab: Currency Log ──
+//
+// Same underlying log as Moderation Log above (website_mod_log:index,
+// filtered server-side to currency_grant entries only — see
+// /api/currency-log's own comment) — admin grants only, never the
+// natural playtime/war-payout accrual, which never writes a log entry
+// at all. Available to any admin tier (matches who can grant currency
+// in the first place), unlike Moderation Log which is owner-only.
+const renderCurrencyLog = (entries) => {
+  const listEl = document.querySelector('[data-currency-log-list]');
+  const emptyEl = document.querySelector('[data-currency-log-empty]');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  if (!entries.length) {
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+  const list = document.createElement('ul');
+  list.className = 'transfer-log-entries';
+  entries.forEach((entry) => list.appendChild(buildModerationLogRow(entry)));
+  listEl.appendChild(list);
+};
+
+const loadCurrencyLog = async () => {
+  const listEl = document.querySelector('[data-currency-log-list]');
+  if (!listEl) return;
+  try {
+    const response = await fetch('/api/currency-log');
+    const data = await response.json();
+    if (!response.ok) {
+      listEl.innerHTML = '';
+      return;
+    }
+    renderCurrencyLog(Array.isArray(data.entries) ? data.entries : []);
+  } catch (error) {
+    console.debug('Currency log load failed:', error);
   }
 };
 

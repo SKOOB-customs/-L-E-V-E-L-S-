@@ -892,6 +892,54 @@
             </form>
           </section>
 
+          <div class="admin-subtab-switcher" role="tablist" aria-label="Admin Panel sections">
+            <button class="admin-subtab-button active" type="button" data-admin-subtab="strikes">Strikes</button>
+            <button class="admin-subtab-button" type="button" data-admin-subtab="comp">Comp</button>
+            <button class="admin-subtab-button" type="button" data-admin-subtab="recovery">Recovery</button>
+            <button class="admin-subtab-button" type="button" data-admin-subtab="glitch-skins">Glitch Skins</button>
+            <button class="admin-subtab-button" type="button" data-admin-subtab="currency">Currency</button>
+          </div>
+
+          <div class="admin-subtab-panel is-active" data-admin-subtab-panel="strikes">
+          <section class="panel content-box">
+            <div class="mini-heading">Strikes</div>
+            <p class="dino-park-note">Look up a player's strike history before issuing another.</p>
+            <div class="field-row two-up">
+              <label>
+                Target Steam ID or name
+                <div class="player-search">
+                  <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-strike-target />
+                </div>
+              </label>
+              <div class="submit-actions field-inline-action">
+                <button class="action-button" type="button" data-strike-load>Load history</button>
+              </div>
+            </div>
+
+            <div class="info-list" data-strike-list></div>
+            <p class="dino-park-note" data-strike-empty hidden>No strikes on file for this Steam ID.</p>
+
+            <form class="submit-form" data-strike-form>
+              <div class="field-row">
+                <label>
+                  Reason
+                  <textarea rows="3" placeholder="Why this strike is being issued..." data-strike-reason required></textarea>
+                </label>
+              </div>
+              <div class="field-row">
+                <label>
+                  Evidence (links, one per line)
+                  <textarea rows="3" placeholder="https://..." data-strike-evidence></textarea>
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Issue strike</button>
+              </div>
+            </form>
+          </section>
+          </div>
+
+          <div class="admin-subtab-panel" data-admin-subtab-panel="comp" hidden>
           <section class="panel content-box">
             <div class="mini-heading">Compensation</div>
             <p class="dino-park-note">Grants a redeemable dino snapshot straight to a player's Inventory — same as a real <code>!park</code>, just without them needing to park one themselves.</p>
@@ -962,6 +1010,16 @@
           </section>
 
           <section class="panel content-box">
+            <div class="mini-heading">Transfer Dinos</div>
+            <p class="dino-park-note">Check "This is a transfer dino" on the Compensation form above to log a grant as a transfer instead of a plain compensation. The full log lives on its own page so it doesn't keep growing this one.</p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-goto-transfer-logs>View Transfer Logs</button>
+            </div>
+          </section>
+          </div>
+
+          <div class="admin-subtab-panel" data-admin-subtab-panel="recovery" hidden>
+          <section class="panel content-box">
             <div class="mini-heading">Recover Dinos</div>
             <p class="dino-park-note">Search a player, then revive one of their dead or disconnected dinos as a fresh compensation grant — restores species and the vitals captured at that moment (growth, blood/health, water/thirst, hunger). Mutations and entombments aren't tracked in dino history, so a recovered dino comes back without them.</p>
             <div class="field-row two-up">
@@ -981,52 +1039,9 @@
             </label>
             <div class="dino-history-list" data-recover-history-list></div>
           </section>
+          </div>
 
-          <section class="panel content-box">
-            <div class="mini-heading">Transfer Dinos</div>
-            <p class="dino-park-note">Check "This is a transfer dino" on the Compensation form above to log a grant as a transfer instead of a plain compensation. The full log lives on its own page so it doesn't keep growing this one.</p>
-            <div class="submit-actions">
-              <button class="action-button" type="button" data-goto-transfer-logs>View Transfer Logs</button>
-            </div>
-          </section>
-
-          <section class="panel content-box">
-            <div class="mini-heading">Strikes</div>
-            <p class="dino-park-note">Look up a player's strike history before issuing another.</p>
-            <div class="field-row two-up">
-              <label>
-                Target Steam ID or name
-                <div class="player-search">
-                  <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-strike-target />
-                </div>
-              </label>
-              <div class="submit-actions field-inline-action">
-                <button class="action-button" type="button" data-strike-load>Load history</button>
-              </div>
-            </div>
-
-            <div class="info-list" data-strike-list></div>
-            <p class="dino-park-note" data-strike-empty hidden>No strikes on file for this Steam ID.</p>
-
-            <form class="submit-form" data-strike-form>
-              <div class="field-row">
-                <label>
-                  Reason
-                  <textarea rows="3" placeholder="Why this strike is being issued..." data-strike-reason required></textarea>
-                </label>
-              </div>
-              <div class="field-row">
-                <label>
-                  Evidence (links, one per line)
-                  <textarea rows="3" placeholder="https://..." data-strike-evidence></textarea>
-                </label>
-              </div>
-              <div class="submit-actions">
-                <button class="action-button" type="submit">Issue strike</button>
-              </div>
-            </form>
-          </section>
-
+          <div class="admin-subtab-panel" data-admin-subtab-panel="glitch-skins" hidden>
           <section class="panel content-box">
             <div class="mini-heading">Glitch Skins</div>
             <p class="dino-park-note">Grants charges of a named skin to a player's Inventory — they spend a charge themselves, either on their live dino or attached to one specific parked dino.</p>
@@ -1124,7 +1139,9 @@
               </div>
             </form>
           </section>
+          </div>
 
+          <div class="admin-subtab-panel" data-admin-subtab-panel="currency" hidden>
           <section class="panel content-box">
             <div class="mini-heading">Currency</div>
             <p class="dino-park-note">Grants LeveLs Coins directly to a player, on top of whatever they've earned by playing — adds to their existing balance.</p>
@@ -1146,6 +1163,14 @@
               </div>
             </form>
           </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Currency Log</div>
+            <p class="dino-park-note">Admin-granted currency only — currency earned naturally through playtime or the war payout isn't logged here.</p>
+            <div class="info-list" data-currency-log-list></div>
+            <p class="dino-park-note empty-state" data-currency-log-empty hidden>No currency grants logged yet.</p>
+          </section>
+          </div>
 
           </div>
         </section>
