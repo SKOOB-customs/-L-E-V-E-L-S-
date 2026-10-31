@@ -4271,11 +4271,13 @@ const renderFactionRankTable = (ranks) => {
 const renderFactionStatus = (data) => {
   const statusSection = document.querySelector('[data-faction-status-section]');
   renderFactionJoinCards(data.factionId, data.swapsRemaining);
+  const swapsAllowedEl = document.querySelector('[data-faction-swaps-allowed]');
+  if (swapsAllowedEl) {
+    swapsAllowedEl.textContent = `${FACTION_SWAP_LIFETIME_LIMIT} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps per account allowed`;
+  }
   const swapsNoteEl = document.querySelector('[data-faction-swaps-note]');
   if (swapsNoteEl) {
-    swapsNoteEl.textContent = data.factionId
-      ? `${data.swapsRemaining ?? 0} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps remaining.`
-      : '';
+    swapsNoteEl.textContent = `${data.swapsRemaining ?? FACTION_SWAP_LIFETIME_LIMIT} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps remaining`;
   }
   if (!data.factionId) {
     if (statusSection) statusSection.hidden = true;
@@ -4384,6 +4386,14 @@ const checkFactionStatus = async () => {
   const statusSection = document.querySelector('[data-faction-status-section]');
   if (!profile?.steamId) {
     renderFactionJoinCards(null, 0);
+    const swapsAllowedEl = document.querySelector('[data-faction-swaps-allowed]');
+    if (swapsAllowedEl) {
+      swapsAllowedEl.textContent = `${FACTION_SWAP_LIFETIME_LIMIT} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps per account allowed`;
+    }
+    const swapsNoteEl = document.querySelector('[data-faction-swaps-note]');
+    if (swapsNoteEl) {
+      swapsNoteEl.textContent = `${FACTION_SWAP_LIFETIME_LIMIT} of ${FACTION_SWAP_LIFETIME_LIMIT} lifetime faction swaps remaining`;
+    }
     if (statusSection) statusSection.hidden = true;
     delete document.body.dataset.faction;
     return;

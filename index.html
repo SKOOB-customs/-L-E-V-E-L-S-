@@ -487,7 +487,7 @@
           </div>
 
           <div data-faction-join-section>
-            <p class="dino-park-note">Join a faction to start earning rank and fighting for it in the war — every account gets 3 lifetime faction swaps if you change your mind later, no matter what.</p>
+            <p class="dino-park-note" data-faction-swaps-allowed></p>
             <p class="dino-park-note" data-faction-swaps-note></p>
             <div class="faction-card-grid" data-faction-card-grid></div>
           </div>
@@ -499,32 +499,6 @@
               <button class="warzone-enter-button" type="button" data-enter-warzone>Enter the Warzone</button>
             </section>
           </div>
-
-          <section class="panel content-box" data-faction-admin-only hidden>
-            <div class="mini-heading">Move a Player's Faction</div>
-            <form class="submit-form" data-faction-move-form>
-              <div class="field-row two-up">
-                <label>
-                  Player Steam ID or name
-                  <div class="player-search">
-                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-faction-move-target required />
-                  </div>
-                </label>
-                <label>
-                  New faction
-                  <select data-faction-move-select required>
-                    <option value="">Pick a faction…</option>
-                    <option value="carcharo">Carcharo Dominion</option>
-                    <option value="dromaeosaur">Dromaeosaur Pact</option>
-                    <option value="mosasaur">Mosasaur Thalassocracy</option>
-                  </select>
-                </label>
-              </div>
-              <div class="submit-actions">
-                <button class="action-button" type="submit">Move player</button>
-              </div>
-            </form>
-          </section>
         </section>
 
         <section class="tab-panel" id="warzone" data-tab="warzone">
@@ -1423,6 +1397,32 @@
               <button class="action-button" type="button" data-faction-start-war>Start War</button>
               <button class="secondary-button" type="button" data-faction-end-war>End War Early</button>
             </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Move a Player's Faction</div>
+            <form class="submit-form" data-faction-move-form>
+              <div class="field-row two-up">
+                <label>
+                  Player Steam ID or name
+                  <div class="player-search">
+                    <input type="text" maxlength="64" placeholder="7656119... or a player name" autocomplete="off" data-faction-move-target required />
+                  </div>
+                </label>
+                <label>
+                  New faction
+                  <select data-faction-move-select required>
+                    <option value="">Pick a faction…</option>
+                    <option value="carcharo">Carcharo Dominion</option>
+                    <option value="dromaeosaur">Dromaeosaur Pact</option>
+                    <option value="mosasaur">Mosasaur Thalassocracy</option>
+                  </select>
+                </label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Move player</button>
+              </div>
+            </form>
           </section>
           </div>
         </section>
