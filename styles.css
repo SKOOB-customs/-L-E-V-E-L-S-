@@ -3657,17 +3657,36 @@ body[data-faction="mosasaur"]::before {
   background: radial-gradient(circle at 50% 0%, rgba(31, 111, 214, 0.14), transparent 60%);
 }
 
-/* Factions tab only — everyone sees this, faction or not. Swaps the
-   whole fixed body background (same background-size/position/attachment
-   body already uses for its default forest art, just a different image)
-   instead of only painting #factions' own tab-panel box — that approach
-   left the old forest background visible in the margins on either side
-   of the centered content column. script.js sets
+/* Factions AND Warzone tabs — everyone sees this, faction or not. Swaps
+   the whole fixed body background (same background-size/position/
+   attachment body already uses for its default forest art, just a
+   different image) instead of only painting each tab's own tab-panel
+   box — that approach left the old forest background visible in the
+   margins on either side of the centered content column. script.js sets
    document.body.dataset.activeTab on every tab switch. Inner panels use
    --panel-strong (near-opaque) already, so no extra overlay is needed
    to keep their text legible over the art. */
-body[data-active-tab="factions"] {
+body[data-active-tab="factions"],
+body[data-active-tab="warzone"] {
   background-image: linear-gradient(rgba(4, 6, 10, 0.3), rgba(4, 6, 10, 0.42)), url('assets/logo/levels_new_background.webp');
+}
+
+/* Panel boxes in both tabs tint toward the viewer's faction accent once
+   joined (--accent itself already gets swapped by body[data-faction]
+   above) — a subtle wash on top of --panel, not a full repaint, so text
+   stays legible. Falls back to the site's own default accent when no
+   faction is joined, same as everywhere else on the site. */
+#factions .panel,
+#warzone .panel {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+
+/* Header's signed-in username button picks up the same faction accent
+   while viewing either tab — reverts to its normal color everywhere
+   else on the site. */
+body[data-active-tab="factions"] #headerSteamBtn,
+body[data-active-tab="warzone"] #headerSteamBtn {
+  color: var(--accent);
 }
 
 .warzone-entry-box {
