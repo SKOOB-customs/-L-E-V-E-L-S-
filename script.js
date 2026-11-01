@@ -6088,6 +6088,59 @@ document.querySelector('[data-skin-library-save-changes]')?.addEventListener('cl
 // from-trash. Same shared data the Owner tab's Skin Library manages,
 // read/written through the separate /api/skin-lab-* routes so this
 // account never needs the Admin Panel/Owner passkey system.
+//
+// Advanced JSON starts pre-filled with a ready-to-edit template (also
+// the literal starting value baked into index.html) rather than empty,
+// so a player can just tweak numbers instead of writing the whole
+// shape from scratch — reset back to this same template after each
+// successful save, not cleared to blank.
+const SKIN_LAB_JSON_TEMPLATE = `{
+  "BodyColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "MarkingsColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -1
+  },
+  "FlankColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "UnderbellyColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "Detail1Color": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "EyesColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "MaleDisplayColor": {
+    "r": 0,
+    "g": 0,
+    "b": 0,
+    "a": -999
+  },
+  "PatternIndex": 0,
+  "SkinVariation": 0
+}`;
+
 const collectSkinLabColors = () => {
   let colors;
   const jsonText = document.querySelector('[data-skinlab-library-json]')?.value.trim() || '';
@@ -6134,7 +6187,7 @@ const saveSkinToSkinLab = async (buttonEl) => {
     } else {
       showToast(`Saved "${name}" to the library.`);
       document.querySelector('[data-skinlab-library-name]').value = '';
-      document.querySelector('[data-skinlab-library-json]').value = '';
+      document.querySelector('[data-skinlab-library-json]').value = SKIN_LAB_JSON_TEMPLATE;
       document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => { input.value = '#808080'; });
       const patternInput = document.querySelector('[data-skinlab-library-pattern-index]');
       if (patternInput) patternInput.value = '';
