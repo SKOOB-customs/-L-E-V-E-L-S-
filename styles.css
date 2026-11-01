@@ -3581,7 +3581,7 @@ body[data-faction="mosasaur"]::before {
   border-radius: 18px;
   padding: 24px;
   background-image: linear-gradient(rgba(4, 6, 10, 0.3), rgba(4, 6, 10, 0.42)), url('assets/logo/levels_new_background.webp');
-  background-size: 150%;
+  background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
 }
