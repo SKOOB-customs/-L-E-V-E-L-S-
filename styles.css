@@ -3702,6 +3702,41 @@ body[data-active-tab="factions"] {
   font-variant-numeric: tabular-nums;
 }
 
+/* Skin Lab tab: countdown sits top-right of the header, next to the
+   eyebrow/title instead of stacked under them like most section
+   headers on this site. */
+.skin-lab-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.skin-lab-countdown {
+  margin: 4px 0 0;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.skin-lab-ended-note {
+  color: var(--chrome-1);
+  font-weight: 600;
+}
+
+/* Past the 28-day trial: visible but non-interactive — dimmed and
+   unclickable rather than hidden outright, per request. Inputs/buttons
+   are also individually `disabled` in script.js (see
+   applySkinLabFrozenState) so this isn't just a visual-only lock. */
+.skin-lab-frozen {
+  opacity: 0.55;
+  pointer-events: none;
+  filter: saturate(0.6);
+}
+
 /* ── Faction Zones map (Warzone tab) ──
    The base image already draws all 3 factions' zones as colored
    outlines; it's desaturated/dimmed here so non-owned zones read as

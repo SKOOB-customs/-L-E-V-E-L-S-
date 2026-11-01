@@ -1209,20 +1209,41 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
-// ── Skin Lab access (owner tier, plus one specific non-admin account) ──
+// ── Skin Lab access (owner tier/one whitelisted account = permanent;
+//    every other signed-in player = a one-time 28-day free trial) ──
 //
-// A standalone tab combining the Owner tab's Skin Library (create/edit/
-// delete/test) with none of the Admin Panel's grant-to-other-players
-// power, built for a trusted skin designer who isn't an admin/owner at
-// all. Deliberately NOT wired through admin_tiers.json or the admin
-// passkey system — that account has neither, and isn't meant to get
-// either just to use this one tab.
+// A standalone tab combining the Owner tab's Skin Library (create/test
+// only — see the client-side comment on why edit/list/restore were
+// removed) with none of the Admin Panel's grant-to-other-players power.
+// Owners and SKIN_LAB_EXTRA_STEAM_IDS keep permanent access, deliberately
+// NOT wired through admin_tiers.json or the admin passkey system (that
+// extra account has neither). Every other signed-in player can activate
+// one lifetime 28-day trial (skin_lab_trials:index, steamId -> {
+// activatedAt }) — hasSkinLabAccess is the real-time gate every Skin Lab
+// write route checks, so a trial that's expired (or was never activated)
+// is rejected server-side regardless of what the client UI shows.
 const SKIN_LAB_EXTRA_STEAM_IDS = ['76561199769552573'];
+const SKIN_LAB_TRIAL_DURATION_MS = 28 * 24 * 60 * 60 * 1000;
+
+const readSkinLabTrial = async (env, steamId) => {
+  if (!env.PARKED_KV) return null;
+  try {
+    const raw = await env.PARKED_KV.get('skin_lab_trials:index');
+    if (!raw) return null;
+    const trials = JSON.parse(raw)?.trials || {};
+    return trials[steamId] || null;
+  } catch {
+    return null;
+  }
+};
 
 const hasSkinLabAccess = async (env, steamId) => {
   if (SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId)) return true;
   const tier = await getAdminTier(env, steamId);
-  return tier === 'owner';
+  if (tier === 'owner') return true;
+  const trial = await readSkinLabTrial(env, steamId);
+  if (!trial?.activatedAt) return false;
+  return Date.now() < trial.activatedAt + SKIN_LAB_TRIAL_DURATION_MS;
 };
 
 // See the /moderation-log route's own comment for the full picture — this
@@ -3275,16 +3296,64 @@ export default {
     // gated by hasSkinLabAccess instead of owner tier. See that comment
     // block above for why this account check is deliberately separate
     // from admin_tiers.json.
+    //
+    // access is always true now for any signed-in player — the tab
+    // itself is open to everyone; permanent/trial below tell the client
+    // which of the 3 UI states to show (activate prompt, live countdown,
+    // or frozen/view-only past expiry).
     if (url.pathname === '/skin-lab-access' && request.method === 'GET') {
       const steamId = url.searchParams.get('steamId');
       if (!steamId || !/^\d{17}$/.test(steamId)) {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
-      if (!env.PARKED_KV) return json({ access: false });
+      if (!env.PARKED_KV) {
+        return json({ access: true, permanent: false, trial: { activated: false, activatedAt: null, expiresAt: null, active: false } });
+      }
       try {
-        return json({ access: await hasSkinLabAccess(env, steamId) });
+        const permanent = SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId) || (await getAdminTier(env, steamId)) === 'owner';
+        const trialRecord = await readSkinLabTrial(env, steamId);
+        const activatedAt = trialRecord?.activatedAt || null;
+        const expiresAt = activatedAt ? activatedAt + SKIN_LAB_TRIAL_DURATION_MS : null;
+        return json({
+          access: true,
+          permanent,
+          trial: { activated: !!activatedAt, activatedAt, expiresAt, active: !!(activatedAt && Date.now() < expiresAt) },
+        });
       } catch (error) {
         return json({ error: error.message || 'Skin Lab access check failed' }, 502);
+      }
+    }
+
+    // One-time lifetime activation — repeat calls are a no-op (returns
+    // the already-recorded activatedAt rather than resetting the clock),
+    // so a replayed/tampered request can't extend the free period.
+    if (url.pathname === '/skin-lab-trial-activate' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const raw = await env.PARKED_KV.get('skin_lab_trials:index');
+        let trials = {};
+        if (raw) {
+          try { trials = JSON.parse(raw)?.trials || {}; } catch { trials = {}; }
+        }
+        if (!trials[steamId]?.activatedAt) {
+          trials[steamId] = { activatedAt: Date.now() };
+          await env.PARKED_KV.put('skin_lab_trials:index', JSON.stringify({ updatedAt: Date.now(), trials }));
+        }
+        const activatedAt = trials[steamId].activatedAt;
+        const expiresAt = activatedAt + SKIN_LAB_TRIAL_DURATION_MS;
+        return json({ ok: true, trial: { activated: true, activatedAt, expiresAt, active: Date.now() < expiresAt } });
+      } catch (error) {
+        return json({ error: error.message || 'Could not activate the free period' }, 502);
       }
     }
 

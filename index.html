@@ -1480,11 +1480,25 @@
         </section>
 
         <section class="tab-panel" id="skin-lab" data-tab="skin-lab" hidden>
-          <div class="section-header">
-            <p class="eyebrow">SKIN LAB</p>
-            <h2>Design &amp; Test Skins</h2>
+          <div class="section-header skin-lab-header">
+            <div>
+              <p class="eyebrow">SKIN LAB</p>
+              <h2>Design &amp; Test Skins</h2>
+            </div>
+            <p class="skin-lab-countdown" data-skin-lab-countdown hidden></p>
           </div>
 
+          <section class="panel content-box" data-skin-lab-activate-section hidden>
+            <div class="mini-heading">Free Trial Available</div>
+            <p class="dino-park-note">Activate a one-time, 28-day free period to design and test your own glitch skins — starts counting down the moment you activate, and this offer never comes back once it's used.</p>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-skin-lab-activate>Activate Free Period (28 days)</button>
+            </div>
+          </section>
+
+          <p class="dino-park-note skin-lab-ended-note" data-skin-lab-ended-note hidden>Your 28-day free period has ended — Skin Lab is now view-only.</p>
+
+          <div data-skin-lab-content hidden>
           <section class="panel content-box">
             <div class="mini-heading">Skin Library</div>
             <p class="dino-park-note">Save a reusable named skin here — it shows up in the Owner tab's and Admin Panel's "Load from library" dropdowns too, same shared library.</p>
@@ -1559,6 +1573,7 @@
               </div>
             </form>
           </section>
+          </div>
         </section>
 
         <section class="tab-panel" id="transfer-logs" data-tab="transfer-logs" hidden>

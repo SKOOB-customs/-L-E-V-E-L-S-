@@ -4074,12 +4074,83 @@ document.querySelector('[data-admin-passkey-reset-form]')?.addEventListener('sub
 // ── Skin Lab tab ──
 //
 // A separate surface from the Admin Panel/Owner tier system entirely —
-// combines the Owner tab's Skin Library (create/edit/delete/test) with
-// none of the Admin Panel's grant-to-other-players power, gated by
-// hasSkinLabAccess on the Worker (owner tier, plus one specific
-// whitelisted non-admin Steam ID — see bridge-worker.js's own comment).
-// Checked independently of checkAdminPanelAccess so it works for an
-// account with no admin passkey and no admin_tiers.json entry at all.
+// combines the Owner tab's Skin Library (create/test only) with none of
+// the Admin Panel's grant-to-other-players power. Open to every
+// signed-in player now: owners and SKIN_LAB_EXTRA_STEAM_IDS keep
+// permanent access (see bridge-worker.js's hasSkinLabAccess), everyone
+// else gets one lifetime 28-day free trial — a one-time "Activate Free
+// Period" button (shown only pre-activation), then a live countdown
+// while active, then a visible-but-non-interactive view once it expires.
+// The Worker re-checks the real trial state on every write route
+// regardless of what this client state shows, so none of this is a
+// trust boundary on its own.
+let skinLabCountdownInterval = null;
+
+const formatSkinLabCountdown = (expiresAt) => {
+  const remainingMs = Math.max(0, expiresAt - Date.now());
+  const totalMinutes = Math.floor(remainingMs / 60000);
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  return `Free period ends in ${days}d ${hours}h ${minutes}m`;
+};
+
+// Disables every actual form control inside the content area, not just
+// the .skin-lab-frozen CSS dimming — pointer-events:none alone still
+// leaves inputs keyboard-focusable/submittable.
+const applySkinLabFrozenState = (frozen) => {
+  const content = document.querySelector('[data-skin-lab-content]');
+  if (!content) return;
+  content.classList.toggle('skin-lab-frozen', frozen);
+  content.querySelectorAll('input, select, textarea, button').forEach((el) => {
+    el.disabled = frozen;
+  });
+};
+
+const renderSkinLabState = (data) => {
+  const activateSection = document.querySelector('[data-skin-lab-activate-section]');
+  const endedNote = document.querySelector('[data-skin-lab-ended-note]');
+  const content = document.querySelector('[data-skin-lab-content]');
+  const countdownEl = document.querySelector('[data-skin-lab-countdown]');
+
+  clearInterval(skinLabCountdownInterval);
+  skinLabCountdownInterval = null;
+
+  const permanent = !!data.permanent;
+  const trial = data.trial || {};
+
+  if (!permanent && !trial.activated) {
+    if (activateSection) activateSection.hidden = false;
+    if (content) content.hidden = true;
+    if (endedNote) endedNote.hidden = true;
+    if (countdownEl) countdownEl.hidden = true;
+    return;
+  }
+
+  if (activateSection) activateSection.hidden = true;
+  if (content) content.hidden = false;
+
+  if (permanent || trial.active) {
+    if (endedNote) endedNote.hidden = true;
+    applySkinLabFrozenState(false);
+    if (!permanent && trial.expiresAt) {
+      if (countdownEl) {
+        countdownEl.hidden = false;
+        const update = () => { countdownEl.textContent = formatSkinLabCountdown(trial.expiresAt); };
+        update();
+        skinLabCountdownInterval = setInterval(update, 1000);
+      }
+    } else if (countdownEl) {
+      countdownEl.hidden = true;
+    }
+  } else {
+    // Activated, but the 28 days are up.
+    if (endedNote) endedNote.hidden = false;
+    if (countdownEl) countdownEl.hidden = true;
+    applySkinLabFrozenState(true);
+  }
+};
+
 const checkSkinLabAccess = async () => {
   const tabButton = document.querySelector('.skin-lab-tab-button');
   const panel = document.getElementById('skin-lab');
@@ -4087,6 +4158,8 @@ const checkSkinLabAccess = async () => {
   if (!profile?.steamId) {
     if (tabButton) tabButton.hidden = true;
     if (panel) panel.hidden = true;
+    clearInterval(skinLabCountdownInterval);
+    skinLabCountdownInterval = null;
     return;
   }
   try {
@@ -4095,10 +4168,31 @@ const checkSkinLabAccess = async () => {
     const access = !!data.access;
     if (tabButton) tabButton.hidden = !access;
     if (panel) panel.hidden = !access;
+    if (access) renderSkinLabState(data);
   } catch (error) {
     console.debug('Skin Lab access check failed:', error);
   }
 };
+
+document.querySelector('[data-skin-lab-activate]')?.addEventListener('click', async (event) => {
+  const button = event.target;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/skin-lab-trial-activate', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not activate the free period.');
+      button.disabled = false;
+      return;
+    }
+    showToast('Free period activated — 28 days starting now.');
+    renderSkinLabState({ access: true, permanent: false, trial: data.trial });
+  } catch (error) {
+    console.debug('Skin Lab trial activation failed:', error);
+    showToast('Could not reach the server right now.');
+    button.disabled = false;
+  }
+});
 
 // ── Factions & War ──
 //
