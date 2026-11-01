@@ -969,9 +969,22 @@ const readFactionOnlineIndex = async (env) => {
   }
 };
 
+// Captured live in-game and given directly, well before the War Zone
+// Coordinates form's own sanctuary fields (which are pre-filled with
+// these exact same numbers) ever got submitted by anyone — used as the
+// baseline here so Sanctuary Teleport works immediately without
+// depending on an owner separately re-entering them through the UI. An
+// explicit save via that form still overrides these, per faction
+// individually (see the merge in readWarZonesIndex below).
+const DEFAULT_FACTION_SANCTUARIES = {
+  carcharo: { x: 304450.792, y: -395191.048, z: 22343.062 },
+  dromaeosaur: { x: -321205.446, y: 102218.296, z: 22151.242 },
+  mosasaur: { x: -293096.653, y: 504991.026, z: 20757.805 },
+};
+
 const readWarZonesIndex = async (env) => {
   const raw = await env.PARKED_KV.get('war_zones:index');
-  if (!raw) return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: {} };
+  if (!raw) return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: { ...DEFAULT_FACTION_SANCTUARIES } };
   try {
     const parsed = JSON.parse(raw);
     return {
@@ -980,10 +993,10 @@ const readWarZonesIndex = async (env) => {
       movingZoneStart: parsed.movingZoneStart || null,
       movingZoneEnd: parsed.movingZoneEnd || null,
       zoneRadius: parsed.zoneRadius || 4000,
-      sanctuaries: parsed.sanctuaries || {},
+      sanctuaries: { ...DEFAULT_FACTION_SANCTUARIES, ...(parsed.sanctuaries || {}) },
     };
   } catch {
-    return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: {} };
+    return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: { ...DEFAULT_FACTION_SANCTUARIES } };
   }
 };
 
