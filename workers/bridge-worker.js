@@ -1209,19 +1209,21 @@ const getAdminTier = async (env, steamId) => {
   return null;
 };
 
-// ── Skin Lab access (owner tier/one whitelisted account = permanent;
-//    every other signed-in player = a one-time 28-day free trial) ──
+// ── Skin Lab access (one whitelisted account = permanent; everyone
+//    else, owners included, = a one-time 28-day free trial) ──
 //
 // A standalone tab combining the Owner tab's Skin Library (create/test
 // only — see the client-side comment on why edit/list/restore were
 // removed) with none of the Admin Panel's grant-to-other-players power.
-// Owners and SKIN_LAB_EXTRA_STEAM_IDS keep permanent access, deliberately
+// Only SKIN_LAB_EXTRA_STEAM_IDS keeps permanent access, deliberately
 // NOT wired through admin_tiers.json or the admin passkey system (that
-// extra account has neither). Every other signed-in player can activate
-// one lifetime 28-day trial (skin_lab_trials:index, steamId -> {
-// activatedAt }) — hasSkinLabAccess is the real-time gate every Skin Lab
-// write route checks, so a trial that's expired (or was never activated)
-// is rejected server-side regardless of what the client UI shows.
+// account has neither). Owners get no special bypass here — same
+// activate/trial/expire flow as any other player, per request. Every
+// signed-in player (owner or not) can activate one lifetime 28-day
+// trial (skin_lab_trials:index, steamId -> { activatedAt }) —
+// hasSkinLabAccess is the real-time gate every Skin Lab write route
+// checks, so a trial that's expired (or was never activated) is
+// rejected server-side regardless of what the client UI shows.
 const SKIN_LAB_EXTRA_STEAM_IDS = ['76561199769552573'];
 const SKIN_LAB_TRIAL_DURATION_MS = 28 * 24 * 60 * 60 * 1000;
 
@@ -1239,8 +1241,6 @@ const readSkinLabTrial = async (env, steamId) => {
 
 const hasSkinLabAccess = async (env, steamId) => {
   if (SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId)) return true;
-  const tier = await getAdminTier(env, steamId);
-  if (tier === 'owner') return true;
   const trial = await readSkinLabTrial(env, steamId);
   if (!trial?.activatedAt) return false;
   return Date.now() < trial.activatedAt + SKIN_LAB_TRIAL_DURATION_MS;
@@ -3354,7 +3354,7 @@ export default {
         return json({ access: true, permanent: false, trial: { activated: false, activatedAt: null, expiresAt: null, active: false } });
       }
       try {
-        const permanent = SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId) || (await getAdminTier(env, steamId)) === 'owner';
+        const permanent = SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId);
         const trialRecord = await readSkinLabTrial(env, steamId);
         const activatedAt = trialRecord?.activatedAt || null;
         const expiresAt = activatedAt ? activatedAt + SKIN_LAB_TRIAL_DURATION_MS : null;

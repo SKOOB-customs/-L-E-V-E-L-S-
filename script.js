@@ -4174,14 +4174,15 @@ document.querySelector('[data-admin-passkey-reset-form]')?.addEventListener('sub
 // A separate surface from the Admin Panel/Owner tier system entirely —
 // combines the Owner tab's Skin Library (create/test only) with none of
 // the Admin Panel's grant-to-other-players power. Open to every
-// signed-in player now: owners and SKIN_LAB_EXTRA_STEAM_IDS keep
-// permanent access (see bridge-worker.js's hasSkinLabAccess), everyone
-// else gets one lifetime 28-day free trial — a one-time "Activate Free
-// Period" button (shown only pre-activation), then a live countdown
-// while active, then a visible-but-non-interactive view once it expires.
-// The Worker re-checks the real trial state on every write route
-// regardless of what this client state shows, so none of this is a
-// trust boundary on its own.
+// signed-in player now, owners included — only SKIN_LAB_EXTRA_STEAM_IDS
+// keeps permanent access (see bridge-worker.js's hasSkinLabAccess);
+// everyone else, owner or not, gets the exact same one-time 28-day
+// free trial: a one-time "Activate Free Period" button (shown only
+// pre-activation), then a live countdown while active, then a
+// visible-but-non-interactive view once it expires. The Worker
+// re-checks the real trial state on every write route regardless of
+// what this client state shows, so none of this is a trust boundary
+// on its own.
 let skinLabCountdownInterval = null;
 
 const formatSkinLabCountdown = (expiresAt) => {
