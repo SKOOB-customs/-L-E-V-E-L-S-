@@ -796,6 +796,21 @@ const requestNotify = (env, steamId, message) => writeRequest(env, notifyRequest
 // sweep /all-positions already uses.
 const FACTION_IDS = ['carcharo', 'dromaeosaur', 'mosasaur'];
 
+// Faction chat's @ping — typing a faction's keyword in THAT faction's
+// own chat room (and only there — the same keyword typed anywhere else
+// is just plain text) plays a sound for everyone currently connected to
+// that room. Rate-limited per player in ChatRoom.handleSession below:
+// under 60 hours of faction playtime (faction_playtime:index, minutes)
+// = once per 10 minutes, 60+ hours = once per 3 minutes.
+const FACTION_PING_KEYWORDS = {
+  'faction-carcharo': '@red',
+  'faction-dromaeosaur': '@green',
+  'faction-mosasaur': '@blue',
+};
+const FACTION_PING_COOLDOWN_MS = 10 * 60 * 1000;
+const FACTION_PING_VETERAN_COOLDOWN_MS = 3 * 60 * 1000;
+const FACTION_PING_VETERAN_MINUTES = 60 * 60;
+
 // Each account gets 3 self-service faction swaps for the lifetime of that
 // account, no matter what (no reset, no per-war refill) — tracked as
 // swapsUsed on factions:index.members[steamId], incremented by
@@ -909,6 +924,21 @@ const readFactionPlaytimeIndex = async (env) => {
     return { totals: parsed.totals || {} };
   } catch {
     return { totals: {} };
+  }
+};
+
+// Written by syncFactionWar's RCON sweep every minute — see its own
+// comment for why this is cached instead of each caller doing its own
+// RCON round trip.
+const readFactionOnlineIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('faction_online:index');
+  const empty = { carcharo: 0, dromaeosaur: 0, mosasaur: 0 };
+  if (!raw) return { counts: empty };
+  try {
+    const parsed = JSON.parse(raw);
+    return { counts: { ...empty, ...(parsed.counts || {}) } };
+  } catch {
+    return { counts: empty };
   }
 };
 
@@ -1058,6 +1088,19 @@ const syncFactionWar = async (env) => {
   const spawned = dinos
     .map((dino) => ({ steamId: dino.playerId, location: dino.location, factionId: factionsData.members[dino.playerId]?.factionId || null }))
     .filter((p) => p.factionId);
+
+  // Online count per faction — cached here (already have the RCON sweep
+  // + faction membership data in hand this tick) so the Warzone tab's
+  // "X members online" reads a cheap KV value instead of needing its
+  // own RCON round trip per page load. Written even when nobody from
+  // any faction is currently spawned, which is why this sits before the
+  // early-return below.
+  const onlineCounts = { carcharo: 0, dromaeosaur: 0, mosasaur: 0 };
+  for (const p of spawned) {
+    if (onlineCounts[p.factionId] !== undefined) onlineCounts[p.factionId] += 1;
+  }
+  await putIndexIfChanged(env, 'faction_online:index', { counts: onlineCounts });
+
   if (spawned.length === 0) return;
 
   // 1. Lifetime playtime — always accrues, independent of any war.
@@ -1932,13 +1975,13 @@ export class ChatRoom {
     // storage read + send) before returning it left the connecting
     // client stuck — confirmed live as a 1006 abnormal-closure failure on
     // every connection attempt.
-    this.handleSession(server, steamId, name).catch((error) => {
+    this.handleSession(server, steamId, name, requestedRoom).catch((error) => {
       console.error('Chat session setup failed:', error.message);
     });
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  async handleSession(webSocket, steamId, name) {
+  async handleSession(webSocket, steamId, name, room) {
     webSocket.accept();
 
     if (this.messages === null) {
@@ -1986,6 +2029,41 @@ export class ChatRoom {
       // the site, and reads/writes here are local to this one instance.
       await this.state.storage.put('messages', this.messages);
       this.broadcast({ type: 'message', message });
+
+      // @ping — only the keyword matching THIS room (faction-<id>'s own
+      // @red/@green/@blue) counts; the message still sends normally
+      // either way, this just decides whether the extra ping broadcast
+      // also fires. Rate-limited per player via a KV timestamp — not
+      // this DO's own storage, since the cooldown needs to be shared
+      // across all 3 faction rooms a player could conceivably reach
+      // (today just the one they're a member of, but one shared clock
+      // either way is simpler than per-room state).
+      const pingKeyword = FACTION_PING_KEYWORDS[room];
+      if (pingKeyword && text.toLowerCase().includes(pingKeyword) && this.env.PARKED_KV) {
+        try {
+          const playtimeData = await readFactionPlaytimeIndex(this.env);
+          const minutes = playtimeData.totals[steamId] || 0;
+          const cooldownMs = minutes >= FACTION_PING_VETERAN_MINUTES
+            ? FACTION_PING_VETERAN_COOLDOWN_MS
+            : FACTION_PING_COOLDOWN_MS;
+          const cooldownKey = `faction_ping_cooldown:${steamId}`;
+          const cooldownRaw = await this.env.PARKED_KV.get(cooldownKey);
+          const lastPingAt = cooldownRaw ? JSON.parse(cooldownRaw)?.lastPingAt || 0 : 0;
+          const elapsed = Date.now() - lastPingAt;
+          if (elapsed >= cooldownMs) {
+            await this.env.PARKED_KV.put(cooldownKey, JSON.stringify({ lastPingAt: Date.now() }));
+            this.broadcast({ type: 'ping', fromSteamId: steamId, fromName: name });
+          } else {
+            const waitMin = Math.ceil((cooldownMs - elapsed) / 60000);
+            this.send(webSocket, {
+              type: 'error',
+              message: `Your message sent, but the ping didn't — you can ping again in about ${waitMin} minute${waitMin === 1 ? '' : 's'}.`,
+            });
+          }
+        } catch (error) {
+          console.error('Faction ping check failed:', error.message);
+        }
+      }
     });
 
     const dropSession = () => {
@@ -5293,12 +5371,14 @@ export default {
         const minutes = playtimeData.totals[steamId] || 0;
         const rank = factionRankForMinutes(member.factionId, minutes);
         const faction = FACTIONS[member.factionId];
+        const onlineData = await readFactionOnlineIndex(env);
         return json({
           factionId: member.factionId,
           factionName: faction?.name || member.factionId,
           joinedAt: member.joinedAt,
           swapsRemaining: Math.max(0, FACTION_SWAP_LIFETIME_LIMIT - (member.swapsUsed || 0)),
           minutes,
+          onlineCount: onlineData.counts[member.factionId] ?? 0,
           rankTitle: rank?.title || null,
           nextRankTitle: rank?.nextTitle || null,
           minutesToNext: rank?.nextThreshold != null ? Math.max(0, rank.nextThreshold - minutes) : null,

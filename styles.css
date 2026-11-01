@@ -3745,17 +3745,21 @@ body[data-faction="mosasaur"]::before {
   background: radial-gradient(circle at 50% 0%, rgba(31, 111, 214, 0.14), transparent 60%);
 }
 
-/* Factions AND Warzone tabs — everyone sees this, faction or not. Swaps
-   the whole fixed body background (same background-size/position/
-   attachment body already uses for its default forest art, just a
-   different image) instead of only painting each tab's own tab-panel
-   box — that approach left the old forest background visible in the
-   margins on either side of the centered content column. script.js sets
-   document.body.dataset.activeTab on every tab switch. Inner panels use
-   --panel-strong (near-opaque) already, so no extra overlay is needed
-   to keep their text legible over the art. */
+/* Factions, Warzone, AND Skin Lab tabs — everyone sees this, faction or
+   not. Swaps the whole fixed body background (same background-size/
+   position/attachment body already uses for its default forest art,
+   just a different image) instead of only painting each tab's own
+   tab-panel box — that approach left the old forest background visible
+   in the margins on either side of the centered content column.
+   script.js sets document.body.dataset.activeTab on every tab switch.
+   Skin Lab deliberately gets just this plain background, not the
+   faction-accent tinting below (it has no faction concept) — same art,
+   always, every time that tab is open. Inner panels use --panel-strong
+   (near-opaque) already, so no extra overlay is needed to keep their
+   text legible over the art. */
 body[data-active-tab="factions"],
-body[data-active-tab="warzone"] {
+body[data-active-tab="warzone"],
+body[data-active-tab="skin-lab"] {
   background-image: linear-gradient(rgba(4, 6, 10, 0.3), rgba(4, 6, 10, 0.42)), url('assets/logo/levels_new_background.webp');
 }
 

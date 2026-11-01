@@ -1493,6 +1493,35 @@ let currentChatRoom = 'global';
 // own load — to catch up before hiding it).
 const chatFriendRequestsSentTo = new Set();
 
+// Faction @ping sound — a plain Web Audio beep rather than an audio
+// asset file, so there's nothing to load/fail to load. Browsers block
+// audio until a user gesture has happened on the page at least once;
+// since this only ever fires in response to a WebSocket message (never
+// on page load), by the time it's reachable the player has already
+// interacted with the page (opened chat, sent a message, etc.), so this
+// doesn't need its own unlock step.
+const playFactionPingSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.18);
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.5);
+    oscillator.addEventListener('ended', () => ctx.close());
+  } catch (error) {
+    console.debug('Faction ping sound failed:', error);
+  }
+};
+
 const renderChatMessages = () => {
   if (!chatMessages) return;
   const wasScrolledToBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 40;
@@ -1838,6 +1867,12 @@ const connectChatSocket = async () => {
       cachedChatMessages = cachedChatMessages.filter((m) => m.id !== data.messageId);
       renderChatMessages();
       renderWebsiteChatLog();
+    } else if (data.type === 'ping' && data.fromName) {
+      // Faction @ping (typing @red/@green/@blue in that faction's own
+      // chat room) — broadcast to everyone connected to that room,
+      // sender included.
+      playFactionPingSound();
+      showToast(`📢 ${data.fromName} pinged the faction!`);
     } else if (data.type === 'error' && data.message) {
       // e.g. "you're timed out from chat until ..." — sent back to just
       // the sender, never broadcast.
@@ -1938,6 +1973,14 @@ const updateChatRoomTabsVisibility = async () => {
   if (activeTab?.hidden) switchChatRoom('global');
 };
 
+// Mirrors FACTION_PING_KEYWORDS in bridge-worker.js — display copy only,
+// the real per-room keyword match happens server-side in ChatRoom.
+const FACTION_PING_KEYWORDS = {
+  'faction-carcharo': '@red',
+  'faction-dromaeosaur': '@green',
+  'faction-mosasaur': '@blue',
+};
+
 const switchChatRoom = (room) => {
   if (room === currentChatRoom) return;
   currentChatRoom = room;
@@ -1948,6 +1991,12 @@ const switchChatRoom = (room) => {
   // color (see styles.css's .chat-sidebar[data-active-room="..."]) —
   // global has no matching rule, so it stays the plain gold scheme.
   if (chatSidebar) chatSidebar.dataset.activeRoom = room;
+  const pingHint = document.querySelector('[data-chat-ping-hint]');
+  const pingKeyword = FACTION_PING_KEYWORDS[room];
+  if (pingHint) {
+    pingHint.hidden = !pingKeyword;
+    if (pingKeyword) pingHint.textContent = `Type ${pingKeyword} to ping online faction members (10 min cooldown, 3 min after 60h played).`;
+  }
   cachedChatMessages = [];
   renderChatMessages();
   disconnectChatSocket();
@@ -4525,6 +4574,11 @@ const renderFactionStatus = (data) => {
     nextRankEl.textContent = data.nextRankTitle
       ? `${data.nextRankTitle} — ${formatMinutesAsHours(data.minutesToNext)} to go`
       : 'Max rank reached';
+  }
+  const onlineCountEl = document.querySelector('[data-faction-online-count]');
+  if (onlineCountEl) {
+    const count = data.onlineCount ?? 0;
+    onlineCountEl.textContent = `${count} member${count === 1 ? '' : 's'}`;
   }
   renderFactionRankTable(data.ranks);
 };
