@@ -404,6 +404,39 @@ body::before {
   text-underline-offset: 3px;
 }
 
+/* Each faction's own tab label is colored and shimmers in that
+   faction's hue, always — not just while active — so the 3 rooms read
+   apart at a glance. Same text-gradient-clip shimmer mechanism as the
+   splash screen's .splash-name-sparkle (reusing @keyframes
+   splash-name-shimmer), just a per-faction gradient instead of gold.
+   -webkit-text-fill-color wins over .active's plain `color` above in
+   any browser that supports background-clip:text, so active state
+   still reads via its underline without losing the color. */
+.chat-room-tab[data-chat-room="faction-carcharo"] {
+  background: linear-gradient(90deg, #d13d4d 0%, color-mix(in srgb, #d13d4d 40%, white) 25%, #d13d4d 50%, color-mix(in srgb, #d13d4d 40%, white) 75%, #d13d4d 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: splash-name-shimmer 2.6s linear infinite;
+}
+.chat-room-tab[data-chat-room="faction-dromaeosaur"] {
+  background: linear-gradient(90deg, #2f9e44 0%, color-mix(in srgb, #2f9e44 40%, white) 25%, #2f9e44 50%, color-mix(in srgb, #2f9e44 40%, white) 75%, #2f9e44 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: splash-name-shimmer 2.6s linear infinite;
+}
+.chat-room-tab[data-chat-room="faction-mosasaur"] {
+  background: linear-gradient(90deg, #1f6fd6 0%, color-mix(in srgb, #1f6fd6 40%, white) 25%, #1f6fd6 50%, color-mix(in srgb, #1f6fd6 40%, white) 75%, #1f6fd6 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: splash-name-shimmer 2.6s linear infinite;
+}
+
 .chat-close {
   border: none;
   background: none;
