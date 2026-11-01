@@ -3761,21 +3761,35 @@ body[data-faction="mosasaur"]::before {
   background: radial-gradient(circle at 50% 0%, rgba(31, 111, 214, 0.14), transparent 60%);
 }
 
-/* Factions, Warzone, AND Skin Lab tabs — everyone sees this, faction or
-   not. Swaps the whole fixed body background (same background-size/
-   position/attachment body already uses for its default forest art,
-   just a different image) instead of only painting each tab's own
-   tab-panel box — that approach left the old forest background visible
-   in the margins on either side of the centered content column.
-   script.js sets document.body.dataset.activeTab on every tab switch.
-   Skin Lab deliberately gets just this plain background, not the
-   faction-accent tinting below (it has no faction concept) — same art,
-   always, every time that tab is open. Inner panels use --panel-strong
-   (near-opaque) already, so no extra overlay is needed to keep their
-   text legible over the art. */
+/* Every tab EXCEPT Home/Map/Support/Community (hub/map/tickets/
+   community) — those 4 keep the site's default forest background per
+   request, every other tab swaps the whole fixed body background (same
+   background-size/position/attachment body already uses for its
+   default forest art, just a different image) instead of only painting
+   each tab's own tab-panel box — that approach left the old forest
+   background visible in the margins on either side of the centered
+   content column. script.js sets document.body.dataset.activeTab on
+   every tab switch. Only Factions/Warzone get the faction-accent
+   tinting below on top of this — everyone else (Skin Lab included)
+   gets just this plain background, since they have no faction concept.
+   Inner panels use --panel-strong (near-opaque) already, so no extra
+   overlay is needed to keep their text legible over the art. */
 body[data-active-tab="factions"],
 body[data-active-tab="warzone"],
-body[data-active-tab="skin-lab"] {
+body[data-active-tab="skin-lab"],
+body[data-active-tab="skins"],
+body[data-active-tab="admin-panel"],
+body[data-active-tab="owner"],
+body[data-active-tab="inventory"],
+body[data-active-tab="live-dino"],
+body[data-active-tab="transfer-logs"],
+body[data-active-tab="profile"],
+body[data-active-tab="dev-tools"],
+body[data-active-tab="staff"],
+body[data-active-tab="overview"],
+body[data-active-tab="features"],
+body[data-active-tab="gallery"],
+body[data-active-tab="submit"] {
   background-image: linear-gradient(rgba(4, 6, 10, 0.3), rgba(4, 6, 10, 0.42)), url('assets/logo/levels_new_background.webp');
 }
 
