@@ -1925,6 +1925,10 @@ const switchChatRoom = (room) => {
   document.querySelectorAll('[data-chat-room]').forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.chatRoom === room);
   });
+  // Faction rooms tint the sidebar background toward that faction's
+  // color (see styles.css's .chat-sidebar[data-active-room="..."]) —
+  // global has no matching rule, so it stays the plain gold scheme.
+  if (chatSidebar) chatSidebar.dataset.activeRoom = room;
   cachedChatMessages = [];
   renderChatMessages();
   disconnectChatSocket();

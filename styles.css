@@ -377,7 +377,7 @@ body::before {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: 4px 8px;
 }
 
 .chat-room-tab {
@@ -388,6 +388,14 @@ body::before {
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
+}
+
+/* Barrier between each room tab — not needed after the last one. Own
+   padding-right (on top of .chat-room-tabs' own gap) so the divider
+   line doesn't sit flush against the next tab's text. */
+.chat-room-tab:not(:last-of-type) {
+  padding-right: 10px;
+  border-right: 1px solid var(--line-strong);
 }
 
 .chat-room-tab.active {
@@ -759,6 +767,24 @@ body::before {
   --muted: #4a3a1c;
   --line: rgba(0, 0, 0, 0.2);
   --line-strong: rgba(0, 0, 0, 0.4);
+}
+
+/* Faction chat rooms tint the sidebar toward that faction's color —
+   blended with the sidebar's own gold base (not the raw accent) so the
+   existing dark-brown text stays legible. Community Chat (global,
+   script.js never sets data-active-room for it) keeps the plain gold
+   above untouched, per request. */
+.chat-sidebar[data-active-room="faction-carcharo"] {
+  --chat-bg-solid: color-mix(in srgb, #d13d4d 45%, #d8bf7d);
+  --panel-strong: color-mix(in srgb, #d13d4d 45%, #c9ac5f);
+}
+.chat-sidebar[data-active-room="faction-dromaeosaur"] {
+  --chat-bg-solid: color-mix(in srgb, #2f9e44 45%, #d8bf7d);
+  --panel-strong: color-mix(in srgb, #2f9e44 45%, #c9ac5f);
+}
+.chat-sidebar[data-active-room="faction-mosasaur"] {
+  --chat-bg-solid: color-mix(in srgb, #1f6fd6 45%, #d8bf7d);
+  --panel-strong: color-mix(in srgb, #1f6fd6 45%, #c9ac5f);
 }
 
 .friends-toggle,
