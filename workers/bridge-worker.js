@@ -969,13 +969,15 @@ const readFactionOnlineIndex = async (env) => {
   }
 };
 
-// Captured live in-game and given directly, well before the War Zone
-// Coordinates form's own sanctuary fields (which are pre-filled with
-// these exact same numbers) ever got submitted by anyone — used as the
-// baseline here so Sanctuary Teleport works immediately without
-// depending on an owner separately re-entering them through the UI. An
-// explicit save via that form still overrides these, per faction
-// individually (see the merge in readWarZonesIndex below).
+// Captured live in-game and given directly — these ALWAYS win over
+// whatever's in war_zones:index's own sanctuaries, deliberately (see the
+// override direction in readWarZonesIndex below), since stale/test data
+// saved through the War Zone Coordinates form earlier was confirmed
+// live to be the actual cause of Sanctuary Teleport landing players at
+// the wrong spot — the merge used to let THAT stored data win, which is
+// backwards from what was actually wanted. Change these constants
+// directly if the real sanctuary ever needs to move; the form's own
+// sanctuary fields no longer have any effect.
 const DEFAULT_FACTION_SANCTUARIES = {
   carcharo: { x: 304450.792, y: -395191.048, z: 22343.062 },
   dromaeosaur: { x: -321205.446, y: 102218.296, z: 22151.242 },
@@ -993,7 +995,7 @@ const readWarZonesIndex = async (env) => {
       movingZoneStart: parsed.movingZoneStart || null,
       movingZoneEnd: parsed.movingZoneEnd || null,
       zoneRadius: parsed.zoneRadius || 4000,
-      sanctuaries: { ...DEFAULT_FACTION_SANCTUARIES, ...(parsed.sanctuaries || {}) },
+      sanctuaries: { ...(parsed.sanctuaries || {}), ...DEFAULT_FACTION_SANCTUARIES },
     };
   } catch {
     return { staticZoneA: null, staticZoneB: null, movingZoneStart: null, movingZoneEnd: null, zoneRadius: 4000, sanctuaries: { ...DEFAULT_FACTION_SANCTUARIES } };
