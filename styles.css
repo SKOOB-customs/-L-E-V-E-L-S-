@@ -3689,6 +3689,14 @@ body[data-active-tab="warzone"] #headerSteamBtn {
   color: var(--accent);
 }
 
+/* The tab-switcher bar itself (the box the Home/Skins/Map/... buttons
+   sit in) — a stronger tint than the content panels above since this
+   is the actual visible ask, not just ambient theming. */
+body[data-active-tab="factions"] .tab-switcher,
+body[data-active-tab="warzone"] .tab-switcher {
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel-strong));
+}
+
 .warzone-entry-box {
   text-align: center;
   display: flex;
