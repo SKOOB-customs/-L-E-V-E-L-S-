@@ -3574,16 +3574,17 @@ body[data-faction="mosasaur"]::before {
   background: radial-gradient(circle at 50% 0%, rgba(31, 111, 214, 0.14), transparent 60%);
 }
 
-/* Factions tab only — everyone sees this, faction or not. Inner panels
-   use --panel-strong (near-opaque) already, so no extra overlay is
-   needed to keep their text legible over the art. */
-#factions.tab-panel {
-  border-radius: 18px;
-  padding: 24px;
+/* Factions tab only — everyone sees this, faction or not. Swaps the
+   whole fixed body background (same background-size/position/attachment
+   body already uses for its default forest art, just a different image)
+   instead of only painting #factions' own tab-panel box — that approach
+   left the old forest background visible in the margins on either side
+   of the centered content column. script.js sets
+   document.body.dataset.activeTab on every tab switch. Inner panels use
+   --panel-strong (near-opaque) already, so no extra overlay is needed
+   to keep their text legible over the art. */
+body[data-active-tab="factions"] {
   background-image: linear-gradient(rgba(4, 6, 10, 0.3), rgba(4, 6, 10, 0.42)), url('assets/logo/levels_new_background.webp');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
 }
 
 .warzone-entry-box {

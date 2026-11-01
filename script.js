@@ -318,6 +318,12 @@ const activateTab = (tabName) => {
     button.classList.toggle('active', isActive);
   });
 
+  // Lets the Factions tab swap the site's whole fixed body background
+  // (not just its own tab-panel box) to the new LEVELS art — the old
+  // approach only covered the tab-panel's own padded box, leaving the
+  // default forest background visible in the margins on either side.
+  document.body.dataset.activeTab = tabName;
+
   tabPanels.forEach((panel) => {
     const isActive = panel.dataset.tab === tabName;
     panel.classList.toggle('is-active', isActive);
