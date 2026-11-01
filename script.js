@@ -371,17 +371,22 @@ if (tabButtons.length) {
   activateTab(hasHashTab ? hashTab : 'hub');
 }
 
-// Admin Panel's own small nested tab row (Strikes/Comp/Recovery/Glitch
-// Skins/Currency) — deliberately separate from the top-level
-// tabButtons/tabPanels/activateTab machinery above, since this switcher
-// only ever needs to toggle panels within the already-active Admin
-// Panel tab.
-document.querySelectorAll('.admin-subtab-button').forEach((button) => {
+// Small nested tab rows inside a top-level tab (Admin Panel's Strikes/
+// Comp/Recovery/Glitch Skins/Currency, Owner's Skin Library/Passkeys/
+// Logs/Factions) — deliberately separate from the top-level
+// tabButtons/tabPanels/activateTab machinery above, since these
+// switchers only ever need to toggle panels within their own group.
+// Scoped to the closest .inner-subtab-group so multiple independent
+// switchers can coexist on the page without one's click affecting
+// another's buttons/panels.
+document.querySelectorAll('.inner-subtab-button').forEach((button) => {
   button.addEventListener('click', () => {
-    const target = button.dataset.adminSubtab;
-    document.querySelectorAll('.admin-subtab-button').forEach((b) => b.classList.toggle('active', b === button));
-    document.querySelectorAll('[data-admin-subtab-panel]').forEach((panel) => {
-      panel.hidden = panel.dataset.adminSubtabPanel !== target;
+    const group = button.closest('.inner-subtab-group');
+    if (!group) return;
+    const target = button.dataset.innerSubtab;
+    group.querySelectorAll('.inner-subtab-button').forEach((b) => b.classList.toggle('active', b === button));
+    group.querySelectorAll('[data-inner-subtab-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.innerSubtabPanel !== target;
     });
   });
 });
