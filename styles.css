@@ -30,13 +30,96 @@
   box-sizing: border-box;
 }
 
+/* 2-second intro, plays before the real splash below — a one-shot reveal
+   of the LEVELS logo gif (walp.gif) with soft/vignetted edges that hold
+   for the first 0.75s, then dissolve (edges sharpen) while the whole
+   image fades out over the next 1.25s, handing off to the splash
+   overlay already waiting underneath (same self-dismissing-via-pure-
+   CSS-animation approach — see that overlay's own comment — so this
+   can't get stuck either). Higher z-index than .splash-overlay so it
+   visually covers it for these first 2 seconds; .splash-overlay's own
+   animation-delay below keeps its fade-out from starting until this one
+   is done, which is what actually makes the whole loading screen
+   slightly longer rather than just resequencing the same total time. */
+.splash-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  animation: splash-intro-dismiss 2s ease forwards;
+}
+
+@keyframes splash-intro-dismiss {
+  0%, 99.9% {
+    opacity: 1;
+    visibility: visible;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.splash-intro-frame {
+  position: relative;
+  width: min(560px, 88vw);
+}
+
+.splash-intro-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 16px;
+  opacity: 0;
+  animation: splash-intro-image-fade 2s ease forwards;
+}
+
+/* 0-12%(~0.24s) fade in, held through 37.5%(0.75s), then fades fully
+   out by 100%(2s) — the "fully fades" half of the request. */
+@keyframes splash-intro-image-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  37.5% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Vignette overlay, same page-background color at its edges as the
+   image's own backdrop so the image's edges read as "faded into the
+   background" rather than hard-cropped. Held fully opaque (vignette
+   visible) through 0.75s, then dissolves to 0 (edges "unfade" to fully
+   sharp) by 2s — the "slowly unfades" half of the request, running in
+   parallel with the image's own fade-out above. */
+.splash-intro-vignette {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background: radial-gradient(circle, transparent 38%, var(--bg) 78%);
+  animation: splash-intro-vignette-fade 2s ease forwards;
+}
+
+@keyframes splash-intro-vignette-fade {
+  0%, 37.5% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Brief splash shown on every real page load (reload, a fresh visit, the
    redirect back from Steam/Discord login — anything that's an actual
    navigation, not a same-page tab switch). Self-dismissing via a pure CSS
    animation rather than JS setting a timer, so it can never get stuck
    covering the site if script.js is slow to load or errors — the random
    admin/owner line (script.js, SPLASH_MESSAGES) is a progressive
-   enhancement on top of an overlay that already hides itself on its own. */
+   enhancement on top of an overlay that already hides itself on its own.
+   animation-delay matches .splash-intro's own 2s runtime above, so this
+   overlay's fade-out (already sitting there the whole time, just hidden
+   under the intro's higher z-index) only starts once the intro is gone. */
 .splash-overlay {
   position: fixed;
   inset: 0;
@@ -47,7 +130,7 @@
   justify-content: center;
   gap: 18px;
   background: var(--bg);
-  animation: splash-dismiss 4.35s ease forwards;
+  animation: splash-dismiss 4.35s ease 2s forwards;
 }
 
 @keyframes splash-dismiss {
