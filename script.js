@@ -4687,29 +4687,63 @@ const checkFactionStatus = async () => {
 };
 
 // ── Factions tab: owner/senior admin tools ──
+// Groups inputs by their point path (e.g. "staticZoneA",
+// "sanctuaries.carcharo") so a point only makes it into the payload
+// once all 3 of its x/y/z fields are actually filled in — an incomplete
+// point is omitted entirely rather than silently sent as 0,0,0. Lets an
+// owner save just the sanctuary coordinates (already captured) without
+// needing the hotzone points ready yet, or vice versa — the Worker
+// merges whatever's included here with whatever's already saved,
+// instead of requiring the whole form at once (see
+// /faction-admin-set-zones's own comment). The real bug this fixes:
+// every field used to be `required`, so the form couldn't be submitted
+// at all — including the sanctuary coordinates that WERE ready — until
+// hotzones nobody had captured yet were filled in too, which is why
+// Sanctuary Teleport kept saying "hasn't been set yet" even after the
+// sanctuary fields above looked pre-filled.
 const collectFactionZonePayload = () => {
   const payload = {};
+  const points = {};
   document.querySelectorAll('[data-faction-zone]').forEach((input) => {
-    const path = input.dataset.factionZone.split('.');
+    const key = input.dataset.factionZone;
+    if (key === 'zoneRadius') {
+      if (input.value.trim() !== '') payload.zoneRadius = Number(input.value);
+      return;
+    }
+    const parts = key.split('.');
+    const axis = parts.pop();
+    const pointKey = parts.join('.');
+    points[pointKey] = points[pointKey] || {};
+    points[pointKey][axis] = input.value.trim();
+  });
+  Object.entries(points).forEach(([pointKey, axes]) => {
+    const { x, y, z } = axes;
+    if (!x || !y || !z) return;
+    const path = pointKey.split('.');
     let node = payload;
     for (let i = 0; i < path.length - 1; i += 1) {
       node[path[i]] = node[path[i]] || {};
       node = node[path[i]];
     }
-    node[path[path.length - 1]] = Number(input.value);
+    node[path[path.length - 1]] = { x: Number(x), y: Number(y), z: Number(z) };
   });
   return payload;
 };
 
 document.querySelector('[data-faction-zones-form]')?.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const payload = collectFactionZonePayload();
+  if (Object.keys(payload).length === 0) {
+    showToast('Fill in at least one complete point (all 3 of its X/Y/Z) before saving.');
+    return;
+  }
   const submitBtn = event.target.querySelector('button[type="submit"]');
   if (submitBtn) submitBtn.disabled = true;
   try {
     const response = await fetch('/api/faction-admin-set-zones', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(collectFactionZonePayload()),
+      body: JSON.stringify(payload),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {

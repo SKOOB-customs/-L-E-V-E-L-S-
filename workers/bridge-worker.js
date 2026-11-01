@@ -5628,24 +5628,45 @@ export default {
       if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
 
       const isPoint = (p) => p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
-      if (!isPoint(staticZoneA) || !isPoint(staticZoneB) || !isPoint(movingZoneStart) || !isPoint(movingZoneEnd)) {
-        return json({ error: 'staticZoneA/staticZoneB/movingZoneStart/movingZoneEnd each need numeric x/y/z' }, 400);
+
+      // Partial saves allowed — an owner with only the sanctuary
+      // coordinates captured so far (or only the hotzones) can save
+      // just that part. Whatever's included here merges into the
+      // existing war_zones:index rather than requiring the whole form
+      // at once — the real bug this fixes: this route used to demand
+      // all 4 hotzone points AND all 3 sanctuaries together, so saving
+      // the sanctuary coordinates (already captured) was blocked by
+      // hotzone points nobody had captured yet, which is why Sanctuary
+      // Teleport kept saying "hasn't been set yet" even though the
+      // sanctuary fields looked pre-filled in the form.
+      const existing = await readWarZonesIndex(env);
+      const updated = { ...existing };
+
+      const hotzonePoints = { staticZoneA, staticZoneB, movingZoneStart, movingZoneEnd };
+      for (const [key, point] of Object.entries(hotzonePoints)) {
+        if (point === undefined) continue;
+        if (!isPoint(point)) return json({ error: `${key} needs numeric x/y/z` }, 400);
+        updated[key] = { x: point.x, y: point.y, z: point.z };
       }
-      const sanctuaryPoints = {};
-      for (const factionId of FACTION_IDS) {
-        const p = sanctuaries?.[factionId];
-        if (!isPoint(p)) return json({ error: `Missing sanctuary coordinates for ${factionId}` }, 400);
-        sanctuaryPoints[factionId] = { x: p.x, y: p.y, z: p.z };
+
+      if (zoneRadius !== undefined) {
+        const radius = Number(zoneRadius);
+        if (Number.isFinite(radius) && radius > 0) updated.zoneRadius = radius;
       }
+
+      if (sanctuaries !== undefined) {
+        const sanctuaryPoints = { ...existing.sanctuaries };
+        for (const factionId of FACTION_IDS) {
+          const p = sanctuaries?.[factionId];
+          if (p === undefined) continue;
+          if (!isPoint(p)) return json({ error: `Sanctuary coordinates for ${factionId} need numeric x/y/z` }, 400);
+          sanctuaryPoints[factionId] = { x: p.x, y: p.y, z: p.z };
+        }
+        updated.sanctuaries = sanctuaryPoints;
+      }
+
       try {
-        await putIndexIfChanged(env, 'war_zones:index', {
-          staticZoneA: { x: staticZoneA.x, y: staticZoneA.y, z: staticZoneA.z },
-          staticZoneB: { x: staticZoneB.x, y: staticZoneB.y, z: staticZoneB.z },
-          movingZoneStart: { x: movingZoneStart.x, y: movingZoneStart.y, z: movingZoneStart.z },
-          movingZoneEnd: { x: movingZoneEnd.x, y: movingZoneEnd.y, z: movingZoneEnd.z },
-          zoneRadius: Number(zoneRadius) || 4000,
-          sanctuaries: sanctuaryPoints,
-        });
+        await putIndexIfChanged(env, 'war_zones:index', updated);
         return json({ ok: true });
       } catch (error) {
         return json({ error: error.message || 'Zone save failed' }, 502);
