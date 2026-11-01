@@ -4095,9 +4095,6 @@ const checkSkinLabAccess = async () => {
     const access = !!data.access;
     if (tabButton) tabButton.hidden = !access;
     if (panel) panel.hidden = !access;
-    if (access) {
-      loadSkinLabLibraryTrash();
-    }
   } catch (error) {
     console.debug('Skin Lab access check failed:', error);
   }
@@ -5892,59 +5889,10 @@ document.querySelector('[data-skin-library-save-changes]')?.addEventListener('cl
 // Create-only by design: this account (see checkSkinLabAccess) can add
 // brand-new named skins to the shared skin_library:index data, but has
 // no visibility into what already exists there — no "edit an existing
-// skin" picker, no list of saved skins, no per-skin delete. Same shared
-// data the Owner tab's Skin Library manages, read/written through the
-// separate /api/skin-lab-* routes so this account never needs the Admin
-// Panel/Owner passkey system.
-let skinLabTrashCache = [];
-
-const loadSkinLabLibraryTrash = async () => {
-  const selectEl = document.querySelector('[data-skinlab-trash-select]');
-  if (!selectEl) return;
-  try {
-    const response = await fetch('/api/skin-lab-library-trash');
-    const data = await response.json();
-    if (!response.ok || !Array.isArray(data.trash)) return;
-    skinLabTrashCache = data.trash;
-    selectEl.innerHTML = '<option value="">— none —</option>' + skinLabTrashCache.map((entry) => {
-      const when = entry.deletedAt ? new Date(entry.deletedAt).toLocaleString() : '';
-      return `<option value="${entry.id}">${String(entry.name).replace(/</g, '&lt;')} — deleted ${when}</option>`;
-    }).join('');
-  } catch (error) {
-    console.debug('Skin Lab library trash load failed:', error);
-  }
-};
-
-document.querySelector('[data-skinlab-trash-restore]')?.addEventListener('click', async (event) => {
-  const selectEl = document.querySelector('[data-skinlab-trash-select]');
-  const id = selectEl?.value;
-  if (!id) {
-    showToast('Pick a deleted skin to restore.');
-    return;
-  }
-  const button = event.target;
-  button.disabled = true;
-  try {
-    const response = await fetch('/api/skin-lab-library-restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      showToast(data.error || 'Could not restore that skin.');
-      return;
-    }
-    showToast(`Restored "${data.skin?.name || 'skin'}".`);
-    loadSkinLabLibraryTrash();
-  } catch (error) {
-    console.debug('Skin Lab library restore failed:', error);
-    showToast('Could not reach the server right now.');
-  } finally {
-    button.disabled = false;
-  }
-});
-
+// skin" picker, no list of saved skins, no per-skin delete, no restore-
+// from-trash. Same shared data the Owner tab's Skin Library manages,
+// read/written through the separate /api/skin-lab-* routes so this
+// account never needs the Admin Panel/Owner passkey system.
 const collectSkinLabColors = () => {
   let colors;
   const jsonText = document.querySelector('[data-skinlab-library-json]')?.value.trim() || '';
