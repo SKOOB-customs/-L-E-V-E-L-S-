@@ -297,6 +297,33 @@ const grantCurrencyToPlayer = async (env, targetSteamId, amount) => {
   return newBalance;
 };
 
+// Used by Skin Lab's paid-save gate (see SKIN_LAB_PAID_SAVE_COST's own
+// comment) — checks the balance is actually sufficient first (unlike
+// grantCurrencyToPlayer, which is only ever called with positive admin
+// grants and has no reason to reject), then reuses
+// grantCurrencyToPlayer's exact file-read/write mechanics with a
+// negative amount to apply the deduction. Throws an Error with
+// code: 'INSUFFICIENT_BALANCE' rather than returning a sentinel, so a
+// caller can't accidentally ignore it the way a falsy return value
+// might get missed.
+const deductCurrencyFromPlayer = async (env, steamId, amount) => {
+  const currencyPath = `${PARKED_SAVED_DIR}/currency_${steamId}.json`;
+  let currentBalance = 0;
+  try {
+    const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(currencyPath)}`);
+    const data = JSON.parse(await response.text());
+    if (typeof data?.balance === 'number') currentBalance = data.balance;
+  } catch {
+    // no existing file yet — balance is 0, which will fail the check below
+  }
+  if (currentBalance < amount) {
+    const error = new Error('Not enough LeveLs Coins');
+    error.code = 'INSUFFICIENT_BALANCE';
+    throw error;
+  }
+  return grantCurrencyToPlayer(env, steamId, -amount);
+};
+
 const syncCurrency = async (env) => {
   const files = await listCurrencyFiles(env);
   const balances = {};
@@ -1287,6 +1314,51 @@ const hasSkinLabAccess = async (env, steamId) => {
   const trial = await readSkinLabTrial(env, steamId);
   if (!trial?.activatedAt) return false;
   return Date.now() < trial.activatedAt + SKIN_LAB_TRIAL_DURATION_MS;
+};
+
+// ── Skin Lab's paid-save gate ──
+//
+// Every account's first-ever Skin Lab save is free. That skin stays
+// "pending" (pendingFirstSkins: { [skinName]: steamId }) until someone
+// actually spends a charge of it (/skin-use-live or /skin-attach-parked
+// — see markSkinLabFirstSkinUsedIfPending, called from both) — the
+// moment that happens, this account's entry flips to
+// paidModeActive: true, and every save after that costs
+// SKIN_LAB_PAID_SAVE_COST LeveLs Coins (deducted via
+// deductCurrencyFromPlayer, rejected with 402 if they can't afford it).
+// Free saves made before that first skin gets used don't themselves
+// start a new "pending" countdown — only the original first skin's
+// usage matters.
+const SKIN_LAB_PAID_SAVE_COST = 999;
+
+const readSkinLabBillingIndex = async (env) => {
+  if (!env.PARKED_KV) return { accounts: {}, pendingFirstSkins: {} };
+  try {
+    const raw = await env.PARKED_KV.get('skin_lab_billing:index');
+    if (!raw) return { accounts: {}, pendingFirstSkins: {} };
+    const parsed = JSON.parse(raw);
+    return { accounts: parsed.accounts || {}, pendingFirstSkins: parsed.pendingFirstSkins || {} };
+  } catch {
+    return { accounts: {}, pendingFirstSkins: {} };
+  }
+};
+
+// Called from every route that actually spends a skin charge — not
+// just Skin Lab's own routes, since a skin someone made in Skin Lab can
+// be used by anyone it was granted to (via the Admin Panel's Glitch
+// Skins form), not only its creator.
+const markSkinLabFirstSkinUsedIfPending = async (env, skinName) => {
+  if (!env.PARKED_KV || !skinName) return;
+  try {
+    const billing = await readSkinLabBillingIndex(env);
+    const pendingSteamId = billing.pendingFirstSkins[skinName];
+    if (!pendingSteamId) return;
+    delete billing.pendingFirstSkins[skinName];
+    billing.accounts[pendingSteamId] = { ...(billing.accounts[pendingSteamId] || {}), paidModeActive: true };
+    await env.PARKED_KV.put('skin_lab_billing:index', JSON.stringify({ ...billing, updatedAt: Date.now() }));
+  } catch (error) {
+    console.error('Skin Lab first-skin-used check failed:', error.message);
+  }
 };
 
 // See the /moderation-log route's own comment for the full picture — this
@@ -3335,6 +3407,19 @@ export default {
       }
       try {
         const requestId = await requestSkinUse(env, steamId, skinCode);
+        // Best-effort (the function swallows its own errors), never
+        // blocks the actual use request — if this skin happens to be
+        // some Skin Lab account's still-pending first free skin, this is
+        // the trigger that flips them into paid mode for every save
+        // after this one (see markSkinLabFirstSkinUsedIfPending's own
+        // comment).
+        try {
+          const skins = await readSkinCharges(env, steamId);
+          const usedSkin = skins.find((entry) => entry.code === skinCode);
+          if (usedSkin?.name) await markSkinLabFirstSkinUsedIfPending(env, usedSkin.name);
+        } catch (error) {
+          console.error('Skin Lab first-skin-used lookup failed:', error.message);
+        }
         return json({ ok: true, requestId });
       } catch (error) {
         return json({ error: error.message || 'Skin use request failed' }, 502);
@@ -3429,17 +3514,25 @@ export default {
         return json({ error: 'Missing or invalid steamId' }, 400);
       }
       if (!env.PARKED_KV) {
-        return json({ access: true, permanent: false, trial: { activated: false, activatedAt: null, expiresAt: null, active: false } });
+        return json({
+          access: true,
+          permanent: false,
+          trial: { activated: false, activatedAt: null, expiresAt: null, active: false },
+          nextSaveCost: 0,
+        });
       }
       try {
         const permanent = SKIN_LAB_EXTRA_STEAM_IDS.includes(steamId);
         const trialRecord = await readSkinLabTrial(env, steamId);
         const activatedAt = trialRecord?.activatedAt || null;
         const expiresAt = activatedAt ? activatedAt + SKIN_LAB_TRIAL_DURATION_MS : null;
+        const billing = await readSkinLabBillingIndex(env);
+        const nextSaveCost = billing.accounts[steamId]?.paidModeActive ? SKIN_LAB_PAID_SAVE_COST : 0;
         return json({
           access: true,
           permanent,
           trial: { activated: !!activatedAt, activatedAt, expiresAt, active: !!(activatedAt && Date.now() < expiresAt) },
+          nextSaveCost,
         });
       } catch (error) {
         return json({ error: error.message || 'Skin Lab access check failed' }, 502);
@@ -3521,16 +3614,42 @@ export default {
       if (Object.keys(normalized).length === 0) {
         return json({ error: 'No valid color fields provided' }, 400);
       }
+      const trimmedName = name.trim().slice(0, 40);
+
+      // First-ever save for this account is free; once their first skin
+      // has actually been used (see markSkinLabFirstSkinUsedIfPending),
+      // every save after that costs SKIN_LAB_PAID_SAVE_COST — see this
+      // whole section's own comment above hasSkinLabAccess.
+      const billing = await readSkinLabBillingIndex(env);
+      const account = billing.accounts[requesterSteamId];
+      const isFirstEverSave = !account;
+      let chargedCost = 0;
+      if (!isFirstEverSave && account.paidModeActive) {
+        chargedCost = SKIN_LAB_PAID_SAVE_COST;
+        try {
+          await deductCurrencyFromPlayer(env, requesterSteamId, SKIN_LAB_PAID_SAVE_COST);
+        } catch (error) {
+          if (error.code === 'INSUFFICIENT_BALANCE') {
+            return json({ error: `Not enough LeveLs Coins — saving a new skin costs ${SKIN_LAB_PAID_SAVE_COST}.` }, 402);
+          }
+          return json({ error: error.message || 'Currency charge failed' }, 502);
+        }
+      }
+
       try {
         const raw = await env.PARKED_KV.get('skin_library:index');
         let library = {};
         if (raw) {
           try { library = JSON.parse(raw) || {}; } catch { library = {}; }
         }
-        const trimmedName = name.trim().slice(0, 40);
         library[trimmedName] = { colors: normalized, savedAt: Date.now(), savedBy: requesterSteamId };
         await env.PARKED_KV.put('skin_library:index', JSON.stringify(library));
-        return json({ ok: true, skin: { name: trimmedName, colors: normalized } });
+        if (isFirstEverSave) {
+          billing.accounts[requesterSteamId] = { paidModeActive: false };
+          billing.pendingFirstSkins[trimmedName] = requesterSteamId;
+          await env.PARKED_KV.put('skin_lab_billing:index', JSON.stringify({ ...billing, updatedAt: Date.now() }));
+        }
+        return json({ ok: true, skin: { name: trimmedName, colors: normalized }, cost: chargedCost });
       } catch (error) {
         return json({ error: error.message || 'Skin library save failed' }, 502);
       }
@@ -3848,6 +3967,9 @@ export default {
 
         await writeSkinCharges(env, steamId, remainingSkins);
         await writeParkedDinosArray(env, steamId, dinos);
+        // Best-effort (the function swallows its own errors) — see
+        // /skin-use-live's identical hook for why.
+        await markSkinLabFirstSkinUsedIfPending(env, skinEntry.name);
         return json({ ok: true, dino });
       } catch (error) {
         return json({ error: error.message || 'Skin attach failed' }, 502);

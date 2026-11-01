@@ -4261,6 +4261,12 @@ const renderSkinLabState = (data) => {
   const content = document.querySelector('[data-skin-lab-content]');
   const countdownEl = document.querySelector('[data-skin-lab-countdown]');
 
+  // Every account's first-ever save is free — the button only shows a
+  // nonzero cost once this account's first skin has actually been used
+  // by someone (see bridge-worker.js's markSkinLabFirstSkinUsedIfPending).
+  const saveCostEl = document.querySelector('[data-skinlab-save-cost]');
+  if (saveCostEl) saveCostEl.textContent = data.nextSaveCost ?? 0;
+
   clearInterval(skinLabCountdownInterval);
   skinLabCountdownInterval = null;
 
@@ -6239,7 +6245,9 @@ const saveSkinToSkinLab = async (buttonEl) => {
     if (!response.ok || !data.ok) {
       showToast(data.error || 'Could not save that skin.');
     } else {
-      showToast(`Saved "${name}" to the library.`);
+      showToast(data.cost
+        ? `Saved "${name}" to the library — ${data.cost.toLocaleString()} LC spent.`
+        : `Saved "${name}" to the library.`);
       document.querySelector('[data-skinlab-library-name]').value = '';
       document.querySelector('[data-skinlab-library-json]').value = SKIN_LAB_JSON_TEMPLATE;
       document.querySelectorAll('[data-skinlab-library-color]').forEach((input) => { input.value = '#808080'; });
@@ -6247,6 +6255,7 @@ const saveSkinToSkinLab = async (buttonEl) => {
       if (patternInput) patternInput.value = '';
       const variationInput = document.querySelector('[data-skinlab-library-skin-variation]');
       if (variationInput) variationInput.value = '';
+      if (data.cost) loadCurrencyBalance();
     }
   } catch (error) {
     console.debug('Skin Lab library save failed:', error);

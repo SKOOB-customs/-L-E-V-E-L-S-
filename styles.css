@@ -1181,6 +1181,22 @@ h6,
   animation: coin-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Small inline coin next to the Skin Lab save-cost number, not the
+   68px header-sized icon above. */
+.skin-lab-save-cost-icon {
+  width: 18px;
+  height: 18px;
+  margin: 0 0 0 2px;
+  vertical-align: -3px;
+  animation: none;
+}
+
+.skin-lab-save-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 @keyframes coin-idle-glimmer {
   0%, 100% {
     transform: translateY(0) translateX(0) rotate(0deg);
