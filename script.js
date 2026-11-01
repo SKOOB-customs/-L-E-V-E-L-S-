@@ -1776,6 +1776,19 @@ const connectChatSocket = async () => {
     chatConnectInFlight = false;
   }
 
+  // currentChatRoom can change while the fetch above was in flight (the
+  // user clicking a different tab before this one even finished) — this
+  // ticket is for a room nobody's looking at anymore. Opening it anyway
+  // was the actual bug behind "switching rooms sometimes doesn't load
+  // messages": this attempt would win, connect to the stale room, and
+  // the in-flight guard above would've silently dropped the real
+  // connect attempt for the room the user actually switched to. Retry
+  // immediately for whatever room is current now instead.
+  if (room !== currentChatRoom) {
+    connectChatSocket();
+    return;
+  }
+
   // Connects straight to the Worker's own workers.dev subdomain rather
   // than l-e-v-e-l-s.app's own routed path — confirmed live: the exact
   // same Durable Object code completes the WebSocket handshake perfectly
@@ -1798,6 +1811,12 @@ const connectChatSocket = async () => {
   chatSocketSteamId = profile.steamId;
 
   socket.addEventListener('message', (event) => {
+    // Guards against a reply arriving after this socket's been
+    // superseded by a newer connection (another rapid room switch) —
+    // without this, a late message from the OLD room could overwrite
+    // cachedChatMessages right after the new room's own history already
+    // rendered, making it look like messages "didn't load".
+    if (chatSocket !== socket) return;
     let data;
     try {
       data = JSON.parse(event.data);
