@@ -1130,7 +1130,7 @@
               </div>
               <p class="dino-park-note" data-owner-only>Pattern index picks which built-in pattern layout the species uses (most dinos have several — see the Skin Library's own Pattern Index field for the quickest way to explore them via "Test on my live dino"). Each species has its own valid range — an out-of-range value silently fails to apply <strong>and drops every color in the same request too</strong>, so test on a live dino first if unsure.</p>
 
-              <details class="skin-advanced" data-owner-only>
+              <details class="skin-advanced">
                 <summary>Advanced JSON (also unlocks Teeth/Mouth/Claws)</summary>
                 <div class="field-row">
                   <label>
@@ -1491,14 +1491,6 @@
             <form class="submit-form" data-skinlab-library-form>
               <div class="field-row">
                 <label>
-                  Edit an existing skin
-                  <select data-skinlab-library-edit-select>
-                    <option value="">Start a new skin…</option>
-                  </select>
-                </label>
-              </div>
-              <div class="field-row">
-                <label>
                   Skin name
                   <input type="text" maxlength="40" placeholder="Neon Glitch" data-skinlab-library-name required />
                 </label>
@@ -1561,16 +1553,11 @@
 
               <div class="submit-actions">
                 <button class="action-button" type="submit">Save to library</button>
-                <button class="action-button" type="button" data-skinlab-library-save-changes hidden>Save changes</button>
                 <button class="secondary-button" type="button" data-skinlab-library-test>Test on my live dino</button>
                 <button class="secondary-button" type="button" data-skinlab-library-test-step="-1">Test −1</button>
                 <button class="secondary-button" type="button" data-skinlab-library-test-step="1">Test +1</button>
               </div>
             </form>
-
-            <div class="dino-history-list" data-skinlab-library-list>
-              <p class="empty-state">No saved skins yet.</p>
-            </div>
           </section>
 
           <section class="panel content-box">

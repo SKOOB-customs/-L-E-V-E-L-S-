@@ -2881,9 +2881,15 @@ export default {
       if (!tier) return json({ error: 'Not an admin' }, 403);
 
       const trimmedName = name.trim().slice(0, 40);
+      const hasSubmittedColors = !!(colors && typeof colors === 'object' && Object.keys(colors).length > 0);
       let normalized;
-      if (tier === 'owner') {
-        // Owners can design a brand-new skin freely, same as always.
+      if (tier === 'owner' || hasSubmittedColors) {
+        // Owners can always design a brand-new skin freely. Non-owner
+        // admins can too now, via the grant form's Advanced JSON box —
+        // the plain color-picker grid stays owner-only client-side, but
+        // this endpoint can't structurally tell JSON-sourced colors from
+        // grid-sourced ones, so the real boundary here is simply
+        // whether any colors were submitted at all.
         if (!colors || typeof colors !== 'object') {
           return json({ error: 'Missing or invalid colors' }, 400);
         }
@@ -2892,12 +2898,9 @@ export default {
           return json({ error: 'No valid color fields provided' }, 400);
         }
       } else {
-        // Non-owner admins can only grant charges of a skin that already
-        // exists in the library — colors are pulled from the library
-        // entry itself, never trusted from the client, so tampering with
-        // hidden form fields (devtools, a raw API call) can't smuggle a
-        // custom color through. Re-checked here regardless of what the
-        // website UI already hides for non-owners.
+        // No colors submitted at all — must be an existing library skin.
+        // Colors are pulled from the library entry itself, never trusted
+        // from an empty/missing client payload.
         let library = {};
         try {
           const libraryRaw = await env.PARKED_KV.get('skin_library:index');
@@ -2907,7 +2910,7 @@ export default {
         }
         const libraryEntry = library[trimmedName];
         if (!libraryEntry) {
-          return json({ error: 'Only owners can design a custom skin — pick an existing one from the library.' }, 403);
+          return json({ error: 'Pick an existing skin from the library, or provide custom colors.' }, 403);
         }
         normalized = libraryEntry.colors;
       }
@@ -3126,8 +3129,24 @@ export default {
       if (raw) {
         try { library = JSON.parse(raw) || {}; } catch { library = {}; }
       }
+      // goldCreator flags a skin saved by a current owner-tier admin
+      // (checked once here, not per-skin via getAdminTier, to avoid a
+      // redundant admin_tiers:index KV read per entry) — the client uses
+      // it to show that skin's name in gold with a shimmer, same visual
+      // treatment the splash screen gives Ubbe/Skoob's names.
+      let ownerIds = [];
+      try {
+        const tiersRaw = await env.PARKED_KV.get('admin_tiers:index');
+        if (tiersRaw) ownerIds = JSON.parse(tiersRaw)?.owner || [];
+      } catch {
+        ownerIds = [];
+      }
       const skins = Object.entries(library)
-        .map(([name, entry]) => ({ name, colors: entry.colors }))
+        .map(([name, entry]) => ({
+          name,
+          colors: entry.colors,
+          goldCreator: ownerIds.includes(entry.savedBy),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name));
       return json({ ok: true, skins });
     }
