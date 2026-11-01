@@ -361,11 +361,39 @@ body::before {
 
 .chat-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 10px;
   font-weight: 400;
   font-size: 1.1rem;
   color: var(--chrome-1);
+}
+
+/* Room switcher — "Community Chat" (global, everyone) plus a faction
+   room only unhidden for that faction's own members, or all 3 for any
+   admin tier (see updateChatRoomTabsVisibility in script.js). Wraps
+   rather than overflows the narrow sidebar when more than 2 are shown. */
+.chat-room-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.chat-room-tab {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.chat-room-tab.active {
+  color: var(--chrome-1);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .chat-close {
@@ -375,6 +403,7 @@ body::before {
   font-size: 1.3rem;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .chat-note {

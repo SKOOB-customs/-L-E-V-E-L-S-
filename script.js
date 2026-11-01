@@ -1254,6 +1254,7 @@ const displaySteamStatus = async () => {
   updateOverlayPairingSectionVisibility();
   updateAyoLoadoutButtonsVisibility();
   updateSanctuaryTeleportButtonVisibility();
+  updateChatRoomTabsVisibility();
   initTicketForm();
   updateChatSignInState();
 
@@ -1480,6 +1481,11 @@ let chatSocket = null;
 let chatReconnectTimer = null;
 let chatSocketSteamId = null;
 let chatConnectInFlight = false;
+// Which chat room the sidebar is currently showing — "global" or
+// "faction-<id>". Switching rooms drops the current socket and opens a
+// fresh one scoped to the new room (see switchChatRoom), rather than
+// trying to multiplex several rooms over one connection.
+let currentChatRoom = 'global';
 // Tracks steamIds already friend-requested from chat this page load, so
 // the "+ Add" button doesn't offer to re-send across the frequent full
 // re-renders renderChatMessages does on every incoming message (chat
@@ -1598,7 +1604,7 @@ document.querySelector('[data-chat-menu-delete]')?.addEventListener('click', asy
     const response = await fetch('/api/chat-delete-message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId: message.id }),
+      body: JSON.stringify({ messageId: message.id, room: currentChatRoom }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -1742,16 +1748,24 @@ const connectChatSocket = async () => {
   // past the readyState check above and opening two sockets.
   if (chatConnectInFlight) return;
   chatConnectInFlight = true;
+  // Captured once, up front — currentChatRoom could change mid-flight
+  // (the user clicking a different room tab while this ticket fetch is
+  // still in the air) and this connection attempt should stay consistent
+  // with whichever room it actually requested a ticket for.
+  const room = currentChatRoom;
 
   // A raw steamId/name in the URL used to be trusted outright by the
   // Worker — anyone could open this socket claiming to be any player.
   // The cookie that actually proves who's signed in is scoped to this
   // site's own domain and never reaches the Worker's separate
   // workers.dev origin below, so this fetches a short-lived signed
-  // ticket same-origin first (where the cookie IS visible) instead.
+  // ticket same-origin first (where the cookie IS visible) instead. room
+  // is re-validated there too (see /api/chat-ticket's own comment) —
+  // the tabs that let a player pick a faction room they're not in are
+  // already hidden client-side, but this is the real boundary.
   let ticket;
   try {
-    const ticketResponse = await fetch(`/api/chat-ticket?name=${encodeURIComponent(profile.username || profile.steamId)}`);
+    const ticketResponse = await fetch(`/api/chat-ticket?name=${encodeURIComponent(profile.username || profile.steamId)}&room=${encodeURIComponent(room)}`);
     const ticketData = await ticketResponse.json();
     if (!ticketResponse.ok || !ticketData.ticket) return;
     ticket = ticketData.ticket;
@@ -1771,7 +1785,7 @@ const connectChatSocket = async () => {
   // connections aren't subject to the same-origin restrictions fetch()
   // has, so connecting cross-origin like this is normal and safe.
   const chatWorkerOrigin = 'wss://l-e-v-e-l-s.conlan-schlaeppi.workers.dev';
-  const url = `${chatWorkerOrigin}/chat-ws?ticket=${encodeURIComponent(ticket)}`;
+  const url = `${chatWorkerOrigin}/chat-ws?ticket=${encodeURIComponent(ticket)}&room=${encodeURIComponent(room)}`;
 
   let socket;
   try {
@@ -1861,6 +1875,65 @@ chatToggle?.addEventListener('click', () => {
 });
 
 chatClose?.addEventListener('click', closeChat);
+
+// ── Faction chat rooms ──
+//
+// "Community Chat" (global) is always available; a faction room tab
+// only shows for that faction's own members, or all 3 for any admin
+// tier (owners/admins can see all 4 chats — see bridge-worker.js's
+// /chat-room-access for the real, server-side version of this same
+// check). Switching rooms drops the current socket and opens a fresh
+// one scoped to the new room — see connectChatSocket's room capture.
+//
+// Does its own /api/faction-status fetch (same pattern as
+// updateSanctuaryTeleportButtonVisibility) rather than reading
+// document.body.dataset.faction — that's only ever set once the player
+// visits the Factions tab specifically, and chat is reachable from
+// every page via the sitewide sidebar toggle.
+const updateChatRoomTabsVisibility = async () => {
+  const profile = getSteamProfile();
+  let viewerFaction = null;
+  if (profile?.steamId) {
+    try {
+      const response = await fetch('/api/faction-status');
+      const data = await response.json();
+      viewerFaction = data.factionId || null;
+    } catch (error) {
+      console.debug('Faction status check for chat tabs failed:', error);
+    }
+  }
+  const isAdmin = !!viewerAdminTier;
+  document.querySelectorAll('[data-chat-room]').forEach((tab) => {
+    const room = tab.dataset.chatRoom;
+    if (room === 'global') {
+      tab.hidden = false;
+      return;
+    }
+    const factionId = room.slice('faction-'.length);
+    tab.hidden = !(isAdmin || viewerFaction === factionId);
+  });
+  // A faction room could've just been hidden out from under the viewer
+  // (left their faction, admin access revoked) while it was the active
+  // tab — fall back to global rather than leaving a hidden tab "active".
+  const activeTab = document.querySelector('[data-chat-room].active');
+  if (activeTab?.hidden) switchChatRoom('global');
+};
+
+const switchChatRoom = (room) => {
+  if (room === currentChatRoom) return;
+  currentChatRoom = room;
+  document.querySelectorAll('[data-chat-room]').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.chatRoom === room);
+  });
+  cachedChatMessages = [];
+  renderChatMessages();
+  disconnectChatSocket();
+  if (chatSidebar?.classList.contains('is-open')) connectChatSocket();
+};
+
+document.querySelectorAll('[data-chat-room]').forEach((tab) => {
+  tab.addEventListener('click', () => switchChatRoom(tab.dataset.chatRoom));
+});
 
 const updateChatSignInState = () => {
   const profile = getSteamProfile();
@@ -3916,6 +3989,7 @@ const checkAdminPanelAccess = async () => {
     document.querySelectorAll('[data-faction-admin-only]').forEach((el) => { el.hidden = true; });
     hideSkinIdeasSidebar();
     viewerAdminTier = null;
+    updateChatRoomTabsVisibility();
     return;
   }
   try {
@@ -3923,6 +3997,7 @@ const checkAdminPanelAccess = async () => {
     const data = await response.json();
     const hasAccess = Boolean(data.tier);
     viewerAdminTier = data.tier || null;
+    updateChatRoomTabsVisibility();
     if (adminPanelTabButton) adminPanelTabButton.hidden = !hasAccess;
     if (adminPanelPanel) adminPanelPanel.hidden = !hasAccess;
     if (transferLogsPanel) transferLogsPanel.hidden = !hasAccess;
@@ -4400,10 +4475,12 @@ const renderFactionStatus = (data) => {
     if (statusSection) statusSection.hidden = true;
     delete document.body.dataset.faction;
     closeWarzonePortal();
+    updateChatRoomTabsVisibility();
     return;
   }
   if (statusSection) statusSection.hidden = false;
   document.body.dataset.faction = data.factionId;
+  updateChatRoomTabsVisibility();
 
   const info = FACTION_DISPLAY[data.factionId];
   const entryNameEl = document.querySelector('[data-faction-entry-name]');

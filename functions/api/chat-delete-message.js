@@ -2,9 +2,11 @@
  * Chat moderation: delete a message for everyone (right-click menu in the
  * chat sidebar, admin/owner only — re-validated by tier on the Worker).
  *
- * POST { messageId } -> proxied to the bridge Worker's
- * /chat-delete-message route. moderatorSteamId comes from the verified
- * session, not a client-supplied field.
+ * POST { messageId, room } -> proxied to the bridge Worker's
+ * /chat-delete-message route. room picks which chat room's Durable
+ * Object the message actually lives in (global or faction-<id>) —
+ * defaults to "global" if omitted. moderatorSteamId comes from the
+ * verified session, not a client-supplied field.
  */
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -35,7 +37,7 @@ export async function onRequestPost(context) {
   } catch {
     return json({ error: 'Invalid JSON body' }, 400);
   }
-  const { messageId } = body || {};
+  const { messageId, room } = body || {};
   if (typeof messageId !== 'string' || !messageId) {
     return json({ error: 'Missing or invalid messageId' }, 400);
   }
@@ -47,7 +49,7 @@ export async function onRequestPost(context) {
         'Content-Type': 'application/json',
         ...(env.STATUS_API_TOKEN ? { Authorization: `Bearer ${env.STATUS_API_TOKEN}` } : {}),
       },
-      body: JSON.stringify({ moderatorSteamId, messageId }),
+      body: JSON.stringify({ moderatorSteamId, messageId, room }),
     });
     const data2 = await response.json();
     return json(data2, response.status);

@@ -129,16 +129,25 @@ export async function verifySession(env, request) {
 // client fetches one of these short-lived tickets same-origin (where the
 // cookie IS visible) and passes it as a query param when opening the
 // WebSocket; the Worker verifies it with the same shared SESSION_SECRET.
-export async function signTicket(env, steamId, name) {
+// room is embedded here (not trusted from a raw query param on the
+// WebSocket URL) — chat-ticket.js checks the caller is actually
+// authorized for that room (global chat, or their own faction's chat,
+// or any room at all for an admin) BEFORE minting a ticket naming it, so
+// a signed ticket is itself proof of "this steamId may join this room."
+export async function signTicket(env, steamId, name, room = 'global') {
   const now = Date.now();
-  return signPayload(env.SESSION_SECRET, { steamId, name, iat: now, exp: now + TICKET_TTL_MS });
+  return signPayload(env.SESSION_SECRET, { steamId, name, room, iat: now, exp: now + TICKET_TTL_MS });
 }
 
 export async function verifyTicket(env, ticket) {
   if (!env.SESSION_SECRET) return null;
   const payload = await verifyToken(env.SESSION_SECRET, ticket);
   if (typeof payload?.steamId !== 'string') return null;
-  return { steamId: payload.steamId, name: typeof payload.name === 'string' ? payload.name : payload.steamId };
+  return {
+    steamId: payload.steamId,
+    name: typeof payload.name === 'string' ? payload.name : payload.steamId,
+    room: typeof payload.room === 'string' ? payload.room : 'global',
+  };
 }
 
 // Admin Panel passkey unlock — a second, separate secret from the site

@@ -1872,8 +1872,12 @@ const generateSkinCode = () => generateReferenceCode('SKIN');
 // new messages to every connected client over a live WebSocket the
 // instant they're sent — no polling, no KV read-after-write lag.
 //
-// One global room (idFromName('global') in the /chat-ws route below) —
-// this site doesn't have per-channel chat, just the one sitewide sidebar.
+// Multiple independent rooms share this exact same class — 'global' plus
+// one per faction ('faction-carcharo' etc.), each its own isolated DO
+// instance (own sessions, own message history) selected by name in the
+// /chat-ws route below. Nothing in this class is global-specific; a
+// room's access rules live entirely in /chat-room-access and the ticket
+// it gates (see fetch()'s room cross-check further down).
 export class ChatRoom {
   constructor(state, env) {
     this.state = state;
@@ -1905,6 +1909,17 @@ export class ChatRoom {
     const verified = await verifyTicket(this.env, ticket);
     if (!verified) {
       return new Response('Missing or invalid ticket', { status: 401 });
+    }
+    // The ?room= that routed this request to this specific DO instance
+    // (see the main fetch handler's /chat-ws branch) is untrusted on its
+    // own — this cross-checks it against the room actually embedded in
+    // the signed ticket (set by chat-ticket.js only after confirming the
+    // caller is authorized for that room) before accepting the
+    // connection, so a mismatched/forged room param here just gets
+    // rejected rather than connecting to a room it wasn't minted for.
+    const requestedRoom = url.searchParams.get('room') || 'global';
+    if (requestedRoom !== verified.room) {
+      return new Response('Ticket not valid for this room', { status: 403 });
     }
     const { steamId, name: verifiedName } = verified;
     const name = verifiedName.slice(0, 32);
@@ -2296,13 +2311,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Global chat WebSocket — routed here from the site's own domain (see
-    // wrangler.jsonc's routes) so the client connects same-origin. One
-    // shared room for the whole site; the Durable Object itself enforces
-    // the steamId/name validation and message handling (see ChatRoom).
+    // Chat WebSocket — routed here from the site's own domain (see
+    // wrangler.jsonc's routes) so the client connects same-origin. room
+    // (?room=global|faction-<id>) picks which ChatRoom Durable Object
+    // instance to route to — untrusted at this point, used only for
+    // instance selection; ChatRoom.fetch() itself cross-checks it
+    // against the room embedded in the caller's signed ticket (see
+    // /chat-room-access and signTicket) before accepting the connection,
+    // so a mismatched room here just gets rejected, never a real gap.
     if (url.pathname === '/chat-ws') {
       if (!env.CHAT_ROOM) return json({ error: 'Chat is not configured' }, 503);
-      const id = env.CHAT_ROOM.idFromName('global');
+      const room = url.searchParams.get('room') || 'global';
+      const id = env.CHAT_ROOM.idFromName(room);
       const stub = env.CHAT_ROOM.get(id);
       return stub.fetch(request);
     }
@@ -2332,6 +2352,30 @@ export default {
       const token = request.headers.get('Authorization')?.replace('Bearer ', '');
       if (env.STATUS_API_TOKEN && token !== env.STATUS_API_TOKEN) {
         return json({ error: 'Unauthorized' }, 401);
+      }
+    }
+
+    // Authorization check behind chat-ticket.js minting a room-scoped
+    // ticket: 'global' is open to everyone, 'faction-<id>' is open to
+    // that faction's own members plus any admin tier (owners/admins can
+    // see all 4 chats — global + every faction's).
+    if (url.pathname === '/chat-room-access' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const room = url.searchParams.get('room');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !room) {
+        return json({ error: 'Missing or invalid steamId/room' }, 400);
+      }
+      if (room === 'global') return json({ authorized: true });
+      const factionId = room.startsWith('faction-') ? room.slice('faction-'.length) : null;
+      if (!factionId || !FACTION_IDS.includes(factionId)) return json({ authorized: false });
+      try {
+        const tier = await getAdminTier(env, steamId);
+        if (tier) return json({ authorized: true });
+        if (!env.PARKED_KV) return json({ authorized: false });
+        const factionsData = await readFactionsIndex(env);
+        return json({ authorized: factionsData.members[steamId]?.factionId === factionId });
+      } catch (error) {
+        return json({ error: error.message || 'Chat room access check failed' }, 502);
       }
     }
 
@@ -4335,7 +4379,7 @@ export default {
       } catch {
         return json({ error: 'Invalid JSON body' }, 400);
       }
-      const { moderatorSteamId, messageId } = body || {};
+      const { moderatorSteamId, messageId, room } = body || {};
       if (typeof moderatorSteamId !== 'string' || !/^\d{17}$/.test(moderatorSteamId)) {
         return json({ error: 'Missing or invalid moderatorSteamId' }, 400);
       }
@@ -4346,7 +4390,7 @@ export default {
       if (!tier) return json({ error: 'Not an admin' }, 403);
 
       try {
-        const id = env.CHAT_ROOM.idFromName('global');
+        const id = env.CHAT_ROOM.idFromName(typeof room === 'string' && room ? room : 'global');
         const stub = env.CHAT_ROOM.get(id);
         const response = await stub.fetch('https://internal/delete-message', {
           method: 'POST',
