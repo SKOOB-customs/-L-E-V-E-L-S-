@@ -645,16 +645,14 @@ end
 local function applyStateToPawn(pawn, state)
     pcall(function() pawn:SetGrowth(state.growth) end)
 
-    -- Compensation/transfer grants only ("Grant as Primed" button on the
-    -- Admin Panel's Compensation form) — the Worker already rejected this
-    -- at grant time unless growth was at least 75%, which is why this
-    -- runs unconditionally here rather than re-checking growth itself.
-    if state.forcePrimeOnRedeem then
-        local ok, err = pcall(function() forcePrimeConditionFlags(pawn) end)
-        if not ok then
-            log("applyStateToPawn: forcePrimeOnRedeem failed: " .. tostring(err))
-        end
-    end
+    -- forcePrimeOnRedeem ("Grant as Primed" on the Admin Panel's
+    -- Compensation form) used to be forced here, synchronously, right
+    -- after SetGrowth — moved into applyPercentageVitalsDeferred (always
+    -- the actual destination for a forcePrimeOnRedeem dino, since that
+    -- flag is compensation/transfer-grant only and those always set
+    -- statsArePercentages too) so it runs on a freshly re-resolved pawn
+    -- after growth has actually settled. See that function's own comment
+    -- for the false critical-health red screen this was causing.
 
     if state.statsArePercentages then
         -- Compensation-granted dinos (website admin panel) store
@@ -724,6 +722,23 @@ end
 -- hunger/0 thirst specifically, never normal !park dinos, which never
 -- hit this branch and read a long-stable live pawn instead of a
 -- freshly-spawned one).
+--
+-- forcePrimeOnRedeem (when state.forcePrimeOnRedeem/forcePrime is set)
+-- is ALSO applied here now, not synchronously right after SetGrowth —
+-- reported bug: redeeming/Ayo-loading a "Grant as Primed" dino showed a
+-- false critical-health red screen. Forcing the 10 bPrimeCondition
+-- flags true immediately after SetGrowth, same tick, hit the exact same
+-- staleness window as the hunger/thirst bug above: Prime status can
+-- shift a dino's real max health, and forcing it before growth's
+-- max-attribute recompute had actually finished left the engine's
+-- internal max health briefly out of sync with what GetMaxHealth()
+-- (read synchronously, right then) reported — which is what
+-- applyStateToPawn's own SetHealth call was computing the target health
+-- FROM, hence a wrong/low health value relative to whatever the engine
+-- settled on, reading as critical. Forcing it here, after the same
+-- 500ms settle this function already waits for mutations/hunger/thirst,
+-- means GetMaxHealth() below reflects the post-Prime value before
+-- SetHealth ever uses it.
 local function applyPercentageVitalsDeferred(steam, state)
     if not state.statsArePercentages then return end
     local fired = false
@@ -741,6 +756,13 @@ local function applyPercentageVitalsDeferred(steam, state)
         pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
         local pawn = livePawnFromCtrl(ctrl)
         if pawn == nil then return end
+
+        if state.forcePrimeOnRedeem then
+            local okPrime, errPrime = pcall(function() forcePrimeConditionFlags(pawn) end)
+            if not okPrime then
+                log("applyPercentageVitalsDeferred: forcePrimeConditionFlags failed: " .. tostring(errPrime))
+            end
+        end
 
         local maxHealth, maxStamina, maxHunger, maxThirst = 1, 1, 1, 1
         pcall(function() maxHealth = pawn:GetMaxHealth() or 1 end)
@@ -2137,18 +2159,19 @@ local function tryAyoLoadout(steam, classPath, species, growth, x, y, z, mutatio
 
     if speciesMatches then
         pcall(function() pawn:SetGrowth(growth) end)
-        local okPrime, errPrime = pcall(function() forcePrimeConditionFlags(pawn) end)
-        if not okPrime then
-            log("Ayo loadout: forcePrimeConditionFlags failed: " .. tostring(errPrime))
-        end
         applyMutationsDeferred(steam, 3, mutations)
         -- Same growth-jump vitals bug fixed for redeem (see
         -- applyPercentageVitalsDeferred's own comment) — SetGrowth's
         -- Max*/current desync can zero out hunger immediately after a
         -- big growth jump, so reset to full on a freshly re-resolved
         -- pawn 500ms later instead of leaving whatever SetGrowth left.
+        -- forcePrimeOnRedeem (same flag redeem's "Grant as Primed" uses)
+        -- forces Prime there too, instead of synchronously right after
+        -- SetGrowth above — that used to cause a false critical-health
+        -- red screen (see applyPercentageVitalsDeferred's own comment).
         applyPercentageVitalsDeferred(steam, {
             statsArePercentages = true,
+            forcePrimeOnRedeem = true,
             health = 1,
             stamina = 1,
             hunger = 1,
