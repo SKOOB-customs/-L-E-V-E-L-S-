@@ -4931,66 +4931,100 @@ const loadMutationCatalog = async () => {
     console.debug('Mutation catalog load failed:', error);
   }
   renderMutationSlots();
+  // Covers the species dropdown's own default selection (whatever
+  // ADMIN_PANEL_SPECIES' first entry is) — that's a plain pre-selected
+  // <option>, not something that ever fires a "change" event, so
+  // handleCompSpeciesChange alone would never apply its preset.
+  applyCompMutationPreset();
 };
 
-// Rex/Trike mutation presets — the exact same 12-mutation Ayo loadout
-// data as bridge-worker.js's AYO_LOADOUTS, mirrored here so picking
-// either species on the Compensation form auto-fills the same preset
-// instead of leaving all 16 mutation slots on "— none —" for the admin
-// to fill in by hand every time. Base/Parent/Elder A are filled; Elder B
-// stays empty, same as the Ayo loadouts themselves.
-const COMP_SPECIES_MUTATION_PRESETS = {
-  Tyrannosaurus: {
-    mutationSlot1: 'Hypermetabolic Inanition',
-    mutationSlot2: 'Congenital Hypoalgesia',
-    mutationSlot3: 'Osteosclerosis',
-    mutationSlot4: 'Cellular Regeneration',
-    parentMutationSlot1: 'Cannibalistic',
-    parentMutationSlot2: 'Gastronomic Regeneration',
-    parentMutationSlot3: 'Hemomania',
-    parentMutationSlot4: 'Hydrodynamic',
-    elderMutationSlot1A: 'Epidermal Fibrosis',
-    elderMutationSlot2A: 'Photosynthetic Tissue',
-    elderMutationSlot3A: 'Nocturnal',
-    elderMutationSlot4A: 'Augmented Tapetum',
-  },
-  Triceratops: {
-    mutationSlot1: 'Photosynthetic Regeneration',
-    mutationSlot2: 'Tactile Endurance',
-    mutationSlot3: 'Multichambered Lungs',
-    mutationSlot4: 'Osteosclerosis',
-    parentMutationSlot1: 'Cellular Regeneration',
-    parentMutationSlot2: 'Gastronomic Regeneration',
-    parentMutationSlot3: 'Enhanced Digestion',
-    parentMutationSlot4: 'Hydrodynamic',
-    elderMutationSlot1A: 'Epidermal Fibrosis',
-    elderMutationSlot2A: 'Photosynthetic Tissue',
-    elderMutationSlot3A: 'Nocturnal',
-    elderMutationSlot4A: 'Augmented Tapetum',
-  },
+// Carnivore/herbivore mutation presets — the exact same 12-mutation Ayo
+// loadout data as bridge-worker.js's AYO_LOADOUTS (Tyrannosaurus's for
+// every carnivore, Triceratops's for every herbivore), so picking ANY
+// carnivore or herbivore species on the Compensation form auto-fills
+// the same preset instead of leaving all 16 mutation slots on "— none —"
+// for the admin to fill in by hand every time. Base/Parent/Elder A are
+// filled; Elder B stays empty, same as the Ayo loadouts themselves.
+// Omnivores (and any species this site has no diet data for) get no
+// auto-preset — there's no single "omnivore Ayo loadout" to mirror.
+const CARNIVORE_MUTATION_PRESET = {
+  mutationSlot1: 'Hypermetabolic Inanition',
+  mutationSlot2: 'Congenital Hypoalgesia',
+  mutationSlot3: 'Osteosclerosis',
+  mutationSlot4: 'Cellular Regeneration',
+  parentMutationSlot1: 'Cannibalistic',
+  parentMutationSlot2: 'Gastronomic Regeneration',
+  parentMutationSlot3: 'Hemomania',
+  parentMutationSlot4: 'Hydrodynamic',
+  elderMutationSlot1A: 'Epidermal Fibrosis',
+  elderMutationSlot2A: 'Photosynthetic Tissue',
+  elderMutationSlot3A: 'Nocturnal',
+  elderMutationSlot4A: 'Augmented Tapetum',
+};
+const HERBIVORE_MUTATION_PRESET = {
+  mutationSlot1: 'Photosynthetic Regeneration',
+  mutationSlot2: 'Tactile Endurance',
+  mutationSlot3: 'Multichambered Lungs',
+  mutationSlot4: 'Osteosclerosis',
+  parentMutationSlot1: 'Cellular Regeneration',
+  parentMutationSlot2: 'Gastronomic Regeneration',
+  parentMutationSlot3: 'Enhanced Digestion',
+  parentMutationSlot4: 'Hydrodynamic',
+  elderMutationSlot1A: 'Epidermal Fibrosis',
+  elderMutationSlot2A: 'Photosynthetic Tissue',
+  elderMutationSlot3A: 'Nocturnal',
+  elderMutationSlot4A: 'Augmented Tapetum',
 };
 
-// Only fires on a species CHANGE, not on every entombments tweak — an
-// admin lowering/raising entombments afterward just reveals/hides slots
-// the normal way (renderMutationSlots), without re-stamping the preset
-// back in, so clearing a slot by hand sticks.
+// mutationSpeciesDiet is the same diet data already loaded for the
+// mutation-eligibility filter above (/api/mutations-catalog) — reused
+// here rather than hardcoding a second, possibly-inconsistent species
+// list.
+const compMutationPresetForSpecies = (species) => {
+  const diet = mutationSpeciesDiet[species];
+  if (diet === 'carnivore') return CARNIVORE_MUTATION_PRESET;
+  if (diet === 'herbivore') return HERBIVORE_MUTATION_PRESET;
+  return null;
+};
+
+// Applies whichever preset matches the CURRENTLY selected species to
+// whichever mutation slots are actually rendered right now — called
+// after every render, not just on a species change, so lowering
+// entombments to "2 — 12" or "1 — 8" instead of "3 — 16" keeps those
+// slots filled with the preset instead of reverting to "— none —".
+// Each preset mutation only ever goes into its own named tier/slot
+// (never reassigned to a different tier), so which ones end up visible
+// is simply whichever tiers are unlocked at the current entombments
+// level — deterministic, not a random reshuffle.
+const applyCompMutationPreset = () => {
+  const species = document.querySelector('[data-comp-species]')?.value;
+  const preset = compMutationPresetForSpecies(species);
+  if (!preset) return;
+  document.querySelectorAll('[data-comp-mutation-field]').forEach((select) => {
+    const field = select.dataset.compMutationField;
+    if (preset[field]) select.value = preset[field];
+  });
+};
+
+// Entombments defaults to "3 — 16" the first time a carnivore/herbivore
+// species is picked (so the full preset — including the still-empty
+// Elder B slots — is visible at a glance), but only on a species
+// CHANGE — an admin who deliberately lowers it afterward (see the
+// entombments listener below) has that choice respected from then on.
 const handleCompSpeciesChange = () => {
   const species = document.querySelector('[data-comp-species]')?.value;
-  const preset = COMP_SPECIES_MUTATION_PRESETS[species];
-  if (preset) {
+  if (compMutationPresetForSpecies(species)) {
     const entombmentsSelect = document.querySelector('[data-comp-entombments]');
     if (entombmentsSelect) entombmentsSelect.value = '3';
   }
   renderMutationSlots();
-  if (preset) {
-    document.querySelectorAll('[data-comp-mutation-field]').forEach((select) => {
-      const field = select.dataset.compMutationField;
-      if (preset[field]) select.value = preset[field];
-    });
-  }
+  applyCompMutationPreset();
 };
 
-document.querySelector('[data-comp-entombments]')?.addEventListener('change', renderMutationSlots);
+document.querySelector('[data-comp-entombments]')?.addEventListener('change', () => {
+  renderMutationSlots();
+  applyCompMutationPreset();
+});
 document.querySelector('[data-comp-species]')?.addEventListener('change', handleCompSpeciesChange);
 loadMutationCatalog();
 
