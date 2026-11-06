@@ -4933,8 +4933,65 @@ const loadMutationCatalog = async () => {
   renderMutationSlots();
 };
 
+// Rex/Trike mutation presets — the exact same 12-mutation Ayo loadout
+// data as bridge-worker.js's AYO_LOADOUTS, mirrored here so picking
+// either species on the Compensation form auto-fills the same preset
+// instead of leaving all 16 mutation slots on "— none —" for the admin
+// to fill in by hand every time. Base/Parent/Elder A are filled; Elder B
+// stays empty, same as the Ayo loadouts themselves.
+const COMP_SPECIES_MUTATION_PRESETS = {
+  Tyrannosaurus: {
+    mutationSlot1: 'Hypermetabolic Inanition',
+    mutationSlot2: 'Congenital Hypoalgesia',
+    mutationSlot3: 'Osteosclerosis',
+    mutationSlot4: 'Cellular Regeneration',
+    parentMutationSlot1: 'Cannibalistic',
+    parentMutationSlot2: 'Gastronomic Regeneration',
+    parentMutationSlot3: 'Hemomania',
+    parentMutationSlot4: 'Hydrodynamic',
+    elderMutationSlot1A: 'Epidermal Fibrosis',
+    elderMutationSlot2A: 'Photosynthetic Tissue',
+    elderMutationSlot3A: 'Nocturnal',
+    elderMutationSlot4A: 'Augmented Tapetum',
+  },
+  Triceratops: {
+    mutationSlot1: 'Photosynthetic Regeneration',
+    mutationSlot2: 'Tactile Endurance',
+    mutationSlot3: 'Multichambered Lungs',
+    mutationSlot4: 'Osteosclerosis',
+    parentMutationSlot1: 'Cellular Regeneration',
+    parentMutationSlot2: 'Gastronomic Regeneration',
+    parentMutationSlot3: 'Enhanced Digestion',
+    parentMutationSlot4: 'Hydrodynamic',
+    elderMutationSlot1A: 'Epidermal Fibrosis',
+    elderMutationSlot2A: 'Photosynthetic Tissue',
+    elderMutationSlot3A: 'Nocturnal',
+    elderMutationSlot4A: 'Augmented Tapetum',
+  },
+};
+
+// Only fires on a species CHANGE, not on every entombments tweak — an
+// admin lowering/raising entombments afterward just reveals/hides slots
+// the normal way (renderMutationSlots), without re-stamping the preset
+// back in, so clearing a slot by hand sticks.
+const handleCompSpeciesChange = () => {
+  const species = document.querySelector('[data-comp-species]')?.value;
+  const preset = COMP_SPECIES_MUTATION_PRESETS[species];
+  if (preset) {
+    const entombmentsSelect = document.querySelector('[data-comp-entombments]');
+    if (entombmentsSelect) entombmentsSelect.value = '3';
+  }
+  renderMutationSlots();
+  if (preset) {
+    document.querySelectorAll('[data-comp-mutation-field]').forEach((select) => {
+      const field = select.dataset.compMutationField;
+      if (preset[field]) select.value = preset[field];
+    });
+  }
+};
+
 document.querySelector('[data-comp-entombments]')?.addEventListener('change', renderMutationSlots);
-document.querySelector('[data-comp-species]')?.addEventListener('change', renderMutationSlots);
+document.querySelector('[data-comp-species]')?.addEventListener('change', handleCompSpeciesChange);
 loadMutationCatalog();
 
 // ── Compensation form: "Grant as Primed" ──
