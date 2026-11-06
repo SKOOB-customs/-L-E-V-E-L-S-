@@ -3416,6 +3416,66 @@ export default {
       return json({ ok: true, skins });
     }
 
+    // Owner tab's "All Skins" mini-tab — every skin in the shared
+    // library, each one tagged with which bucket its creator falls
+    // into (owner / admin / member — a Skin Lab trial account with no
+    // admin tier at all) plus who made it and when, for the hover
+    // detail. Owner tier only — this is a strictly broader view than
+    // /skin-library above (which any admin tier can read for the grant
+    // dropdown), so it stays a separate route rather than adding this
+    // detail to that shared one.
+    if (url.pathname === '/skin-library-all' && request.method === 'GET') {
+      const requesterSteamId = url.searchParams.get('requesterSteamId');
+      if (!requesterSteamId || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (tier !== 'owner') return json({ error: 'Owner tier required' }, 403);
+      if (!env.PARKED_KV) return json({ ok: true, skins: [] });
+      try {
+        const raw = await env.PARKED_KV.get('skin_library:index');
+        let library = {};
+        if (raw) {
+          try { library = JSON.parse(raw) || {}; } catch { library = {}; }
+        }
+        // Single fetch of admin_tiers:index + player_directory:index,
+        // classified locally per skin below — not a getAdminTier/name
+        // lookup per entry, same reasoning as goldCreator above.
+        let tiers = { owner: [], senior: [], admin: [] };
+        try {
+          const tiersRaw = await env.PARKED_KV.get('admin_tiers:index');
+          if (tiersRaw) tiers = JSON.parse(tiersRaw) || tiers;
+        } catch {
+          // keep the empty default — every skin falls back to "member"
+        }
+        let players = {};
+        try {
+          const dirRaw = await env.PARKED_KV.get('player_directory:index');
+          if (dirRaw) players = JSON.parse(dirRaw).players || {};
+        } catch {
+          players = {};
+        }
+        const categoryFor = (steamId) => {
+          if (tiers.owner?.includes(steamId)) return 'owner';
+          if (tiers.senior?.includes(steamId) || tiers.admin?.includes(steamId)) return 'admin';
+          return 'member';
+        };
+        const skins = Object.entries(library)
+          .map(([name, entry]) => ({
+            name,
+            colors: entry.colors,
+            savedAt: entry.savedAt || null,
+            savedBy: entry.savedBy || null,
+            savedByName: players[entry.savedBy]?.name || entry.savedBy || 'Unknown',
+            category: categoryFor(entry.savedBy),
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        return json({ ok: true, skins });
+      } catch (error) {
+        return json({ error: error.message || 'Skin library lookup failed' }, 502);
+      }
+    }
+
     // Inventory: a player's own skin-charge ledger. Same trust model as
     // /api/parked-list — client-supplied steamId, no separate requester
     // check (read-only, their own data, not a new gap on this site).
@@ -3634,8 +3694,14 @@ export default {
       if (raw) {
         try { library = JSON.parse(raw) || {}; } catch { library = {}; }
       }
+      // Own skins only — this account has no visibility into the shared
+      // library beyond what it created itself (see the client-side
+      // comment on why edit/list/restore of OTHERS' skins were removed
+      // entirely; this is the narrower "see your own" carve-out added
+      // back in afterward).
       const skins = Object.entries(library)
-        .map(([name, entry]) => ({ name, colors: entry.colors }))
+        .filter(([, entry]) => entry.savedBy === requesterSteamId)
+        .map(([name, entry]) => ({ name, colors: entry.colors, savedAt: entry.savedAt || null }))
         .sort((a, b) => a.name.localeCompare(b.name));
       return json({ ok: true, skins });
     }

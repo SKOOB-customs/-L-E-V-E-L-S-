@@ -4120,6 +4120,7 @@ const checkAdminPanelAccess = async () => {
         loadModerationLog();
         loadSkinLibraryTrash();
         loadFactionEventStatus();
+        loadAllSkinsLibrary();
         const skinIdeasToggle = document.getElementById('skinIdeasToggle');
         if (skinIdeasToggle) skinIdeasToggle.hidden = false;
         loadSkinIdeasList();
@@ -4288,6 +4289,7 @@ const renderSkinLabState = (data) => {
   if (permanent || trial.active) {
     if (endedNote) endedNote.hidden = true;
     applySkinLabFrozenState(false);
+    loadSkinLabOwnSkins();
     if (!permanent && trial.expiresAt) {
       if (countdownEl) {
         countdownEl.hidden = false;
@@ -6066,6 +6068,69 @@ const loadSkinLibrary = async () => {
   }
 };
 
+// ── Owner tab: "All Skins" (owner/admin/member breakdown) ──
+//
+// Every skin in the shared library, split into the 3 category mini-tabs
+// (reusing the generic .inner-subtab-group click handler already wired
+// up sitewide — no extra JS needed for the tab-switching itself) —
+// owner-created, admin-created (senior/admin tier), and member-created
+// (a Skin Lab trial account with no admin tier at all). Hover a card
+// for when it was made and by whom (native title tooltip — simplest
+// way to get "show on hover" without new UI chrome).
+const renderAllSkinsCategoryList = (category, skins) => {
+  const list = document.querySelector(`[data-all-skins-list="${category}"]`);
+  if (!list) return;
+  list.innerHTML = '';
+  if (!skins.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = `No ${category}-created skins yet.`;
+    list.appendChild(empty);
+    return;
+  }
+  skins.forEach((skin) => {
+    const card = document.createElement('div');
+    card.className = 'panel skin-library-card';
+    const when = skin.savedAt ? new Date(skin.savedAt).toLocaleString() : 'an unknown time';
+    card.title = `Created ${when} by ${skin.savedByName}`;
+    const header = document.createElement('div');
+    header.className = 'skin-library-card-header';
+    const title = document.createElement('strong');
+    title.textContent = skin.name;
+    const swatch = document.createElement('span');
+    swatch.className = 'skin-library-swatch';
+    const bodyColor = skin.colors?.BodyColor;
+    if (bodyColor) {
+      const r = Math.round((bodyColor.r ?? 0.5) * 255);
+      const g = Math.round((bodyColor.g ?? 0.5) * 255);
+      const b = Math.round((bodyColor.b ?? 0.5) * 255);
+      swatch.style.background = `rgb(${r}, ${g}, ${b})`;
+    } else {
+      swatch.classList.add('skin-library-swatch-empty');
+    }
+    header.append(title, swatch);
+    card.appendChild(header);
+    list.appendChild(card);
+  });
+};
+
+const loadAllSkinsLibrary = async () => {
+  try {
+    const response = await fetch('/api/skin-library-all');
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.skins)) return;
+    const byCategory = { owner: [], admin: [], member: [] };
+    data.skins.forEach((skin) => {
+      (byCategory[skin.category] || byCategory.member).push(skin);
+    });
+    renderAllSkinsCategoryList('owner', byCategory.owner);
+    renderAllSkinsCategoryList('admin', byCategory.admin);
+    renderAllSkinsCategoryList('member', byCategory.member);
+  } catch (error) {
+    console.debug('All Skins load failed:', error);
+  }
+};
+
 // ── Owner tab: Skin Library recycle bin ──
 //
 // Every skin removed via "Delete" on the Skin Library above lands here
@@ -6476,6 +6541,58 @@ const SKIN_LAB_JSON_TEMPLATE = `{
   "PatternIndex": 0,
   "SkinVariation": 0
 }`;
+
+// "My Skins" — read-only, this account's own saved skins only (no
+// visibility into anyone else's, no edit/delete) — see /skin-lab-library's
+// own comment for why this is scoped to savedBy === the caller. Only
+// loaded while the trial is actually active (see renderSkinLabState),
+// matching "once activated they can see their own skins" from the
+// request this was built for.
+const renderSkinLabOwnSkinsList = (skins) => {
+  const list = document.querySelector('[data-skinlab-own-skins-list]');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!skins.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No saved skins yet.';
+    list.appendChild(empty);
+    return;
+  }
+  skins.forEach((skin) => {
+    const card = document.createElement('div');
+    card.className = 'panel skin-library-card';
+    const header = document.createElement('div');
+    header.className = 'skin-library-card-header';
+    const title = document.createElement('strong');
+    title.textContent = skin.name;
+    const swatch = document.createElement('span');
+    swatch.className = 'skin-library-swatch';
+    const bodyColor = skin.colors?.BodyColor;
+    if (bodyColor) {
+      const r = Math.round((bodyColor.r ?? 0.5) * 255);
+      const g = Math.round((bodyColor.g ?? 0.5) * 255);
+      const b = Math.round((bodyColor.b ?? 0.5) * 255);
+      swatch.style.background = `rgb(${r}, ${g}, ${b})`;
+      swatch.title = skin.savedAt ? `Saved ${new Date(skin.savedAt).toLocaleString()}` : 'Body color preview';
+    } else {
+      swatch.classList.add('skin-library-swatch-empty');
+    }
+    header.append(title, swatch);
+    card.appendChild(header);
+    list.appendChild(card);
+  });
+};
+
+const loadSkinLabOwnSkins = async () => {
+  try {
+    const response = await fetch('/api/skin-lab-library');
+    const data = await response.json();
+    if (response.ok && Array.isArray(data.skins)) renderSkinLabOwnSkinsList(data.skins);
+  } catch (error) {
+    console.debug('My Skins load failed:', error);
+  }
+};
 
 const collectSkinLabColors = () => {
   let colors;

@@ -1319,6 +1319,33 @@
               </div>
             </div>
           </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">All Skins</div>
+            <p class="dino-park-note">Every skin in the shared library, organized by who made it. Hover a skin for when it was created and by whom.</p>
+            <div class="inner-subtab-group">
+              <div class="inner-subtab-switcher" role="tablist" aria-label="All Skins categories">
+                <button class="inner-subtab-button active" type="button" data-inner-subtab="all-skins-owner">Owner Skins</button>
+                <button class="inner-subtab-button" type="button" data-inner-subtab="all-skins-admin">Admin Skins</button>
+                <button class="inner-subtab-button" type="button" data-inner-subtab="all-skins-member">Member Skins</button>
+              </div>
+              <div class="inner-subtab-panel is-active" data-inner-subtab-panel="all-skins-owner">
+                <div class="dino-history-list" data-all-skins-list="owner">
+                  <p class="empty-state">No owner-created skins yet.</p>
+                </div>
+              </div>
+              <div class="inner-subtab-panel" data-inner-subtab-panel="all-skins-admin" hidden>
+                <div class="dino-history-list" data-all-skins-list="admin">
+                  <p class="empty-state">No admin-created skins yet.</p>
+                </div>
+              </div>
+              <div class="inner-subtab-panel" data-inner-subtab-panel="all-skins-member" hidden>
+                <div class="dino-history-list" data-all-skins-list="member">
+                  <p class="empty-state">No member-created skins yet.</p>
+                </div>
+              </div>
+            </div>
+          </section>
           </div>
 
           <div class="inner-subtab-panel" data-inner-subtab-panel="passkeys" hidden>
@@ -1663,6 +1690,14 @@
                 <button class="secondary-button" type="button" data-skinlab-library-test-step="1">Test +1</button>
               </div>
             </form>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">My Skins</div>
+            <p class="dino-park-note">Only the skins you've saved yourself — no visibility into anyone else's.</p>
+            <div class="dino-history-list" data-skinlab-own-skins-list>
+              <p class="empty-state">No saved skins yet.</p>
+            </div>
           </section>
           </div>
         </section>
