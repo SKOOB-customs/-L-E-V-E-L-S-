@@ -4987,15 +4987,43 @@ const compMutationPresetForSpecies = (species) => {
   return null;
 };
 
+// Elder B has no fixed preset — the Ayo loadouts this is mirrored from
+// never filled it either, so there's no "correct" answer to hardcode.
+// Instead, each of its 4 slots gets a genuinely random pick (re-rolled
+// every time this runs) from whichever mutations are actually eligible
+// for that species — same diet check (mutationAllowedForSpecies) and
+// per-slot restriction (mutationAllowedForSlot, e.g. Gastronomic
+// Regeneration staying parent/elder-only) the dropdown's own option
+// list already enforces — excluding the other 12 slots' mutations and
+// whatever's already been picked for an earlier Elder B slot this same
+// pass, so nothing repeats across the full 16.
+const ELDER_B_FIELDS = ['elderMutationSlot1B', 'elderMutationSlot2B', 'elderMutationSlot3B', 'elderMutationSlot4B'];
+const fillRandomElderBMutations = (species, preset) => {
+  const usedNames = new Set(Object.values(preset));
+  ELDER_B_FIELDS.forEach((field) => {
+    const select = document.querySelector(`[data-comp-mutation-field="${field}"]`);
+    if (!select) return;
+    const eligible = mutationCatalog.filter((m) => mutationAllowedForSpecies(m.diet, species)
+      && mutationAllowedForSlot(m, field)
+      && !usedNames.has(m.name));
+    if (eligible.length === 0) return;
+    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    select.value = pick.name;
+    usedNames.add(pick.name);
+  });
+};
+
 // Applies whichever preset matches the CURRENTLY selected species to
 // whichever mutation slots are actually rendered right now — called
 // after every render, not just on a species change, so lowering
 // entombments to "2 — 12" or "1 — 8" instead of "3 — 16" keeps those
 // slots filled with the preset instead of reverting to "— none —".
 // Each preset mutation only ever goes into its own named tier/slot
-// (never reassigned to a different tier), so which ones end up visible
-// is simply whichever tiers are unlocked at the current entombments
-// level — deterministic, not a random reshuffle.
+// (never reassigned to a different tier), so which of the 12 end up
+// visible is simply whichever tiers are unlocked at the current
+// entombments level — deterministic, not a random reshuffle. Elder B
+// (only visible at "3 — 16") is the one part that IS randomized every
+// time, via fillRandomElderBMutations above.
 const applyCompMutationPreset = () => {
   const species = document.querySelector('[data-comp-species]')?.value;
   const preset = compMutationPresetForSpecies(species);
@@ -5004,6 +5032,7 @@ const applyCompMutationPreset = () => {
     const field = select.dataset.compMutationField;
     if (preset[field]) select.value = preset[field];
   });
+  fillRandomElderBMutations(species, preset);
 };
 
 // Entombments defaults to "3 — 16" the first time a carnivore/herbivore
