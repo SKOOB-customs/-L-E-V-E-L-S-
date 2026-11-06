@@ -1212,6 +1212,7 @@
             <button class="inner-subtab-button" type="button" data-inner-subtab="passkeys">Passkeys</button>
             <button class="inner-subtab-button" type="button" data-inner-subtab="logs">Logs</button>
             <button class="inner-subtab-button" type="button" data-inner-subtab="owner-factions">Factions</button>
+            <button class="inner-subtab-button" type="button" data-inner-subtab="events">Events</button>
           </div>
 
           <div class="inner-subtab-panel is-active" data-inner-subtab-panel="skin-library">
@@ -1479,6 +1480,42 @@
                 <button class="action-button" type="submit">Move player</button>
               </div>
             </form>
+          </section>
+          </div>
+
+          <div class="inner-subtab-panel" data-inner-subtab-panel="events" hidden>
+          <section class="panel content-box">
+            <div class="mini-heading">Mini War Event Scores</div>
+            <p class="dino-park-note">A separate, simpler zone-capture mini-event from the real monthly War — every faction member physically inside the zone below banks their faction a point each minute while active.</p>
+            <p class="dino-park-note" data-event-status-note>Checking…</p>
+            <div class="info-list">
+              <div class="faction-rank-row"><strong>Carcharo Dominion</strong><span data-event-score="carcharo">0</span></div>
+              <div class="faction-rank-row"><strong>Dromaeosaur Pact</strong><span data-event-score="dromaeosaur">0</span></div>
+              <div class="faction-rank-row"><strong>Mosasaur Thalassocracy</strong><span data-event-score="mosasaur">0</span></div>
+            </div>
+            <div class="submit-actions">
+              <button class="action-button" type="button" data-event-toggle disabled>Start Event</button>
+              <button class="secondary-button" type="button" data-event-reset-scores>Reset Scores</button>
+            </div>
+          </section>
+
+          <section class="panel content-box">
+            <div class="mini-heading">Event Zone</div>
+            <p class="dino-park-note">Capture live in-game, same as every other coordinate on this site — one circular zone. Must be set before the event can be started.</p>
+            <form class="submit-form" data-event-zone-form>
+              <div class="field-row two-up">
+                <label>X <input type="number" step="any" data-event-zone="x" required /></label>
+                <label>Y <input type="number" step="any" data-event-zone="y" required /></label>
+              </div>
+              <div class="field-row two-up">
+                <label>Z <input type="number" step="any" data-event-zone="z" required /></label>
+                <label>Radius <input type="number" step="any" value="3000" data-event-zone="radius" required /></label>
+              </div>
+              <div class="submit-actions">
+                <button class="action-button" type="submit">Save zone</button>
+              </div>
+            </form>
+            <p class="dino-park-note" data-event-zone-status></p>
           </section>
           </div>
           </div>

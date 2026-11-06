@@ -954,6 +954,26 @@ const readFactionPlaytimeIndex = async (env) => {
   }
 };
 
+// Mini War Event (Owner tab's Events sub-tab) — see the routes' own
+// comment for the full picture. active defaults false and zone null
+// until an owner actually sets them through the UI.
+const readFactionEventIndex = async (env) => {
+  const empty = { active: false, zone: null, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
+  if (!env.PARKED_KV) return empty;
+  const raw = await env.PARKED_KV.get('faction_event:index');
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      active: !!parsed.active,
+      zone: parsed.zone || null,
+      scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0, ...(parsed.scores || {}) },
+    };
+  } catch {
+    return empty;
+  }
+};
+
 // Written by syncFactionWar's RCON sweep every minute — see its own
 // comment for why this is cached instead of each caller doing its own
 // RCON round trip.
@@ -1151,6 +1171,21 @@ const syncFactionWar = async (env) => {
     playtimeData.totals[p.steamId] = (playtimeData.totals[p.steamId] || 0) + 1;
   }
   await putIndexIfChanged(env, 'faction_playtime:index', playtimeData);
+
+  // 1a. Mini War Event (Owner tab's Events sub-tab) — separate from the
+  // calendar-anchored War below, owner-toggled on/off. Same per-capita
+  // "everyone physically inside the zone this minute banks their
+  // faction a point" model, just one simple circular zone instead of
+  // the full hotzone/sanctuary/moving-zone system.
+  const eventData = await readFactionEventIndex(env);
+  if (eventData.active && eventData.zone) {
+    for (const p of spawned) {
+      if (isWithinZone(p.location, eventData.zone, eventData.zone.radius)) {
+        eventData.scores[p.factionId] = (eventData.scores[p.factionId] || 0) + 1;
+      }
+    }
+    await putIndexIfChanged(env, 'faction_event:index', eventData);
+  }
 
   // 2. War scoring/sanctuaries/currency — only while a war is active.
   let warData = await readWarIndex(env);
@@ -5785,6 +5820,114 @@ export default {
         return json({ ok: true, previousFactionId, factionId });
       } catch (error) {
         return json({ error: error.message || 'Moving that player failed' }, 502);
+      }
+    }
+
+    // ── Mini War Event (Owner tab's own Events sub-tab) ──
+    //
+    // A separate, simpler zone-capture event from the calendar-anchored
+    // War above — owner-toggled on/off (no auto-start), one circular
+    // zone, same per-capita "everyone physically inside it this minute
+    // banks their faction a point" model syncFactionWar's real hotzones
+    // already use. Scored inside syncFactionWar itself (reusing its
+    // already-fetched RCON sweep, see the "1a." block there) rather than
+    // a second cron task doing its own separate RCON round trip. Owner
+    // tier only, same as every other faction-admin route — this is
+    // entirely Owner-tab tooling for now, no player-facing surface yet.
+    if (url.pathname === '/faction-event-status' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      const tier = await getAdminTier(env, steamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
+      try {
+        const eventData = await readFactionEventIndex(env);
+        return json({ ok: true, ...eventData });
+      } catch (error) {
+        return json({ error: error.message || 'Event status lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-set-event-zone' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, x, y, z, radius } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
+      if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+        return json({ error: 'x/y/z must be numeric' }, 400);
+      }
+      const radiusNum = Number(radius);
+      if (!Number.isFinite(radiusNum) || radiusNum <= 0) {
+        return json({ error: 'radius must be a positive number' }, 400);
+      }
+      try {
+        const eventData = await readFactionEventIndex(env);
+        eventData.zone = { x, y, z, radius: radiusNum };
+        await putIndexIfChanged(env, 'faction_event:index', eventData);
+        return json({ ok: true, zone: eventData.zone });
+      } catch (error) {
+        return json({ error: error.message || 'Event zone save failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-event-toggle' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId, active } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
+      try {
+        const eventData = await readFactionEventIndex(env);
+        if (active && !eventData.zone) {
+          return json({ error: 'Set the event zone before starting it.' }, 400);
+        }
+        eventData.active = !!active;
+        await putIndexIfChanged(env, 'faction_event:index', eventData);
+        return json({ ok: true, active: eventData.active });
+      } catch (error) {
+        return json({ error: error.message || 'Event toggle failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/faction-admin-event-reset-scores' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
+      try {
+        const eventData = await readFactionEventIndex(env);
+        eventData.scores = { carcharo: 0, dromaeosaur: 0, mosasaur: 0 };
+        await putIndexIfChanged(env, 'faction_event:index', eventData);
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Score reset failed' }, 502);
       }
     }
 

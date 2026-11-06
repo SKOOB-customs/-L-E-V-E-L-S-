@@ -4119,6 +4119,7 @@ const checkAdminPanelAccess = async () => {
       if (isOwner) {
         loadModerationLog();
         loadSkinLibraryTrash();
+        loadFactionEventStatus();
         const skinIdeasToggle = document.getElementById('skinIdeasToggle');
         if (skinIdeasToggle) skinIdeasToggle.hidden = false;
         loadSkinIdeasList();
@@ -4840,6 +4841,127 @@ document.querySelector('[data-faction-move-form]')?.addEventListener('submit', a
     showToast('Could not reach the server right now.');
   } finally {
     if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+// ── Owner tab: Events sub-tab (Mini War Event) ──
+//
+// A separate, simpler owner-toggled zone-capture event from the real
+// monthly War — one circular zone, same per-capita scoring model,
+// scored server-side inside syncFactionWar's own RCON sweep (see that
+// function's own comment). This is purely the owner-facing controls;
+// there's no player-facing surface for this yet.
+const renderFactionEventStatus = (data) => {
+  const statusNote = document.querySelector('[data-event-status-note]');
+  const toggleBtn = document.querySelector('[data-event-toggle]');
+  const zoneStatus = document.querySelector('[data-event-zone-status]');
+
+  Object.keys(FACTION_DISPLAY).forEach((factionId) => {
+    const el = document.querySelector(`[data-event-score="${factionId}"]`);
+    if (el) el.textContent = data.scores?.[factionId] ?? 0;
+  });
+
+  const hasZone = !!data.zone;
+  if (zoneStatus) {
+    zoneStatus.textContent = hasZone
+      ? `Zone set: X ${data.zone.x}, Y ${data.zone.y}, Z ${data.zone.z}, radius ${data.zone.radius}.`
+      : 'No zone set yet — the event can\'t be started until one is saved below.';
+  }
+  if (toggleBtn) {
+    toggleBtn.disabled = !hasZone;
+    toggleBtn.textContent = data.active ? 'Stop Event' : 'Start Event';
+  }
+  if (statusNote) {
+    statusNote.textContent = data.active
+      ? 'Event is active — players in the zone are banking points.'
+      : 'Event is not active.';
+  }
+};
+
+const loadFactionEventStatus = async () => {
+  try {
+    const response = await fetch('/api/faction-event-status');
+    const data = await response.json();
+    if (response.ok && data.ok) renderFactionEventStatus(data);
+  } catch (error) {
+    console.debug('Faction event status load failed:', error);
+  }
+};
+
+document.querySelector('[data-event-zone-form]')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const payload = {};
+  document.querySelectorAll('[data-event-zone]').forEach((input) => {
+    payload[input.dataset.eventZone] = Number(input.value);
+  });
+  const submitBtn = event.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-set-event-zone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not save the event zone.');
+    } else {
+      showToast('Event zone saved.');
+      loadFactionEventStatus();
+    }
+  } catch (error) {
+    console.debug('Event zone save failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+});
+
+document.querySelector('[data-event-toggle]')?.addEventListener('click', async (event) => {
+  const btn = event.target;
+  const nextActive = btn.textContent.trim() === 'Start Event';
+  btn.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-event-toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: nextActive }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not toggle the event.');
+    } else {
+      showToast(nextActive ? 'Event started.' : 'Event stopped.');
+      loadFactionEventStatus();
+    }
+  } catch (error) {
+    console.debug('Event toggle failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.querySelector('[data-event-reset-scores]')?.addEventListener('click', async (event) => {
+  const btn = event.target;
+  btn.disabled = true;
+  try {
+    const response = await fetch('/api/faction-admin-event-reset-scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      showToast(data.error || 'Could not reset scores.');
+    } else {
+      showToast('Scores reset.');
+      loadFactionEventStatus();
+    }
+  } catch (error) {
+    console.debug('Event score reset failed:', error);
+    showToast('Could not reach the server right now.');
+  } finally {
+    btn.disabled = false;
   }
 });
 
