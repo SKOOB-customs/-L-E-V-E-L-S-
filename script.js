@@ -2375,22 +2375,23 @@ const setDinoView = (view, message) => {
   }
 };
 
-// Map calibration for THE_DINO_ISLE_MAP.jpg (2026-10-27) — re-derived
-// when the map art changed from gateway.png. Anchored on one precise,
-// live-captured point: standing exactly at the Dome's center reported
-// world (x: -40299, y: 114257), matched against that structure's own
-// pixel position on the new art (visually estimated — the large
-// thick-walled ring near "Highlands J Sector", roughly 35.25% across /
-// 69% down the image). Only one anchor point was available, so the
-// world-span (MAX-MIN) each axis covers is carried over unchanged from
-// the previous gateway.png calibration — that fixes the Dome's position
-// exactly right, but the overall scale is inherited, not independently
-// re-verified, so nudge these (or ask for a shift) if anything else on
-// the map reads off.
-const MAP_MIN_X = -434;
-const MAP_MAX_X = 682;
-const MAP_MIN_Y = -653;
-const MAP_MAX_Y = 459;
+// Map calibration for THE_DINO_ISLE_MAP.jpg (2026-11-07) — re-derived from
+// TWO precise, live-captured anchor points instead of one, which is what
+// let this get solved properly instead of just translated:
+//   1) Dome center, world (x: -40299, y: 114257) — the large thick-walled
+//      ring near "Highlands J Sector", ~35.25% across / 69% down the image.
+//   2) Volcano center, world (x: 267245, y: -285490) — the grey crater
+//      shape directly under the "North Lake" label, ~56% across / 51% down.
+// The previous calibration only had the Dome point, so it could fix that
+// one location exactly but had to inherit its world-span (MAX-MIN) from
+// the older gateway.png art unverified — which is exactly what put the
+// volcano (and the live marker generally) off. With two points, both the
+// offset AND the span are solved directly rather than assumed. If anything
+// still reads off, nudge these per live feedback the same way as before.
+const MAP_MIN_X = -561;
+const MAP_MAX_X = 916;
+const MAP_MIN_Y = -1402;
+const MAP_MAX_Y = 796;
 
 const worldToMapFraction = (worldX, worldY) => {
   const sx = worldX / 1000;
