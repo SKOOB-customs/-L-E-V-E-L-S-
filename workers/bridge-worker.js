@@ -5513,7 +5513,9 @@ export default {
         // height, which triggered fatal fall damage on landing. Treated
         // the same as Dome now: a real player's live position, trusted
         // exact, no buffer.
-        const destination = { x: sanctuary.x, y: sanctuary.y, z: sanctuary.z };
+        // factionId rides along so the mod can flash the landing in the
+        // right faction color — it has no faction data of its own.
+        const destination = { x: sanctuary.x, y: sanctuary.y, z: sanctuary.z, factionId };
         const requestId = await requestSanctuaryTeleport(env, steamId, destination);
         return json({ ok: true, requestId });
       } catch (error) {

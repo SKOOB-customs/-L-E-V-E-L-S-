@@ -2055,7 +2055,44 @@ end
 -- whatever X/Y/Z the Worker sends (the caller's own faction's sanctuary
 -- point, decided server-side; this mod has no concept of factions at
 -- all, it just trusts the request the same way every other
--- website-triggered request here is trusted).
+-- website-triggered request here is trusted). factionId rides along in
+-- the same request purely to pick a color/name for the arrival flourish
+-- below — it's not used for anything else.
+local SANCTUARY_FACTION_COLORS = {
+    carcharo = { R = 0.85, G = 0.08, B = 0.08, A = 1.0 },
+    dromaeosaur = { R = 0.10, G = 0.65, B = 0.15, A = 1.0 },
+    mosasaur = { R = 0.10, G = 0.35, B = 0.90, A = 1.0 },
+}
+local SANCTUARY_FACTION_NAMES = {
+    carcharo = "Carcharo Dominion",
+    dromaeosaur = "Dromaeosaur Pact",
+    mosasaur = "Mosasaur Thalassocracy",
+}
+
+-- Brief fade from the faction's color down to clear, so landing at your
+-- sanctuary reads as "arriving home" rather than an ordinary teleport.
+-- Untested engine call (this mod hasn't driven a camera fade before) —
+-- pcall-wrapped like every other uncertain engine call here so a failure
+-- here never blocks the actual teleport or its notification.
+local function tryFactionCameraFlash(steam, factionId)
+    local color = SANCTUARY_FACTION_COLORS[factionId]
+    if color == nil then return end
+    local gm = findGameMode()
+    if gm == nil then return end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    if ctrl == nil then return end
+    local okFade, errFade = pcall(function()
+        local camMgr = ctrl.PlayerCameraManager
+        if camMgr ~= nil then
+            camMgr:StartCameraFade(1.0, 0.0, 1.5, color, false, false)
+        end
+    end)
+    if not okFade then
+        log("Sanctuary camera flash failed: " .. tostring(errFade))
+    end
+end
+
 local function sanctuaryTeleportRequestFilePath(steam)
     return SAVED_DIR .. "/sanctuary_teleport_request_" .. steam .. ".json"
 end
@@ -2075,9 +2112,15 @@ local function checkWebsiteSanctuaryTeleportRequest(steam)
     local x = jsonReadNumber(body, "x")
     local y = jsonReadNumber(body, "y")
     local z = jsonReadNumber(body, "z")
+    local factionId = jsonReadString(body, "factionId")
     if requestId == nil or x == nil or y == nil or z == nil then return end
 
     local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    if ok and factionId ~= nil then
+        local name = SANCTUARY_FACTION_NAMES[factionId]
+        if name ~= nil then message = "Welcome home, " .. name .. "." end
+        tryFactionCameraFlash(steam, factionId)
+    end
     safeNotify(steam, message)
     log("Sanctuary teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))
