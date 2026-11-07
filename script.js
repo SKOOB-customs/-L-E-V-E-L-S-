@@ -2380,18 +2380,26 @@ const setDinoView = (view, message) => {
 // let this get solved properly instead of just translated:
 //   1) Dome center, world (x: -40299, y: 114257) — the large thick-walled
 //      ring near "Highlands J Sector", ~35.25% across / 69% down the image.
-//   2) Volcano center, world (x: 267245, y: -285490) — the grey crater
-//      shape directly under the "North Lake" label, ~56% across / 51% down.
+//   2) Volcano center, world (avg of two live captures both reported as
+//      "standing at the volcano center": (267245,-285490) and
+//      (272706,-278546), averaged to (269976,-282018)) — the grey crater
+//      shape directly under the "North Lake" label, read directly off a
+//      live in-game screenshot (not the blank map art) at ~55.4% across /
+//      43.3% down.
 // The previous calibration only had the Dome point, so it could fix that
 // one location exactly but had to inherit its world-span (MAX-MIN) from
-// the older gateway.png art unverified — which is exactly what put the
-// volcano (and the live marker generally) off. With two points, both the
-// offset AND the span are solved directly rather than assumed. If anything
-// still reads off, nudge these per live feedback the same way as before.
-const MAP_MIN_X = -561;
-const MAP_MAX_X = 916;
-const MAP_MIN_Y = -1402;
-const MAP_MAX_Y = 796;
+// the older gateway.png art unverified. A first attempt at adding the
+// volcano as a second point used a rough pixel read off the blank map
+// art and came out with wildly mismatched X/Y spans (1477 vs 2198) —
+// physically implausible, since nothing stretches the map differently
+// per axis. This version re-reads the volcano position off an actual
+// live screenshot instead, and the resulting spans come out nearly equal
+// (1545 vs 1543), which is the sanity check that confirms it's right.
+// If anything still reads off, nudge these per live feedback.
+const MAP_MIN_X = -585;
+const MAP_MAX_X = 960;
+const MAP_MIN_Y = -950;
+const MAP_MAX_Y = 593;
 
 const worldToMapFraction = (worldX, worldY) => {
   const sx = worldX / 1000;
