@@ -999,9 +999,9 @@ const readFactionOnlineIndex = async (env) => {
 // directly if the real sanctuary ever needs to move; the form's own
 // sanctuary fields no longer have any effect.
 const DEFAULT_FACTION_SANCTUARIES = {
-  carcharo: { x: 304450.792, y: -395191.048, z: 22343.062 },
-  dromaeosaur: { x: -321205.446, y: 102218.296, z: 22151.242 },
-  mosasaur: { x: -293096.653, y: 504991.026, z: 20757.805 },
+  carcharo: { x: 89052, y: -326842, z: 20884 },
+  dromaeosaur: { x: 505030, y: -297474, z: 20889 },
+  mosasaur: { x: -394864, y: 303721, z: 22474 },
 };
 
 const readWarZonesIndex = async (env) => {
