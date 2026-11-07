@@ -366,6 +366,28 @@ local function mutationsToJsonFragment(mutations)
     return table.concat(parts, ",")
 end
 
+-- Shared with skinChargeEntryToJson's own colorParts loop below — same
+-- recipe, pulled out so dinoToJson (a parked-snapshot writer that
+-- previously never needed to round-trip a skin) can reuse it for the
+-- Event Dino faction-skin grant.
+local function skinColorsToJsonFragment(colors)
+    local parts = {}
+    for _, field in ipairs(SKIN_COLOR_FIELDS) do
+        local c = colors[field]
+        if c ~= nil then
+            table.insert(parts, string.format('"%s":{"r":%f,"g":%f,"b":%f,"a":%f}',
+                field, c.R, c.G, c.B, c.A or 1.0))
+        end
+    end
+    if colors.PatternIndex ~= nil then
+        table.insert(parts, string.format('"PatternIndex":%d', colors.PatternIndex))
+    end
+    if colors.SkinVariation ~= nil then
+        table.insert(parts, string.format('"SkinVariation":%d', colors.SkinVariation))
+    end
+    return table.concat(parts, ",")
+end
+
 local function dinoToJson(state)
     -- statsArePercentages/forcePrimeOnRedeem/noGift were previously only
     -- ever produced Worker-side (compensation grants, via plain
@@ -374,12 +396,25 @@ local function dinoToJson(state)
     -- fallback) can also stamp them. Always present now, defaulting to
     -- false for every normal !park capture (state.* is nil there), so
     -- this is a no-op for the ordinary case.
+    --
+    -- skin is new — ordinary !park captures and most grants never set
+    -- state.skin, so this stays an empty "skin":{} (loadParkedDinos'
+    -- matcher needs SOME {} to find, but an empty colors table there is
+    -- indistinguishable from "no skin" since every per-field read is
+    -- nil-checked). The Event Dino faction-skin grant is the one case
+    -- that actually populates it, same {name, colors} shape
+    -- /skin-attach-parked already writes directly.
+    local skinFragment = "{}"
+    if state.skin ~= nil then
+        skinFragment = string.format('{"name":"%s","colors":{%s}}',
+            jsonEscape(state.skin.name or ""), skinColorsToJsonFragment(state.skin.colors or {}))
+    end
     return string.format(
         '{"name":"%s","classPath":"%s","growth":%f,"health":%f,' ..
         '"maxHealth":%f,"stamina":%f,"hunger":%f,"thirst":%f,"maxHunger":%f,"maxThirst":%f,' ..
         '"maxStamina":%f,"primeElder":%s,"bodyColorR":%f,"bodyColorG":%f,"bodyColorB":%f,' ..
         '"capturedAt":%d,"entombments":%d,"dinoId":"%s",' ..
-        '"statsArePercentages":%s,"forcePrimeOnRedeem":%s,"noGift":%s,%s}',
+        '"statsArePercentages":%s,"forcePrimeOnRedeem":%s,"noGift":%s,"skin":%s,%s}',
         jsonEscape(state.name or ""), jsonEscape(state.classPath), state.growth,
         state.health, state.maxHealth or 0, state.stamina, state.hunger, state.thirst,
         state.maxHunger or 0, state.maxThirst or 0, state.maxStamina or 0,
@@ -389,6 +424,7 @@ local function dinoToJson(state)
         state.statsArePercentages and "true" or "false",
         state.forcePrimeOnRedeem and "true" or "false",
         state.noGift and "true" or "false",
+        skinFragment,
         mutationsToJsonFragment(state.mutations)
     )
 end
@@ -1194,7 +1230,23 @@ local DOME_NO_PARK_RADIUS = 62688
 -- Core park logic shared by the in-game !park command and website-
 -- triggered park requests (the Live Dino tab's Park button — see the
 -- website-bridge section below). Returns ok (bool), message (string).
+-- Mirrored every minute by syncFactionWar's own Live Event flag write —
+-- shared (not per-steamId), since this applies to every player the same
+-- way regardless of faction. Missing file / unreadable just means "not
+-- active", same fail-open-to-normal-behavior posture as every other
+-- optional read in this file.
+local function isLiveEventActive()
+    local path = SAVED_DIR .. "/live_event_active.json"
+    if not fileExists(path) then return false end
+    local body = readAll(path)
+    if body == nil or body == "" then return false end
+    return jsonReadBool(body, "active")
+end
+
 local function tryPark(steam, name)
+    if isLiveEventActive() then
+        return false, "Parking is disabled during the Live Event — park once it ends."
+    end
     local gm = findGameMode()
     if gm == nil then return false, "Park failed: internal error." end
     local ctrl
@@ -2223,7 +2275,7 @@ end
 -- redeem (forcePrimeOnRedeem/statsArePercentages, same fields
 -- /compensation-grant's "Grant as Primed" uses), and flagged noGift so
 -- /gift-dino rejects it unconditionally regardless of who owns it later.
-local function grantTrainingDino(steam, classPath, growth, mutations)
+local function grantTrainingDino(steam, classPath, growth, mutations, skinColors)
     local dinos = loadParkedDinos(steam)
     local capturedAt = os.time()
     local taken = {}
@@ -2249,6 +2301,7 @@ local function grantTrainingDino(steam, classPath, growth, mutations)
         statsArePercentages = true,
         forcePrimeOnRedeem = true,
         noGift = true,
+        skin = skinColors and { name = "Event Skin", colors = skinColors } or nil,
     })
     return writeParkedDinos(steam, dinos)
 end
@@ -2359,7 +2412,7 @@ local function eventDinoResultFilePath(steam)
     return SAVED_DIR .. "/event_dino_result_" .. steam .. ".json"
 end
 
-local function tryEventDino(steam, classPath, species, growth, mutations)
+local function tryEventDino(steam, classPath, species, growth, mutations, skinColors)
     local gm = findGameMode()
     if gm == nil then return false, "Failed: internal error." end
     local ctrl
@@ -2376,6 +2429,11 @@ local function tryEventDino(steam, classPath, species, growth, mutations)
     if speciesMatches then
         pcall(function() pawn:SetGrowth(growth) end)
         applyMutationsDeferred(steam, 3, mutations)
+        if skinColors ~= nil then
+            local okSkin, errSkin = pcall(function() applyCustomizer(pawn, skinColors) end)
+            if okSkin then pcall(function() pawn:ForceNetUpdate() end) end
+            if not okSkin then log("Event Dino: applyCustomizer failed: " .. tostring(errSkin)) end
+        end
         applyPercentageVitalsDeferred(steam, {
             statsArePercentages = true,
             forcePrimeOnRedeem = true,
@@ -2385,15 +2443,15 @@ local function tryEventDino(steam, classPath, species, growth, mutations)
             thirst = 1,
         })
         pcall(function() pawn:ForceNetUpdate() end)
-        return true, "Event Dino applied — growth, Prime, and mutations complete."
+        return true, "Event Dino applied — growth, Prime, mutations, and faction skin complete."
     end
 
-    local okGrant = grantTrainingDino(steam, classPath, growth, mutations)
+    local okGrant = grantTrainingDino(steam, classPath, growth, mutations, skinColors)
     if not okGrant then
         return false, "Could not grant the event dino — try the button again."
     end
     return true, "Not currently a " .. (species or "matching species")
-        .. " — an EVENT'DINO was added to your inventory, redeem it next time you spawn as one."
+        .. " — an EVENT'DINO (with your faction's skin) was added to your inventory, redeem it next time you spawn as one."
 end
 
 local function checkWebsiteEventDinoRequest(steam)
@@ -2416,7 +2474,23 @@ local function checkWebsiteEventDinoRequest(steam)
         if value ~= nil and value ~= "" then mutations[field] = value end
     end
 
-    local ok, message = tryEventDino(steam, classPath, species, growth, mutations)
+    -- Flat object (color fields directly, not nested under "colors" like
+    -- a parked snapshot's skin) — null when the caller isn't in a
+    -- faction, same jsonReadColorField/SKIN_COLOR_FIELDS recipe every
+    -- other skin-colors parse in this file already uses.
+    local skinSection = body:match('"skin"%s*:%s*(%b{})')
+    local skinColors = nil
+    if skinSection ~= nil then
+        skinColors = {}
+        for _, field in ipairs(SKIN_COLOR_FIELDS) do
+            local color = jsonReadColorField(skinSection, field)
+            if color ~= nil then skinColors[field] = color end
+        end
+        skinColors.PatternIndex = jsonReadNumber(skinSection, "PatternIndex")
+        skinColors.SkinVariation = jsonReadNumber(skinSection, "SkinVariation")
+    end
+
+    local ok, message = tryEventDino(steam, classPath, species, growth, mutations, skinColors)
     safeNotify(steam, message)
     log("Event dino request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))

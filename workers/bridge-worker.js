@@ -847,6 +847,43 @@ const EVENT_DINO_SPECIES = [
 const eventDinoMutationsForSpecies = (species) =>
   (SPECIES_DIET[species] === 'herbivore' ? AYO_LOADOUTS.trike.mutations : AYO_LOADOUTS.rex.mutations);
 
+// Faction-colored skin applied alongside the event loadout — literal
+// out-of-range R/A values are intentional (the glitch-skin trick this
+// site's skin system already passes through unvalidated everywhere
+// else), not a mistake to "fix".
+const EVENT_DINO_FACTION_SKINS = {
+  dromaeosaur: {
+    bIsFemale: true, SkinVariation: 8, PatternIndex: 3,
+    MaleDisplayColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+    BodyColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+    FlankColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+    UnderbellyColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+    MarkingsColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+    Detail1Color: { R: -999999999999, G: 999, B: 0, A: -999 },
+    EyesColor: { R: -999999999999, G: 999, B: 0, A: -999 },
+  },
+  mosasaur: {
+    bIsFemale: true, SkinVariation: 8, PatternIndex: 0,
+    MaleDisplayColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+    BodyColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+    FlankColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+    UnderbellyColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+    MarkingsColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+    Detail1Color: { R: -999999999999, G: 999, B: 999, A: -999 },
+    EyesColor: { R: -999999999999, G: 999, B: 999, A: -999 },
+  },
+  carcharo: {
+    bIsFemale: false, SkinVariation: 8, PatternIndex: 3,
+    MaleDisplayColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    BodyColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    FlankColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    UnderbellyColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    MarkingsColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    Detail1Color: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+    EyesColor: { R: 99999999999999999999, G: 0, B: 0, A: -999 },
+  },
+};
+
 const eventDinoRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/event_dino_request_${steamId}.json`;
 const eventDinoResultPath = (steamId) => `${REDEEM_SAVED_DIR}/event_dino_result_${steamId}.json`;
 const requestEventDino = (env, steamId, payload) =>
@@ -1022,17 +1059,23 @@ const readFactionPlaytimeIndex = async (env) => {
   }
 };
 
-// Best-fit circle around 8 live-captured points tracing the zone
-// boundary around the volcano (centroid + average distance to each
-// point). Only a default — the Owner tab's form can still set/replace
-// it, this just means Start Event doesn't need the form filled out
-// first since a real zone is already there.
-const DEFAULT_EVENT_ZONE = { x: 262307, y: -279740, z: 54115, radius: 30668 };
+// Circle around 8 live-captured points tracing the zone boundary around
+// the volcano — centroid, radius sized to the FARTHEST of the 8 points
+// (plus a small margin) so the circle actually encloses all of them.
+// An earlier version used the average distance instead, which left 5 of
+// the 8 points outside the circle — confirmed live: players standing on
+// those points weren't scoring. Always overrides whatever's in KV (same
+// pattern as DEFAULT_FACTION_SANCTUARIES) since this was set from raw
+// coordinates rather than the Owner tab's own zone form — there's no
+// admin customization here to preserve, and this is also what makes the
+// above fix actually take effect for a faction_event:index already
+// written with the old radius.
+const DEFAULT_EVENT_ZONE = { x: 262307, y: -279740, z: 54115, radius: 41500 };
 
 // Mini War Event (Owner tab's Events sub-tab) — see the routes' own
 // comment for the full picture. active defaults false until an owner
-// actually starts it through the UI; zone falls back to the default
-// above until the form sets/replaces it.
+// actually starts it through the UI; zone always comes from the
+// default above (see its own comment for why).
 const readFactionEventIndex = async (env) => {
   const empty = { active: false, zone: DEFAULT_EVENT_ZONE, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
   if (!env.PARKED_KV) return empty;
@@ -1042,7 +1085,7 @@ const readFactionEventIndex = async (env) => {
     const parsed = JSON.parse(raw);
     return {
       active: !!parsed.active,
-      zone: parsed.zone || DEFAULT_EVENT_ZONE,
+      zone: DEFAULT_EVENT_ZONE,
       scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0, ...(parsed.scores || {}) },
     };
   } catch {
@@ -1197,8 +1240,24 @@ const finalizeWar = (warData) => {
 // out-of-sanctuary currency payout (war-active only). Same RCON_BRIDGE
 // Durable Object + PLAYER_DATA_OPCODE + parseAllPlayerDinos the
 // /all-positions route already uses for this exact kind of sweep.
+// Mirrors the Live Event's active flag onto the game server so tryPark
+// (both the website's Park button and the in-game !park command) can
+// block parking during the event without its own round trip — same
+// "Worker writes, mod polls" shape as every other website-triggered mod
+// behavior, just one shared file instead of per-steamId.
+const LIVE_EVENT_ACTIVE_FLAG_PATH = `${PARKED_SAVED_DIR}/live_event_active.json`;
+
 const syncFactionWar = async (env) => {
   if (!env.PARKED_KV || !env.RCON_HOST || !env.RCON_PORT || !env.RCON_PASSWORD || !env.RCON_BRIDGE) return;
+
+  try {
+    const eventData = await readLiveEventIndex(env);
+    const now = Date.now();
+    const active = now >= eventData.startAt && now < eventData.endAt;
+    await pterodactylWriteFile(env, LIVE_EVENT_ACTIVE_FLAG_PATH, JSON.stringify({ active }));
+  } catch (error) {
+    console.error('syncFactionWar: live event flag write failed:', error.message);
+  }
 
   const factionsData = await readFactionsIndex(env);
   if (Object.keys(factionsData.members).length === 0) return; // no one's joined yet — nothing to do
@@ -1249,16 +1308,20 @@ const syncFactionWar = async (env) => {
   await putIndexIfChanged(env, 'faction_playtime:index', playtimeData);
 
   // 1a. Mini War Event (Owner tab's Events sub-tab) — separate from the
-  // calendar-anchored War below, owner-toggled on/off. Same per-capita
-  // "everyone physically inside the zone this minute banks their
-  // faction a point" model, just one simple circular zone instead of
-  // the full hotzone/sanctuary/moving-zone system.
+  // calendar-anchored War below, owner-toggled on/off. Per-capita,
+  // everyone physically inside the zone this minute banks their own
+  // faction points — 25 each while only one faction is present
+  // (uncontested), dropping to 13 each the moment a rival faction's
+  // player is also inside (contested) — a zone-wide state, not a
+  // per-player one, so a lone defender's take drops the instant an
+  // enemy walks in too, same as everyone else's.
   const eventData = await readFactionEventIndex(env);
   if (eventData.active && eventData.zone) {
-    for (const p of spawned) {
-      if (isWithinZone(p.location, eventData.zone, eventData.zone.radius)) {
-        eventData.scores[p.factionId] = (eventData.scores[p.factionId] || 0) + 1;
-      }
+    const inZone = spawned.filter((p) => isWithinZone(p.location, eventData.zone, eventData.zone.radius));
+    const factionsPresent = new Set(inZone.map((p) => p.factionId));
+    const pointsPerPlayer = factionsPresent.size > 1 ? 13 : 25;
+    for (const p of inZone) {
+      eventData.scores[p.factionId] = (eventData.scores[p.factionId] || 0) + pointsPerPlayer;
     }
     await putIndexIfChanged(env, 'faction_event:index', eventData);
   }
@@ -5715,11 +5778,14 @@ export default {
           if (beforeStart) return json({ error: 'The event hasn\'t started yet.' }, 403);
           return json({ error: 'The event has ended.' }, 403);
         }
+        const factionsData = await readFactionsIndex(env);
+        const factionId = factionsData.members[steamId]?.factionId || null;
         const requestId = await requestEventDino(env, steamId, {
           classPath: classPathForSpecies(species),
           species,
           growth: EVENT_DINO_GROWTH,
           mutations: eventDinoMutationsForSpecies(species),
+          skin: factionId ? EVENT_DINO_FACTION_SKINS[factionId] : null,
         });
         return json({ ok: true, requestId });
       } catch (error) {

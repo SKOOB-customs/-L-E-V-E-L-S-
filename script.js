@@ -2417,6 +2417,39 @@ const worldToMapFraction = (worldX, worldY) => {
   return { fx, fy };
 };
 
+// Mini War Event zone outline — the 8 live-captured points tracing the
+// boundary around the volcano, given one after another in walking order
+// around it, so connecting them in that same order (closing back to the
+// first) draws the actual shape rather than the simplified circle the
+// Worker uses server-side for the isWithinZone math. Static geometry
+// (doesn't change), so this renders once on load; only its hidden/shown
+// state tracks the event's active flag, piggybacked on the scoreboard
+// poll below rather than a separate fetch.
+const EVENT_ZONE_BOUNDARY_POINTS = [
+  { x: 292793, y: -307350 },
+  { x: 281736, y: -312226 },
+  { x: 266518, y: -311970 },
+  { x: 240325, y: -284285 },
+  { x: 245676, y: -270219 },
+  { x: 248785, y: -257835 },
+  { x: 255553, y: -248480 },
+  { x: 267072, y: -245553 },
+];
+
+const renderEventZonePolygon = () => {
+  const polygon = document.querySelector('[data-map-event-zone-polygon]');
+  if (!polygon) return;
+  const pointsAttr = EVENT_ZONE_BOUNDARY_POINTS
+    .map((p) => {
+      const { fx, fy } = worldToMapFraction(p.x, p.y);
+      return `${(fx * 100).toFixed(2)},${(fy * 100).toFixed(2)}`;
+    })
+    .join(' ');
+  polygon.setAttribute('points', pointsAttr);
+};
+
+renderEventZonePolygon();
+
 // Small manual calibration nudge for the marker DOT itself (not the
 // artwork — an earlier attempt shifted the .map-image with a CSS
 // transform instead, which visually matched but broke the pan/zoom
@@ -3079,10 +3112,15 @@ const tickLiveEventCountdown = () => {
   // the live local check so it also flips true the instant the real
   // countdown hits zero without waiting on the next poll.
   const isActive = liveEventState.active || (now >= liveEventState.startAt && now < liveEventState.endAt);
+  // Parking is rejected mod-side during the event (blocks the in-game
+  // !park command too, not just this button) — disabling it here is
+  // just so the button itself explains why instead of silently failing.
+  const parkBtn = document.querySelector('[data-park-dino]');
   if (now >= liveEventState.endAt && !liveEventState.testMode) {
     section.hidden = true;
     if (activeNoteEl) activeNoteEl.hidden = true;
     actionGroups.forEach((el) => { el.hidden = true; });
+    if (parkBtn) { parkBtn.disabled = false; parkBtn.textContent = 'Park Dino'; }
     clearInterval(liveEventTickInterval);
     liveEventTickInterval = null;
     return;
@@ -3090,6 +3128,10 @@ const tickLiveEventCountdown = () => {
   section.hidden = false;
   if (activeNoteEl) activeNoteEl.hidden = !isActive;
   actionGroups.forEach((el) => { el.hidden = !isActive; });
+  if (parkBtn) {
+    parkBtn.disabled = isActive;
+    parkBtn.textContent = isActive ? 'Parking disabled during event' : 'Park Dino';
+  }
   if (isActive) {
     const testSuffix = liveEventState.testMode ? ' (test mode — owner/admin preview)' : '';
     countdownEl.textContent = `Event live${testSuffix} — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
@@ -3131,15 +3173,18 @@ setInterval(loadLiveEventStatus, 30000);
 const loadPublicEventScoreboard = async () => {
   const profile = getSteamProfile();
   const board = document.querySelector('[data-event-scoreboard]');
+  const zoneSvg = document.querySelector('[data-map-event-zone]');
   if (!board) return;
   if (!profile?.steamId) {
     board.hidden = true;
+    if (zoneSvg) zoneSvg.hidden = true;
     return;
   }
   try {
     const response = await fetch('/api/faction-event-public-status');
     const data = await response.json();
     board.hidden = !data.active;
+    if (zoneSvg) zoneSvg.hidden = !data.active;
     if (data.active && data.scores) {
       document.querySelectorAll('[data-event-public-score]').forEach((el) => {
         const factionId = el.dataset.eventPublicScore;
@@ -3149,6 +3194,7 @@ const loadPublicEventScoreboard = async () => {
   } catch (error) {
     console.debug('Public event scoreboard check failed:', error);
     board.hidden = true;
+    if (zoneSvg) zoneSvg.hidden = true;
   }
 };
 
