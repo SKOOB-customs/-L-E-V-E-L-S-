@@ -3067,20 +3067,27 @@ const tickLiveEventCountdown = () => {
   if (!liveEventState) return;
   const section = document.querySelector('[data-live-event-section]');
   const countdownEl = document.querySelector('[data-live-event-countdown]');
-  const actionsEl = document.querySelector('[data-live-event-actions]');
-  if (!section || !countdownEl || !actionsEl) return;
+  const activeNoteEl = document.querySelector('[data-live-event-active-note]');
+  // data-live-event-actions now lives on the Warzone tab (Event
+  // Teleport + Event Dino) — querySelectorAll since Home's countdown box
+  // no longer has its own copy of it.
+  const actionGroups = document.querySelectorAll('[data-live-event-actions]');
+  if (!section || !countdownEl) return;
   const now = Date.now();
   if (now < liveEventState.startAt) {
     section.hidden = false;
-    actionsEl.hidden = true;
+    if (activeNoteEl) activeNoteEl.hidden = true;
+    actionGroups.forEach((el) => { el.hidden = true; });
     countdownEl.textContent = `Event starts in ${formatLiveEventDuration(liveEventState.startAt - now)}`;
   } else if (now < liveEventState.endAt) {
     section.hidden = false;
-    actionsEl.hidden = false;
+    if (activeNoteEl) activeNoteEl.hidden = false;
+    actionGroups.forEach((el) => { el.hidden = false; });
     countdownEl.textContent = `Event live — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
   } else {
     section.hidden = true;
-    actionsEl.hidden = true;
+    if (activeNoteEl) activeNoteEl.hidden = true;
+    actionGroups.forEach((el) => { el.hidden = true; });
     clearInterval(liveEventTickInterval);
     liveEventTickInterval = null;
   }
