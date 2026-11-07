@@ -5506,7 +5506,16 @@ export default {
         const zonesData = await readWarZonesIndex(env);
         const sanctuary = zonesData.sanctuaries[factionId];
         if (!sanctuary) return json({ error: "Your faction's sanctuary hasn't been set yet." }, 400);
-        const requestId = await requestSanctuaryTeleport(env, steamId, sanctuary);
+        // Confirmed live: teleporting to the sanctuary's exact captured Z
+        // dropped the player through the terrain ("under the map") —
+        // same risk Hotzone's own destinations already guard against
+        // (see HOTZONE_Z_SAFETY_BUFFER's comment). Unlike Dome (a real
+        // player's live position, trusted exact), this sanctuary Z
+        // apparently isn't quite sitting on solid ground at that X/Y, so
+        // it gets the same small upward bias and lets gravity settle it
+        // safely instead of clipping into whatever's below.
+        const destination = { x: sanctuary.x, y: sanctuary.y, z: sanctuary.z + HOTZONE_Z_SAFETY_BUFFER };
+        const requestId = await requestSanctuaryTeleport(env, steamId, destination);
         return json({ ok: true, requestId });
       } catch (error) {
         return json({ error: error.message || 'Sanctuary teleport request failed' }, 502);
