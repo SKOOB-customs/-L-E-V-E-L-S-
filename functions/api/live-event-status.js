@@ -26,7 +26,9 @@ export async function onRequestGet({ env, data }) {
   if (!data.authedSteamId) return json({ error: 'Please sign in with Steam again.' }, 401);
 
   try {
-    const response = await fetch(`${origin}/live-event-status`, {
+    const target = new URL(`${origin}/live-event-status`);
+    target.searchParams.set('steamId', data.authedSteamId);
+    const response = await fetch(target.toString(), {
       headers: {
         Accept: 'application/json',
         ...(env.STATUS_API_TOKEN ? { Authorization: `Bearer ${env.STATUS_API_TOKEN}` } : {}),

@@ -3074,22 +3074,27 @@ const tickLiveEventCountdown = () => {
   const actionGroups = document.querySelectorAll('[data-live-event-actions]');
   if (!section || !countdownEl) return;
   const now = Date.now();
-  if (now < liveEventState.startAt) {
-    section.hidden = false;
-    if (activeNoteEl) activeNoteEl.hidden = true;
-    actionGroups.forEach((el) => { el.hidden = true; });
-    countdownEl.textContent = `Event starts in ${formatLiveEventDuration(liveEventState.startAt - now)}`;
-  } else if (now < liveEventState.endAt) {
-    section.hidden = false;
-    if (activeNoteEl) activeNoteEl.hidden = false;
-    actionGroups.forEach((el) => { el.hidden = false; });
-    countdownEl.textContent = `Event live — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
-  } else {
+  // liveEventState.active can be true via an owner/admin test-mode
+  // bypass even while now < startAt (re-polled every 30s) — OR'd with
+  // the live local check so it also flips true the instant the real
+  // countdown hits zero without waiting on the next poll.
+  const isActive = liveEventState.active || (now >= liveEventState.startAt && now < liveEventState.endAt);
+  if (now >= liveEventState.endAt && !liveEventState.testMode) {
     section.hidden = true;
     if (activeNoteEl) activeNoteEl.hidden = true;
     actionGroups.forEach((el) => { el.hidden = true; });
     clearInterval(liveEventTickInterval);
     liveEventTickInterval = null;
+    return;
+  }
+  section.hidden = false;
+  if (activeNoteEl) activeNoteEl.hidden = !isActive;
+  actionGroups.forEach((el) => { el.hidden = !isActive; });
+  if (isActive) {
+    const testSuffix = liveEventState.testMode ? ' (test mode — owner/admin preview)' : '';
+    countdownEl.textContent = `Event live${testSuffix} — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
+  } else {
+    countdownEl.textContent = `Event starts in ${formatLiveEventDuration(liveEventState.startAt - now)}`;
   }
 };
 
@@ -3100,7 +3105,12 @@ const loadLiveEventStatus = async () => {
     const response = await fetch('/api/live-event-status');
     const data = await response.json();
     if (typeof data.startAt !== 'number' || typeof data.endAt !== 'number') return;
-    liveEventState = { startAt: data.startAt, endAt: data.endAt };
+    liveEventState = {
+      startAt: data.startAt,
+      endAt: data.endAt,
+      active: Boolean(data.active),
+      testMode: Boolean(data.testMode),
+    };
     tickLiveEventCountdown();
     if (!liveEventTickInterval) {
       liveEventTickInterval = setInterval(tickLiveEventCountdown, 1000);

@@ -5657,11 +5657,22 @@ export default {
       try {
         const eventData = await readLiveEventIndex(env);
         const now = Date.now();
+        const naturallyActive = now >= eventData.startAt && now < eventData.endAt;
+        // Owner/senior/admin tiers can preview the Warzone tab's event
+        // controls before the real countdown hits zero, to test before
+        // it goes live for everyone — the actual spawn/teleport routes
+        // apply the identical bypass. Scoped to strictly before startAt
+        // so it doesn't also reopen the event for them after endAt.
+        const requesterSteamId = url.searchParams.get('steamId');
+        const beforeStart = now < eventData.startAt;
+        const tier = beforeStart && requesterSteamId ? await getAdminTier(env, requesterSteamId) : null;
+        const testMode = beforeStart && Boolean(tier);
         return json({
           startAt: eventData.startAt,
           endAt: eventData.endAt,
           now,
-          active: now >= eventData.startAt && now < eventData.endAt,
+          active: naturallyActive || testMode,
+          testMode,
           species: EVENT_DINO_SPECIES,
         });
       } catch (error) {
@@ -5689,8 +5700,13 @@ export default {
       try {
         const eventData = await readLiveEventIndex(env);
         const now = Date.now();
-        if (now < eventData.startAt) return json({ error: 'The event hasn\'t started yet.' }, 403);
-        if (now >= eventData.endAt) return json({ error: 'The event has ended.' }, 403);
+        const naturallyActive = now >= eventData.startAt && now < eventData.endAt;
+        const beforeStart = now < eventData.startAt;
+        const testBypass = beforeStart && Boolean(await getAdminTier(env, steamId));
+        if (!naturallyActive && !testBypass) {
+          if (beforeStart) return json({ error: 'The event hasn\'t started yet.' }, 403);
+          return json({ error: 'The event has ended.' }, 403);
+        }
         const requestId = await requestEventDino(env, steamId, {
           classPath: classPathForSpecies(species),
           species,
@@ -5737,8 +5753,13 @@ export default {
         if (!factionId) return json({ error: 'Join a faction first.' }, 403);
         const eventData = await readLiveEventIndex(env);
         const now = Date.now();
-        if (now < eventData.startAt) return json({ error: 'The event hasn\'t started yet.' }, 403);
-        if (now >= eventData.endAt) return json({ error: 'The event has ended.' }, 403);
+        const naturallyActive = now >= eventData.startAt && now < eventData.endAt;
+        const beforeStart = now < eventData.startAt;
+        const testBypass = beforeStart && Boolean(await getAdminTier(env, steamId));
+        if (!naturallyActive && !testBypass) {
+          if (beforeStart) return json({ error: 'The event hasn\'t started yet.' }, 403);
+          return json({ error: 'The event has ended.' }, 403);
+        }
         const point = EVENT_TELEPORT_DESTINATIONS[factionId];
         if (!point) return json({ error: 'No event destination set for your faction.' }, 400);
         const requestId = await requestEventTeleport(env, steamId, { ...point, factionId });
