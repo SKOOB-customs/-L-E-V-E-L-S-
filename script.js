@@ -3046,6 +3046,106 @@ document.querySelector('[data-sanctuary-teleport]')?.addEventListener('click', (
   });
 });
 
+// Live Event — Home tab banner. Timestamps come from /api/live-event-status
+// (the Worker lazily stamps the actual start/end the first time anything
+// asks, anchored to real server time rather than a guess), polled every
+// 30s; the on-screen countdown itself just ticks locally off those two
+// timestamps every second so it doesn't need to hit the network for that.
+let liveEventState = null;
+let liveEventTickInterval = null;
+
+const formatLiveEventDuration = (ms) => {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const tickLiveEventCountdown = () => {
+  if (!liveEventState) return;
+  const section = document.querySelector('[data-live-event-section]');
+  const countdownEl = document.querySelector('[data-live-event-countdown]');
+  const actionsEl = document.querySelector('[data-live-event-actions]');
+  if (!section || !countdownEl || !actionsEl) return;
+  const now = Date.now();
+  if (now < liveEventState.startAt) {
+    section.hidden = false;
+    actionsEl.hidden = true;
+    countdownEl.textContent = `Event starts in ${formatLiveEventDuration(liveEventState.startAt - now)}`;
+  } else if (now < liveEventState.endAt) {
+    section.hidden = false;
+    actionsEl.hidden = false;
+    countdownEl.textContent = `Event live — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
+  } else {
+    section.hidden = true;
+    actionsEl.hidden = true;
+    clearInterval(liveEventTickInterval);
+    liveEventTickInterval = null;
+  }
+};
+
+const loadLiveEventStatus = async () => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) return;
+  try {
+    const response = await fetch('/api/live-event-status');
+    const data = await response.json();
+    if (typeof data.startAt !== 'number' || typeof data.endAt !== 'number') return;
+    liveEventState = { startAt: data.startAt, endAt: data.endAt };
+    tickLiveEventCountdown();
+    if (!liveEventTickInterval) {
+      liveEventTickInterval = setInterval(tickLiveEventCountdown, 1000);
+    }
+  } catch (error) {
+    console.debug('Live event status check failed:', error);
+  }
+};
+
+loadLiveEventStatus();
+setInterval(loadLiveEventStatus, 30000);
+
+document.querySelector('[data-event-dino]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const species = document.querySelector('[data-event-dino-species]')?.value;
+  if (!species) return;
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/event-dino',
+    body: { steamId: profile.steamId, species },
+    buttonEl: btn,
+    idleLabel: 'Event Dino',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino();
+    },
+  });
+});
+
+document.querySelector('[data-event-teleport]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/event-teleport',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Event Teleport',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino();
+    },
+  });
+});
+
 // Inventory gallery — the signed-in player's own currently-parked dinos
 // (scoped server-side by functions/api/parked-list.js, never anyone else's),
 // synced from the game server by workers/bridge-worker.js's scheduled sync.
@@ -4430,7 +4530,7 @@ const enterWarzonePortal = () => {
   }, WARZONE_PORTAL_DURATION_MS);
 };
 
-document.querySelector('[data-enter-warzone]')?.addEventListener('click', enterWarzonePortal);
+document.querySelectorAll('[data-enter-warzone]').forEach((btn) => btn.addEventListener('click', enterWarzonePortal));
 
 const renderFactionJoinCards = (currentFactionId, swapsRemaining) => {
   const grid = document.querySelector('[data-faction-card-grid]');

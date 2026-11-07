@@ -2127,6 +2127,43 @@ local function checkWebsiteSanctuaryTeleportRequest(steam)
     writeRequestResult(sanctuaryTeleportResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Event Teleport ──
+--
+-- Same shape as Sanctuary Teleport — tryHotzoneTeleport reused as-is,
+-- factionId only along for the ride to pick the arrival flourish.
+local function eventTeleportRequestFilePath(steam)
+    return SAVED_DIR .. "/event_teleport_request_" .. steam .. ".json"
+end
+
+local function eventTeleportResultFilePath(steam)
+    return SAVED_DIR .. "/event_teleport_result_" .. steam .. ".json"
+end
+
+local function checkWebsiteEventTeleportRequest(steam)
+    local path = eventTeleportRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local x = jsonReadNumber(body, "x")
+    local y = jsonReadNumber(body, "y")
+    local z = jsonReadNumber(body, "z")
+    local factionId = jsonReadString(body, "factionId")
+    if requestId == nil or x == nil or y == nil or z == nil then return end
+
+    local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    if ok then
+        message = "Teleported to the event zone."
+        if factionId ~= nil then tryFactionCameraFlash(steam, factionId) end
+    end
+    safeNotify(steam, message)
+    log("Event teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(eventTeleportResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Ayo Rex / Ayo Trike loadouts ──
 --
 -- Replaces the single "Dome" button for Ayo-prefixed/PermException
@@ -2275,6 +2312,85 @@ local function checkWebsiteAyoLoadoutRequest(steam)
     log("Ayo loadout request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
         .. " message=" .. tostring(message))
     writeRequestResult(ayoLoadoutResultFilePath(steam), requestId, ok, message)
+end
+
+-- ── Live Event Dino ──
+--
+-- Near-duplicate of tryAyoLoadout minus its Dome teleport step — this
+-- event isn't tied to one fixed location, so it just applies growth/
+-- Prime/mutations wherever the player already is (or grants a
+-- redeem-on-next-spawn snapshot via the same grantTrainingDino used for
+-- an Ayo loadout species mismatch) instead of moving them anywhere.
+local function eventDinoRequestFilePath(steam)
+    return SAVED_DIR .. "/event_dino_request_" .. steam .. ".json"
+end
+
+local function eventDinoResultFilePath(steam)
+    return SAVED_DIR .. "/event_dino_result_" .. steam .. ".json"
+end
+
+local function tryEventDino(steam, classPath, species, growth, mutations)
+    local gm = findGameMode()
+    if gm == nil then return false, "Failed: internal error." end
+    local ctrl
+    pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+    local pawn = livePawnFromCtrl(ctrl)
+    if pawn == nil then
+        return false, "Failed: spawn in first, then try again."
+    end
+
+    local liveClassPath
+    pcall(function() liveClassPath = stripClassPrefix(pawn:GetClass():GetFullName()) end)
+    local speciesMatches = (liveClassPath == classPath)
+
+    if speciesMatches then
+        pcall(function() pawn:SetGrowth(growth) end)
+        applyMutationsDeferred(steam, 3, mutations)
+        applyPercentageVitalsDeferred(steam, {
+            statsArePercentages = true,
+            forcePrimeOnRedeem = true,
+            health = 1,
+            stamina = 1,
+            hunger = 1,
+            thirst = 1,
+        })
+        pcall(function() pawn:ForceNetUpdate() end)
+        return true, "Event Dino applied — growth, Prime, and mutations complete."
+    end
+
+    local okGrant = grantTrainingDino(steam, classPath, growth, mutations)
+    if not okGrant then
+        return false, "Could not grant the event dino — try the button again."
+    end
+    return true, "Not currently a " .. (species or "matching species")
+        .. " — an EVENT'DINO was added to your inventory, redeem it next time you spawn as one."
+end
+
+local function checkWebsiteEventDinoRequest(steam)
+    local path = eventDinoRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local classPath = jsonReadString(body, "classPath")
+    local species = jsonReadString(body, "species")
+    local growth = jsonReadNumber(body, "growth")
+    if requestId == nil or classPath == nil or growth == nil then return end
+
+    local mutationsSection = body:match('"mutations"%s*:%s*(%b{})') or "{}"
+    local mutations = {}
+    for _, field in ipairs(MUTATION_SLOT_FIELDS) do
+        local value = jsonReadString(mutationsSection, mutationJsonKey(field))
+        if value ~= nil and value ~= "" then mutations[field] = value end
+    end
+
+    local ok, message = tryEventDino(steam, classPath, species, growth, mutations)
+    safeNotify(steam, message)
+    log("Event dino request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(eventDinoResultFilePath(steam), requestId, ok, message)
 end
 
 -- ── Website-triggered growth pause/resume (Live Dino tab) ──
@@ -2561,7 +2677,9 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteHotzoneTeleportRequest(steam)
                     checkWebsiteDomeTeleportRequest(steam)
                     checkWebsiteSanctuaryTeleportRequest(steam)
+                    checkWebsiteEventTeleportRequest(steam)
                     checkWebsiteAyoLoadoutRequest(steam)
+                    checkWebsiteEventDinoRequest(steam)
                     checkWebsiteNotifyRequest(steam)
                     local pawn = livePawnFromCtrl(unwrapped)
                     writeGrowthStatus(steam, pawn)

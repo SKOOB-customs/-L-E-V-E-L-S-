@@ -803,6 +803,74 @@ const requestAyoLoadout = (env, steamId, payload) =>
 const readAyoLoadoutResult = (env, steamId, requestId) =>
   readResult(env, ayoLoadoutResultPath, steamId, requestId);
 
+// ── Live Event (time-boxed dino event) ──
+//
+// A one-off: starts a fixed delay after this code first goes live, stays
+// active for a fixed duration, never repeats on its own. The start time
+// is lazily stamped into KV the first time anything reads it (whichever
+// request — a page load's status poll — happens to land first after
+// deploy) rather than hardcoded, so it's anchored to the Worker's own
+// Date.now() instead of a guess at wall-clock time made while writing
+// this code.
+const LIVE_EVENT_COUNTDOWN_MS = 13 * 60 * 1000;
+const LIVE_EVENT_DURATION_MS = (3 * 60 + 13) * 60 * 1000;
+
+const readLiveEventIndex = async (env) => {
+  const raw = await env.PARKED_KV.get('live_event:index');
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.startAt === 'number' && typeof parsed.endAt === 'number') return parsed;
+    } catch {
+      // fall through and re-stamp
+    }
+  }
+  const startAt = Date.now() + LIVE_EVENT_COUNTDOWN_MS;
+  const endAt = startAt + LIVE_EVENT_DURATION_MS;
+  const data = { startAt, endAt, updatedAt: Date.now() };
+  await env.PARKED_KV.put('live_event:index', JSON.stringify(data));
+  return data;
+};
+
+// Same transform-in-place-or-grant-to-inventory mechanism as Ayo(R)/
+// Ayo(T) (tryEventDino on the mod side is a near-duplicate of
+// tryAyoLoadout minus its Dome teleport step — this event isn't tied to
+// one fixed location), just opened up to 9 species and gated by the
+// event window instead of hasDomeAccess. Mutation preset reuses
+// AYO_LOADOUTS' own rex/trike sets by diet — "same preset as Ayo(T)/
+// Ayo(R)" is exactly what was asked for.
+const EVENT_DINO_GROWTH = 0.87;
+const EVENT_DINO_SPECIES = [
+  'Tyrannosaurus', 'Triceratops', 'Diabloceratops', 'Ceratosaurus',
+  'Carnotaurus', 'Kentrosaurus', 'Stegosaurus', 'Allosaurus', 'Troodon',
+];
+const eventDinoMutationsForSpecies = (species) =>
+  (SPECIES_DIET[species] === 'herbivore' ? AYO_LOADOUTS.trike.mutations : AYO_LOADOUTS.rex.mutations);
+
+const eventDinoRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/event_dino_request_${steamId}.json`;
+const eventDinoResultPath = (steamId) => `${REDEEM_SAVED_DIR}/event_dino_result_${steamId}.json`;
+const requestEventDino = (env, steamId, payload) =>
+  writeRequest(env, eventDinoRequestPath, steamId, payload);
+const readEventDinoResult = (env, steamId, requestId) =>
+  readResult(env, eventDinoResultPath, steamId, requestId);
+
+// Per-faction live-captured drop points for the event — same trusted-
+// exact treatment as the sanctuary coordinates (no Z buffer), teleport
+// mechanics reused wholesale from Sanctuary Teleport (tryHotzoneTeleport
+// on the mod side, no new Lua needed).
+const EVENT_TELEPORT_DESTINATIONS = {
+  carcharo: { x: 104207, y: -221628, z: 29969 },
+  dromaeosaur: { x: 234977, y: -93217, z: 20406 },
+  mosasaur: { x: 318143, y: -409789, z: 39867 },
+};
+
+const eventTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/event_teleport_request_${steamId}.json`;
+const eventTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/event_teleport_result_${steamId}.json`;
+const requestEventTeleport = (env, steamId, destination) =>
+  writeRequest(env, eventTeleportRequestPath, steamId, destination);
+const readEventTeleportResult = (env, steamId, requestId) =>
+  readResult(env, eventTeleportResultPath, steamId, requestId);
+
 // Generic website-triggered in-game toast — not faction-specific, reusable
 // by anything that wants to push a message to one online player. Reuses
 // main.lua's existing safeNotify, same request-file pattern as every
@@ -5581,6 +5649,116 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Ayo loadout result lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/live-event-status' && request.method === 'GET') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      try {
+        const eventData = await readLiveEventIndex(env);
+        const now = Date.now();
+        return json({
+          startAt: eventData.startAt,
+          endAt: eventData.endAt,
+          now,
+          active: now >= eventData.startAt && now < eventData.endAt,
+          species: EVENT_DINO_SPECIES,
+        });
+      } catch (error) {
+        return json({ error: error.message || 'Live event status lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/event-dino-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId, species } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      if (!EVENT_DINO_SPECIES.includes(species)) {
+        return json({ error: 'Invalid species' }, 400);
+      }
+      try {
+        const eventData = await readLiveEventIndex(env);
+        const now = Date.now();
+        if (now < eventData.startAt) return json({ error: 'The event hasn\'t started yet.' }, 403);
+        if (now >= eventData.endAt) return json({ error: 'The event has ended.' }, 403);
+        const requestId = await requestEventDino(env, steamId, {
+          classPath: classPathForSpecies(species),
+          species,
+          growth: EVENT_DINO_GROWTH,
+          mutations: eventDinoMutationsForSpecies(species),
+        });
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Event dino request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/event-dino-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readEventDinoResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Event dino result lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/event-teleport-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const factionsData = await readFactionsIndex(env);
+        const factionId = factionsData.members[steamId]?.factionId;
+        if (!factionId) return json({ error: 'Join a faction first.' }, 403);
+        const eventData = await readLiveEventIndex(env);
+        const now = Date.now();
+        if (now < eventData.startAt) return json({ error: 'The event hasn\'t started yet.' }, 403);
+        if (now >= eventData.endAt) return json({ error: 'The event has ended.' }, 403);
+        const point = EVENT_TELEPORT_DESTINATIONS[factionId];
+        if (!point) return json({ error: 'No event destination set for your faction.' }, 400);
+        const requestId = await requestEventTeleport(env, steamId, { ...point, factionId });
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Event teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/event-teleport-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readEventTeleportResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Event teleport result lookup failed' }, 502);
       }
     }
 

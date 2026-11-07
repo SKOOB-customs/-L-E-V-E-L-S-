@@ -3851,6 +3851,46 @@ body[data-active-tab="warzone"] .tab-switcher {
   font-variant-numeric: tabular-nums;
 }
 
+.live-event-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.live-event-countdown {
+  margin: 0;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.live-event-dino-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-event-dino-picker select {
+  background: var(--chrome-2);
+  color: inherit;
+  border: 1px solid var(--chrome-3);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-weight: 600;
+}
+
 /* Skin Lab tab: countdown sits top-right of the header, next to the
    eyebrow/title instead of stacked under them like most section
    headers on this site. */
