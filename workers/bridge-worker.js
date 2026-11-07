@@ -6132,6 +6132,23 @@ export default {
       }
     }
 
+    // Player-facing scoreboard — any signed-in player, not owner-gated.
+    // Deliberately omits zone (no player-facing need to know exact
+    // coordinates) and only reports while the event is active, so the
+    // Warzone tab can show live standings until it ends.
+    if (url.pathname === '/faction-event-public-status' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      if (!steamId || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const eventData = await readFactionEventIndex(env);
+        return json({ active: eventData.active, scores: eventData.scores });
+      } catch (error) {
+        return json({ error: error.message || 'Event status lookup failed' }, 502);
+      }
+    }
+
     if (url.pathname === '/faction-admin-set-event-zone' && request.method === 'POST') {
       if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
       let body;

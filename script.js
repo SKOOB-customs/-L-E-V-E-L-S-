@@ -3123,6 +3123,38 @@ const loadLiveEventStatus = async () => {
 loadLiveEventStatus();
 setInterval(loadLiveEventStatus, 30000);
 
+// Mini War Event public scoreboard — separate from the Live Event
+// countdown above, and from the Owner tab's full admin view
+// (renderFactionEventStatus/loadFactionEventStatus). Visible to every
+// signed-in player on the Warzone tab for as long as an owner has it
+// toggled active; hidden entirely otherwise.
+const loadPublicEventScoreboard = async () => {
+  const profile = getSteamProfile();
+  const board = document.querySelector('[data-event-scoreboard]');
+  if (!board) return;
+  if (!profile?.steamId) {
+    board.hidden = true;
+    return;
+  }
+  try {
+    const response = await fetch('/api/faction-event-public-status');
+    const data = await response.json();
+    board.hidden = !data.active;
+    if (data.active && data.scores) {
+      document.querySelectorAll('[data-event-public-score]').forEach((el) => {
+        const factionId = el.dataset.eventPublicScore;
+        el.textContent = data.scores[factionId] ?? 0;
+      });
+    }
+  } catch (error) {
+    console.debug('Public event scoreboard check failed:', error);
+    board.hidden = true;
+  }
+};
+
+loadPublicEventScoreboard();
+setInterval(loadPublicEventScoreboard, 15000);
+
 document.querySelector('[data-event-dino]')?.addEventListener('click', (event) => {
   const profile = getSteamProfile();
   if (!profile?.steamId) {
