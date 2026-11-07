@@ -5506,15 +5506,14 @@ export default {
         const zonesData = await readWarZonesIndex(env);
         const sanctuary = zonesData.sanctuaries[factionId];
         if (!sanctuary) return json({ error: "Your faction's sanctuary hasn't been set yet." }, 400);
-        // Confirmed live: teleporting to the sanctuary's exact captured Z
-        // dropped the player through the terrain ("under the map") —
-        // same risk Hotzone's own destinations already guard against
-        // (see HOTZONE_Z_SAFETY_BUFFER's comment). Unlike Dome (a real
-        // player's live position, trusted exact), this sanctuary Z
-        // apparently isn't quite sitting on solid ground at that X/Y, so
-        // it gets the same small upward bias and lets gravity settle it
-        // safely instead of clipping into whatever's below.
-        const destination = { x: sanctuary.x, y: sanctuary.y, z: sanctuary.z + HOTZONE_Z_SAFETY_BUFFER };
+        // That "under the map" failure traced back to the sanctuary data
+        // itself being wrong, not the Z value needing clearance — once
+        // corrected, live-captured coordinates (confirmed landing in the
+        // right spot) the full Hotzone-style buffer was pure excess
+        // height, which triggered fatal fall damage on landing. Treated
+        // the same as Dome now: a real player's live position, trusted
+        // exact, no buffer.
+        const destination = { x: sanctuary.x, y: sanctuary.y, z: sanctuary.z };
         const requestId = await requestSanctuaryTeleport(env, steamId, destination);
         return json({ ok: true, requestId });
       } catch (error) {
