@@ -1022,11 +1022,19 @@ const readFactionPlaytimeIndex = async (env) => {
   }
 };
 
+// Best-fit circle around 8 live-captured points tracing the zone
+// boundary around the volcano (centroid + average distance to each
+// point). Only a default — the Owner tab's form can still set/replace
+// it, this just means Start Event doesn't need the form filled out
+// first since a real zone is already there.
+const DEFAULT_EVENT_ZONE = { x: 262307, y: -279740, z: 54115, radius: 30668 };
+
 // Mini War Event (Owner tab's Events sub-tab) — see the routes' own
-// comment for the full picture. active defaults false and zone null
-// until an owner actually sets them through the UI.
+// comment for the full picture. active defaults false until an owner
+// actually starts it through the UI; zone falls back to the default
+// above until the form sets/replaces it.
 const readFactionEventIndex = async (env) => {
-  const empty = { active: false, zone: null, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
+  const empty = { active: false, zone: DEFAULT_EVENT_ZONE, scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0 } };
   if (!env.PARKED_KV) return empty;
   const raw = await env.PARKED_KV.get('faction_event:index');
   if (!raw) return empty;
@@ -1034,7 +1042,7 @@ const readFactionEventIndex = async (env) => {
     const parsed = JSON.parse(raw);
     return {
       active: !!parsed.active,
-      zone: parsed.zone || null,
+      zone: parsed.zone || DEFAULT_EVENT_ZONE,
       scores: { carcharo: 0, dromaeosaur: 0, mosasaur: 0, ...(parsed.scores || {}) },
     };
   } catch {
