@@ -639,6 +639,36 @@ local function forcePrimeConditionFlags(pawn)
     pawn:SetEligiblePrimeElderData(pe)
 end
 
+-- Every spawn, any species, no admin/redeem action needed — per request,
+-- every dino on the server is always Prime. Same 500ms-later/re-resolved-
+-- pawn deferral as applyPercentageVitalsDeferred's own forcePrimeOnRedeem
+-- call, for the same reason: forcing Prime immediately after a pawn is
+-- detected can race the engine's own growth/max-attribute settle and
+-- read as a false critical-health state.
+local function scheduleForcePrimeOnSpawn(steam)
+    local fired = false
+    local handle
+    handle = LoopInGameThreadWithDelay(500, function()
+        if fired then return end
+        fired = true
+        pcall(function()
+            if handle ~= nil and CancelDelayedAction ~= nil then CancelDelayedAction(handle) end
+        end)
+
+        local gm = findGameMode()
+        if gm == nil then return end
+        local ctrl
+        pcall(function() ctrl = gm:GetControllerBySteamId(steam) end)
+        local pawn = livePawnFromCtrl(ctrl)
+        if pawn == nil then return end
+
+        local ok, err = pcall(function() forcePrimeConditionFlags(pawn) end)
+        if not ok then
+            log("scheduleForcePrimeOnSpawn: forcePrimeConditionFlags failed: " .. tostring(err))
+        end
+    end)
+end
+
 -- Apply order matters (GAS-attribute auto-refill on growth change; see
 -- Safety Rule 8 / State Restore Cookbook): growth first, then max-vitals,
 -- then current vitals.
@@ -2727,6 +2757,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                                 currentDinoId[steam] = newDinoId
                                 startNewHistoryEntry(steam, newDinoId, historyClassPath, (historyGrowth or 0) * 100, historyVitalsPct)
                                 dinoHistoryLastHealthOk[steam] = true
+                                scheduleForcePrimeOnSpawn(steam)
                             end
 
                             local historyHealth = historyVitalsRaw.health
