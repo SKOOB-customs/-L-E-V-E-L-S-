@@ -3252,7 +3252,7 @@ document.querySelector('[data-volcano-teleport]')?.addEventListener('click', (ev
     endpoint: '/api/volcano-teleport',
     body: { steamId: profile.steamId },
     buttonEl: btn,
-    idleLabel: 'Volcano Teleport',
+    idleLabel: 'Straight to it',
     waitingLabel: 'Waiting for in-game…',
     onSuccess: () => {
       pollLiveDino();
