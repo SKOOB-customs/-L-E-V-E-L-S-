@@ -3116,11 +3116,13 @@ const tickLiveEventCountdown = () => {
   // !park command too, not just this button) — disabling it here is
   // just so the button itself explains why instead of silently failing.
   const parkBtn = document.querySelector('[data-park-dino]');
+  const adminStatusEl = document.querySelector('[data-live-event-admin-status]');
   if (now >= liveEventState.endAt && !liveEventState.testMode) {
     section.hidden = true;
     if (activeNoteEl) activeNoteEl.hidden = true;
     actionGroups.forEach((el) => { el.hidden = true; });
     if (parkBtn) { parkBtn.disabled = false; parkBtn.textContent = 'Park Dino'; }
+    if (adminStatusEl) adminStatusEl.textContent = 'Ended. Parking is allowed again (may take up to a minute to reflect in-game).';
     clearInterval(liveEventTickInterval);
     liveEventTickInterval = null;
     return;
@@ -3132,6 +3134,11 @@ const tickLiveEventCountdown = () => {
     parkBtn.disabled = isActive;
     parkBtn.textContent = isActive ? 'Parking disabled during event' : 'Park Dino';
   }
+  if (adminStatusEl) {
+    adminStatusEl.textContent = isActive
+      ? `Active — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}. Parking is blocked.`
+      : `Not started yet — starts in ${formatLiveEventDuration(liveEventState.startAt - now)}.`;
+  }
   if (isActive) {
     const testSuffix = liveEventState.testMode ? ' (test mode — owner/admin preview)' : '';
     countdownEl.textContent = `Event live${testSuffix} — ends in ${formatLiveEventDuration(liveEventState.endAt - now)}`;
@@ -3139,6 +3146,27 @@ const tickLiveEventCountdown = () => {
     countdownEl.textContent = `Event starts in ${formatLiveEventDuration(liveEventState.startAt - now)}`;
   }
 };
+
+document.querySelector('[data-live-event-end-now]')?.addEventListener('click', async (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  try {
+    const response = await fetch('/api/live-event-admin-end', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Failed to end the event.');
+    showToast(data.alreadyEnded ? 'Live Event already ended.' : 'Live Event ended.');
+    loadLiveEventStatus();
+  } catch (error) {
+    showToast(error.message || 'Failed to end the event.');
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 const loadLiveEventStatus = async () => {
   const profile = getSteamProfile();

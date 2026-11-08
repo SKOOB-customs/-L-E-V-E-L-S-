@@ -5857,6 +5857,38 @@ export default {
       }
     }
 
+    // Manual early-end — the countdown/endAt otherwise only resolves on
+    // its own once real time catches up to it, and the parking-block
+    // flag only mirrors to the game server once a minute on top of
+    // that. Setting endAt to now makes /live-event-status (read live,
+    // not cached) report inactive immediately for everyone; the parking
+    // flag still trails by up to a minute, same as it always does.
+    if (url.pathname === '/live-event-admin-end' && request.method === 'POST') {
+      if (!env.PARKED_KV) return json({ error: 'Bridge is not configured' }, 503);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { requesterSteamId } = body || {};
+      if (typeof requesterSteamId !== 'string' || !/^\d{17}$/.test(requesterSteamId)) {
+        return json({ error: 'Missing or invalid requesterSteamId' }, 400);
+      }
+      const tier = await getAdminTier(env, requesterSteamId);
+      if (!hasFactionAdminAccess(tier)) return json({ error: 'Owner tier required' }, 403);
+      try {
+        const eventData = await readLiveEventIndex(env);
+        const now = Date.now();
+        if (now >= eventData.endAt) return json({ ok: true, alreadyEnded: true });
+        const next = { startAt: eventData.startAt, endAt: now, updatedAt: now };
+        await env.PARKED_KV.put('live_event:index', JSON.stringify(next));
+        return json({ ok: true });
+      } catch (error) {
+        return json({ error: error.message || 'Live event end failed' }, 502);
+      }
+    }
+
     if (url.pathname === '/event-dino-request' && request.method === 'POST') {
       if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
         return json({ error: 'Bridge is not configured' }, 503);
