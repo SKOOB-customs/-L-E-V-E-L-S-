@@ -2839,6 +2839,26 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                                 if historyHealth <= 0 and dinoHistoryLastHealthOk[steam] then
                                     appendHistoryEvent(steam, currentDinoId[steam], "died", (historyGrowth or 0) * 100, historyVitalsPct)
                                     dinoHistoryLastHealthOk[steam] = false
+                                    -- Mini War Event kill points: this mod has no
+                                    -- combat/damage hook (confirmed — only chat/
+                                    -- ban/kick/weather hooks exist here), so it
+                                    -- can't know WHO dealt the killing blow, only
+                                    -- that this player's dino just died and where.
+                                    -- Written as a one-shot event file the Worker's
+                                    -- cron picks up and attributes to the nearest
+                                    -- rival-faction player it finds in its own next
+                                    -- RCON sweep — an approximation, not true kill
+                                    -- credit, by explicit agreement.
+                                    local okDeathLoc, deathLoc = pcall(function() return pawn:K2_GetActorLocation() end)
+                                    local deathSpecies
+                                    pcall(function() deathSpecies = stripClassPrefix(pawn:GetClass():GetFullName()) end)
+                                    if okDeathLoc and deathLoc ~= nil and deathSpecies ~= nil then
+                                        local eventPath = SAVED_DIR .. "/kill_event_" .. steam .. "_" .. tostring(os.time()) .. ".json"
+                                        writeAll(eventPath, string.format(
+                                            '{"steam":"%s","species":"%s","x":%f,"y":%f,"z":%f,"diedAt":%d}',
+                                            steam, deathSpecies, deathLoc.X, deathLoc.Y, deathLoc.Z, os.time()
+                                        ))
+                                    end
                                 elseif historyHealth > 0 then
                                     dinoHistoryLastHealthOk[steam] = true
                                 end

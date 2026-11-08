@@ -191,6 +191,44 @@ const pterodactylWriteFile = async (env, path, body) => {
   }
 };
 
+const pterodactylDeleteFiles = async (env, directory, filenames) => {
+  if (!filenames.length) return;
+  const url = `${env.PTERODACTYL_BASE_URL}/api/client/servers/${env.PTERODACTYL_SERVER_ID}/files/delete`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.PTERODACTYL_API_KEY}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ root: directory, files: filenames }),
+  });
+  if (!response.ok) {
+    throw new Error(`Pterodactyl delete failed: ${response.status} ${await response.text()}`);
+  }
+};
+
+// One-shot files main.lua writes itself (not a request/response pair —
+// see the death-detection block's own comment) whenever a player's dino
+// dies, since this mod has no way to know WHO killed it, only that it
+// happened and where. Listed/read/deleted the same way parked files are.
+const listKillEventFiles = async (env) => {
+  const response = await pterodactylFetch(
+    env,
+    `/files/list?directory=${encodeURIComponent(PARKED_SAVED_DIR)}`,
+  );
+  const body = await response.json();
+  return (body.data || [])
+    .map((entry) => entry.attributes)
+    .filter((attrs) => attrs?.is_file && /^kill_event_\d+_\d+\.json$/.test(attrs.name));
+};
+
+const readKillEventFile = async (env, filename) => {
+  const path = `${PARKED_SAVED_DIR}/${filename}`;
+  const response = await pterodactylFetch(env, `/files/contents?file=${encodeURIComponent(path)}`);
+  return response.text();
+};
+
 // Each parked_<steamid>.json now holds {version:2, steam, dinos:[...]} — a
 // player can have any number of parked dinos, not just one. Syncs every
 // file currently on disk into KV as one flattened aggregated document, one
@@ -1324,6 +1362,60 @@ const syncFactionWar = async (env) => {
       eventData.scores[p.factionId] = (eventData.scores[p.factionId] || 0) + pointsPerPlayer;
     }
     await putIndexIfChanged(env, 'faction_event:index', eventData);
+  }
+
+  // 1b. Mini War Event kill points — nearest-rival heuristic. main.lua
+  // has no combat/damage hook (confirmed: only chat/ban/kick/weather
+  // hooks exist), so it can't identify an actual killer — it just
+  // writes a one-shot kill_event_*.json the instant a death is detected
+  // (steam, species, death location). This attributes each one to
+  // whichever rival-faction player this same tick's RCON sweep found
+  // closest to that location — an approximation by explicit agreement,
+  // not true kill credit. Always drained (and deleted) regardless of
+  // whether the event is active, so they don't pile up on disk; points
+  // are only awarded while it is.
+  const KILL_POINTS_BIG_SPECIES = new Set(['Tyrannosaurus', 'Stegosaurus', 'Triceratops']);
+  const KILL_POINTS_BIG = 200;
+  const KILL_POINTS_SMALL = 90;
+  try {
+    const killFiles = await listKillEventFiles(env);
+    if (killFiles.length) {
+      let scoresChanged = false;
+      for (const file of killFiles) {
+        try {
+          const raw = await readKillEventFile(env, file.name);
+          const evt = JSON.parse(raw);
+          if (eventData.active && typeof evt.x === 'number' && typeof evt.y === 'number') {
+            const victimFactionId = factionsData.members[evt.steam]?.factionId;
+            if (victimFactionId) {
+              let nearest = null;
+              let nearestDistSq = Infinity;
+              for (const p of spawned) {
+                if (p.steamId === evt.steam || p.factionId === victimFactionId) continue;
+                const dx = p.location.x - evt.x;
+                const dy = p.location.y - evt.y;
+                const distSq = dx * dx + dy * dy;
+                if (distSq < nearestDistSq) {
+                  nearestDistSq = distSq;
+                  nearest = p;
+                }
+              }
+              if (nearest) {
+                const points = KILL_POINTS_BIG_SPECIES.has(evt.species) ? KILL_POINTS_BIG : KILL_POINTS_SMALL;
+                eventData.scores[nearest.factionId] = (eventData.scores[nearest.factionId] || 0) + points;
+                scoresChanged = true;
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`syncFactionWar: kill event ${file.name} processing failed:`, error.message);
+        }
+      }
+      if (scoresChanged) await putIndexIfChanged(env, 'faction_event:index', eventData);
+      await pterodactylDeleteFiles(env, PARKED_SAVED_DIR, killFiles.map((f) => f.name));
+    }
+  } catch (error) {
+    console.error('syncFactionWar: kill event drain failed:', error.message);
   }
 
   // 2. War scoring/sanctuaries/currency — only while a war is active.
