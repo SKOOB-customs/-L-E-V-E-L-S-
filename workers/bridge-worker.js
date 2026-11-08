@@ -946,6 +946,20 @@ const requestEventTeleport = (env, steamId, destination) =>
 const readEventTeleportResult = (env, steamId, requestId) =>
   readResult(env, eventTeleportResultPath, steamId, requestId);
 
+// Volcano center — average of the two live "standing at the volcano
+// center" captures given during map recalibration ((267245,-285490,
+// 64428) and (272706,-278546,64249)), same averaging already used there.
+// Notably higher Z than DEFAULT_EVENT_ZONE's centroid (54115) since that
+// one was fit from the 8 ground-level boundary points, not the summit.
+const VOLCANO_DESTINATION = { x: 269976, y: -282018, z: 64339 };
+
+const volcanoTeleportRequestPath = (steamId) => `${REDEEM_SAVED_DIR}/volcano_teleport_request_${steamId}.json`;
+const volcanoTeleportResultPath = (steamId) => `${REDEEM_SAVED_DIR}/volcano_teleport_result_${steamId}.json`;
+const requestVolcanoTeleport = (env, steamId) =>
+  writeRequest(env, volcanoTeleportRequestPath, steamId, VOLCANO_DESTINATION);
+const readVolcanoTeleportResult = (env, steamId, requestId) =>
+  readResult(env, volcanoTeleportResultPath, steamId, requestId);
+
 // Generic website-triggered in-game toast — not faction-specific, reusable
 // by anything that wants to push a message to one online player. Reuses
 // main.lua's existing safeNotify, same request-file pattern as every
@@ -5946,6 +5960,42 @@ export default {
         return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
       } catch (error) {
         return json({ error: error.message || 'Event teleport result lookup failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/volcano-teleport-request' && request.method === 'POST') {
+      if (!env.PTERODACTYL_API_KEY || !env.PTERODACTYL_BASE_URL || !env.PTERODACTYL_SERVER_ID || !env.PARKED_KV) {
+        return json({ error: 'Bridge is not configured' }, 503);
+      }
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Invalid JSON body' }, 400);
+      }
+      const { steamId } = body || {};
+      if (typeof steamId !== 'string' || !/^\d{17}$/.test(steamId)) {
+        return json({ error: 'Missing or invalid steamId' }, 400);
+      }
+      try {
+        const requestId = await requestVolcanoTeleport(env, steamId);
+        return json({ ok: true, requestId });
+      } catch (error) {
+        return json({ error: error.message || 'Volcano teleport request failed' }, 502);
+      }
+    }
+
+    if (url.pathname === '/volcano-teleport-result' && request.method === 'GET') {
+      const steamId = url.searchParams.get('steamId');
+      const requestId = url.searchParams.get('requestId');
+      if (!steamId || !/^\d{17}$/.test(steamId) || !requestId) {
+        return json({ error: 'Missing or invalid steamId/requestId' }, 400);
+      }
+      try {
+        const result = await readVolcanoTeleportResult(env, steamId, requestId);
+        return json(result ? { ok: result.ok, message: result.message, processedAt: result.processedAt } : { ok: null });
+      } catch (error) {
+        return json({ error: error.message || 'Volcano teleport result lookup failed' }, 502);
       }
     }
 

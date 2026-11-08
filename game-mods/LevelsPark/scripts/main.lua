@@ -2246,6 +2246,40 @@ local function checkWebsiteEventTeleportRequest(steam)
     writeRequestResult(eventTeleportResultFilePath(steam), requestId, ok, message)
 end
 
+-- ── Volcano Teleport ──
+--
+-- Same shape as Event Teleport — tryHotzoneTeleport reused as-is, one
+-- fixed destination (no faction routing, everyone goes to the same
+-- spot), trusted-exact like Dome/Sanctuary.
+local function volcanoTeleportRequestFilePath(steam)
+    return SAVED_DIR .. "/volcano_teleport_request_" .. steam .. ".json"
+end
+
+local function volcanoTeleportResultFilePath(steam)
+    return SAVED_DIR .. "/volcano_teleport_result_" .. steam .. ".json"
+end
+
+local function checkWebsiteVolcanoTeleportRequest(steam)
+    local path = volcanoTeleportRequestFilePath(steam)
+    if not fileExists(path) then return end
+    local body = readAll(path)
+    os.remove(path)
+    if body == nil or body == "" then return end
+
+    local requestId = jsonReadString(body, "requestId")
+    local x = jsonReadNumber(body, "x")
+    local y = jsonReadNumber(body, "y")
+    local z = jsonReadNumber(body, "z")
+    if requestId == nil or x == nil or y == nil or z == nil then return end
+
+    local ok, message = tryHotzoneTeleport(steam, x, y, z)
+    if ok then message = "Teleported to the volcano." end
+    safeNotify(steam, message)
+    log("Volcano teleport request " .. requestId .. " for " .. steam .. ": ok=" .. tostring(ok)
+        .. " message=" .. tostring(message))
+    writeRequestResult(volcanoTeleportResultFilePath(steam), requestId, ok, message)
+end
+
 -- ── Ayo Rex / Ayo Trike loadouts ──
 --
 -- Replaces the single "Dome" button for Ayo-prefixed/PermException
@@ -2782,6 +2816,7 @@ LoopInGameThreadWithDelay(REDEEM_REQUEST_POLL_MS, function()
                     checkWebsiteDomeTeleportRequest(steam)
                     checkWebsiteSanctuaryTeleportRequest(steam)
                     checkWebsiteEventTeleportRequest(steam)
+                    checkWebsiteVolcanoTeleportRequest(steam)
                     checkWebsiteAyoLoadoutRequest(steam)
                     checkWebsiteEventDinoRequest(steam)
                     checkWebsiteNotifyRequest(steam)

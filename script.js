@@ -3241,6 +3241,25 @@ document.querySelector('[data-event-teleport]')?.addEventListener('click', (even
   });
 });
 
+document.querySelector('[data-volcano-teleport]')?.addEventListener('click', (event) => {
+  const profile = getSteamProfile();
+  if (!profile?.steamId) {
+    showToast('Sign in with Steam first.');
+    return;
+  }
+  const btn = event.currentTarget;
+  requestActionAndPoll({
+    endpoint: '/api/volcano-teleport',
+    body: { steamId: profile.steamId },
+    buttonEl: btn,
+    idleLabel: 'Volcano Teleport',
+    waitingLabel: 'Waiting for in-game…',
+    onSuccess: () => {
+      pollLiveDino();
+    },
+  });
+});
+
 // Inventory gallery — the signed-in player's own currently-parked dinos
 // (scoped server-side by functions/api/parked-list.js, never anyone else's),
 // synced from the game server by workers/bridge-worker.js's scheduled sync.
